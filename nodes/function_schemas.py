@@ -14,6 +14,7 @@ _FUNCTION = {
     "id": str,
     "name": str,
     "goal": str,
+    "requirement_id": str,
     "inputs": [str],
     "outputs": [str],
     "sub_functions": [str],
