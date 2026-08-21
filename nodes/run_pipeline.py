@@ -1,9 +1,10 @@
-"""独立运行 function -> scenario 流程，用于验证从需求文档到场景划分的生成效果。
+"""独立运行 function -> scenario -> testcase 流程，用于验证从需求文档到测试用例
+的生成效果。
 
-依次跑 function 节点（识别功能）与 scenario 节点（为每个功能划分使用场景）：把
-需求文档整篇塞进内存态的 State Store，跑完打印两个节点各自的产出，不落盘任何
-状态、不依赖其它节点——用于快速迭代 nodes/function.py 与 nodes/scenario.py 里的
-system prompt。
+依次跑 function 节点（识别功能）、scenario 节点（为每个功能划分使用场景）与
+testcase 节点（在场景范围内设计测试用例）：把需求文档整篇塞进内存态的 State
+Store，跑完打印三个节点各自的产出，不落盘任何状态、不依赖其它节点——用于快速
+迭代 nodes/function.py、nodes/scenario.py、nodes/testcase.py 里的 system prompt。
 
 用法:
     ANTHROPIC_API_KEY=sk-... python -m nodes.run_pipeline \\
@@ -35,16 +36,22 @@ from nodes.function_schemas import (
 )
 from nodes.scenario import build_scenario_node
 from nodes.scenario_schemas import SCENARIO_STATE_SCHEMA, SCENARIOS_PATH
+from nodes.testcase import build_testcase_node
+from nodes.testcase_schemas import TEST_CASES_PATH, TESTCASE_STATE_SCHEMA
 
 _PROVIDER_DEFAULT_MODEL = {"anthropic": "claude-sonnet-latest", "openai": "gpt-4o", "zhipu": "glm-5.2"}
 _PROVIDER_API_KEY_ENV = {"anthropic": "ANTHROPIC_API_KEY", "openai": "OPENAI_API_KEY", "zhipu": "ZHIPU_API_KEY"}
 
-# function 与 scenario 各自的 state schema 顶层 key 不同
-# （requirement_analysis_state / scenario_state），互不冲突，合并成一份供同一个
-# State Store 校验两边的写入。
+# function / scenario / testcase 各自的 state schema 顶层 key 不同
+# （requirement_analysis_state / scenario_state / testcase_state），互不冲突，
+# 合并成一份供同一个 State Store 校验三边的写入。
 PIPELINE_STATE_SCHEMA = StateSchema(
     "pipeline_state",
-    {**REQUIREMENT_ANALYSIS_STATE_SCHEMA.definition, **SCENARIO_STATE_SCHEMA.definition},
+    {
+        **REQUIREMENT_ANALYSIS_STATE_SCHEMA.definition,
+        **SCENARIO_STATE_SCHEMA.definition,
+        **TESTCASE_STATE_SCHEMA.definition,
+    },
 )
 
 
@@ -60,8 +67,9 @@ def _infer_provider(model: str) -> str:
 def build_llm_client(model: str | None = None) -> LLMClient:
     """按 model（若给出）或环境变量里存在哪个 API Key 选一个 Provider 并构造 client。
 
-    function 与 scenario 两个节点共用同一个 client（同一模型）；若以后要给某个
-    节点单独换模型，在 main() 里分别构造两个 client 传给对应的 build_*_node 即可。
+    function / scenario / testcase 三个节点共用同一个 client（同一模型）；若以后
+    要给某个节点单独换模型，在 main() 里分别构造对应的 client 传给对应的
+    build_*_node 即可。
     """
     if model is not None:
         provider = _infer_provider(model)
@@ -111,7 +119,7 @@ def build_llm_client(model: str | None = None) -> LLMClient:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="依次运行 function -> scenario 节点，验证生成效果")
+    parser = argparse.ArgumentParser(description="依次运行 function -> scenario -> testcase 节点，验证生成效果")
     parser.add_argument("--requirement-doc", type=Path, required=True, help="需求文档 Markdown 路径")
     parser.add_argument("--model", default=None, help="本次使用的模型名（默认按已设置的 API Key 自动选择 Provider）")
     args = parser.parse_args()
@@ -122,7 +130,11 @@ def main() -> None:
     client = build_llm_client(args.model)
     pipeline = Sequence(
         name="requirement_analysis_pipeline",
-        nodes=[build_function_node(client), build_scenario_node(client)],
+        nodes=[
+            build_function_node(client),
+            build_scenario_node(client),
+            build_testcase_node(client),
+        ],
     )
 
     state_store = InMemoryStateStore(schema=PIPELINE_STATE_SCHEMA, initial=PIPELINE_STATE_SCHEMA.empty())
@@ -138,16 +150,19 @@ def main() -> None:
 
     pipeline.run(ctx, {})
 
-    # 两个节点各自的产出都已经通过 Stage.writes 落进 state_store，直接从状态里
-    # 读，而不是依赖 Sequence.run 的返回值（那只是最后一个节点——scenario——的
-    # outputs，读不到 function 的产出）。
+    # 三个节点各自的产出都已经通过 Stage.writes 落进 state_store，直接从状态里
+    # 读，而不是依赖 Sequence.run 的返回值（那只是最后一个节点——testcase——的
+    # outputs，读不到 function/scenario 的产出）。
     functions = state_store.get(FUNCTIONS_PATH, [])
     scenarios = state_store.get(SCENARIOS_PATH, [])
+    test_cases = state_store.get(TEST_CASES_PATH, [])
 
     print(f"\n识别到 {len(functions)} 个功能:\n")
     print(json.dumps(functions, ensure_ascii=False, indent=2))
     print(f"\n划分出 {len(scenarios)} 个场景:\n")
     print(json.dumps(scenarios, ensure_ascii=False, indent=2))
+    print(f"\n设计出 {len(test_cases)} 条用例:\n")
+    print(json.dumps(test_cases, ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":
