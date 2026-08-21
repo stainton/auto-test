@@ -1,15 +1,16 @@
-"""独立运行 function 节点，用于验证功能识别的生成效果。
+"""独立运行 function -> scenario 流程，用于验证从需求文档到场景划分的生成效果。
 
-只跑这一个节点：把需求文档整篇塞进内存态的 State Store，调用节点，打印识别出的
-功能列表，不落盘任何状态、不依赖其它节点——用于快速迭代 nodes/function.py 里的
+依次跑 function 节点（识别功能）与 scenario 节点（为每个功能划分使用场景）：把
+需求文档整篇塞进内存态的 State Store，跑完打印两个节点各自的产出，不落盘任何
+状态、不依赖其它节点——用于快速迭代 nodes/function.py 与 nodes/scenario.py 里的
 system prompt。
 
 用法:
-    ANTHROPIC_API_KEY=sk-... python -m nodes.run_function \\
+    ANTHROPIC_API_KEY=sk-... python -m nodes.run_pipeline \\
         --requirement-doc examples/sample_requirement.md
 
     # 或指定模型（据模型名自动判断走哪家 Provider：claude-* / glm-* / 其余走 OpenAI 协议）
-    OPENAI_API_KEY=sk-... python -m nodes.run_function \\
+    OPENAI_API_KEY=sk-... python -m nodes.run_pipeline \\
         --requirement-doc examples/sample_requirement.md --model gpt-4o
 """
 
@@ -21,19 +22,30 @@ import os
 from pathlib import Path
 
 from bumaren_agent_workflow.engine.context import LifecycleHooks, RunContext
+from bumaren_agent_workflow.engine.primitives import Sequence
 from bumaren_agent_workflow.llm.client import LLMClient
 from bumaren_agent_workflow.state.backends.memory import InMemoryStateStore
+from bumaren_agent_workflow.state.schema import StateSchema
 
 from nodes.function import build_function_node
 from nodes.function_schemas import (
     FUNCTIONS_PATH,
     REQUIREMENT_ANALYSIS_STATE_SCHEMA,
     REQUIREMENT_DOC_PATH,
-    empty_state,
 )
+from nodes.scenario import build_scenario_node
+from nodes.scenario_schemas import SCENARIO_STATE_SCHEMA, SCENARIOS_PATH
 
 _PROVIDER_DEFAULT_MODEL = {"anthropic": "claude-sonnet-latest", "openai": "gpt-4o", "zhipu": "glm-5.2"}
 _PROVIDER_API_KEY_ENV = {"anthropic": "ANTHROPIC_API_KEY", "openai": "OPENAI_API_KEY", "zhipu": "ZHIPU_API_KEY"}
+
+# function 与 scenario 各自的 state schema 顶层 key 不同
+# （requirement_analysis_state / scenario_state），互不冲突，合并成一份供同一个
+# State Store 校验两边的写入。
+PIPELINE_STATE_SCHEMA = StateSchema(
+    "pipeline_state",
+    {**REQUIREMENT_ANALYSIS_STATE_SCHEMA.definition, **SCENARIO_STATE_SCHEMA.definition},
+)
 
 
 def _infer_provider(model: str) -> str:
@@ -46,7 +58,11 @@ def _infer_provider(model: str) -> str:
 
 
 def build_llm_client(model: str | None = None) -> LLMClient:
-    """按 model（若给出）或环境变量里存在哪个 API Key 选一个 Provider 并构造 client。"""
+    """按 model（若给出）或环境变量里存在哪个 API Key 选一个 Provider 并构造 client。
+
+    function 与 scenario 两个节点共用同一个 client（同一模型）；若以后要给某个
+    节点单独换模型，在 main() 里分别构造两个 client 传给对应的 build_*_node 即可。
+    """
     if model is not None:
         provider = _infer_provider(model)
     elif os.environ.get("ANTHROPIC_API_KEY"):
@@ -95,7 +111,7 @@ def build_llm_client(model: str | None = None) -> LLMClient:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="单独运行 function 节点，验证功能识别效果")
+    parser = argparse.ArgumentParser(description="依次运行 function -> scenario 节点，验证生成效果")
     parser.add_argument("--requirement-doc", type=Path, required=True, help="需求文档 Markdown 路径")
     parser.add_argument("--model", default=None, help="本次使用的模型名（默认按已设置的 API Key 自动选择 Provider）")
     args = parser.parse_args()
@@ -104,9 +120,12 @@ def main() -> None:
         raise SystemExit(f"需求文档不存在: {args.requirement_doc}")
 
     client = build_llm_client(args.model)
-    node = build_function_node(client)
+    pipeline = Sequence(
+        name="requirement_analysis_pipeline",
+        nodes=[build_function_node(client), build_scenario_node(client)],
+    )
 
-    state_store = InMemoryStateStore(schema=REQUIREMENT_ANALYSIS_STATE_SCHEMA, initial=empty_state())
+    state_store = InMemoryStateStore(schema=PIPELINE_STATE_SCHEMA, initial=PIPELINE_STATE_SCHEMA.empty())
     state_store.patch(REQUIREMENT_DOC_PATH, args.requirement_doc.read_text(encoding="utf-8"))
 
     ctx = RunContext(
@@ -117,10 +136,18 @@ def main() -> None:
         ),
     )
 
-    outputs = node.run(ctx, {})
-    functions = outputs.get(FUNCTIONS_PATH, [])
+    pipeline.run(ctx, {})
+
+    # 两个节点各自的产出都已经通过 Stage.writes 落进 state_store，直接从状态里
+    # 读，而不是依赖 Sequence.run 的返回值（那只是最后一个节点——scenario——的
+    # outputs，读不到 function 的产出）。
+    functions = state_store.get(FUNCTIONS_PATH, [])
+    scenarios = state_store.get(SCENARIOS_PATH, [])
+
     print(f"\n识别到 {len(functions)} 个功能:\n")
     print(json.dumps(functions, ensure_ascii=False, indent=2))
+    print(f"\n划分出 {len(scenarios)} 个场景:\n")
+    print(json.dumps(scenarios, ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":
