@@ -1,0 +1,10 @@
+{
+  "name": "auto-test",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "review": "node review/server.mjs",
+    "test": "playwright test"
+  }
+}

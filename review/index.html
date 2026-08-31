@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Test-case Review</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #fff; --border: #d9dde3; --text: #1c2530;
+    --muted: #6b7683; --accent: #2563eb; --accent-fg: #fff; --ok: #15803d; --warn: #b45309;
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); height: 100vh; display: flex; }
+  h1, h2, h3 { margin: 0; }
+
+  #sidebar {
+    width: 280px; flex: none; background: var(--panel); border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; overflow-y: auto;
+  }
+  #sidebar header { padding: 14px 16px; border-bottom: 1px solid var(--border); }
+  #sidebar header h1 { font-size: 15px; }
+  #sidebar header p { margin: 4px 0 0; font-size: 12px; color: var(--muted); }
+  .group { padding: 10px 8px; }
+  .group > .label {
+    font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted);
+    padding: 4px 8px; display: flex; justify-content: space-between;
+  }
+  .file { padding: 7px 10px; border-radius: 6px; cursor: pointer; font-size: 13px; word-break: break-all; }
+  .file:hover { background: #eef1f5; }
+  .file.active { background: var(--accent); color: var(--accent-fg); }
+  .file .tag { font-size: 10px; color: var(--muted); }
+  .file.active .tag { color: #dbe4ff; }
+  .empty { padding: 6px 10px; font-size: 12px; color: var(--muted); font-style: italic; }
+
+  #main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  #toolbar {
+    padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  }
+  #toolbar .path { font-weight: 600; font-size: 13px; margin-right: auto; }
+  #toolbar .dirty { color: var(--warn); font-size: 12px; }
+  button {
+    font: inherit; font-size: 13px; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--border);
+    background: var(--panel); cursor: pointer;
+  }
+  button:hover { background: #eef1f5; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+  button.approve { background: var(--ok); border-color: var(--ok); color: #fff; }
+
+  #panes { flex: 1; display: flex; min-height: 0; }
+  #editor, #preview { flex: 1; min-width: 0; overflow: auto; }
+  #editor {
+    border: none; resize: none; padding: 16px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 13px; line-height: 1.5; background: #fbfcfd; border-right: 1px solid var(--border);
+  }
+  #preview { padding: 16px 24px; background: var(--panel); }
+  #preview table { border-collapse: collapse; font-size: 13px; display: block; overflow-x: auto; }
+  #preview th, #preview td { border: 1px solid var(--border); padding: 6px 9px; text-align: left; vertical-align: top; }
+  #preview code { background: #eef1f5; padding: 1px 4px; border-radius: 4px; }
+  #preview pre { background: #1c2530; color: #e6edf3; padding: 12px; border-radius: 8px; overflow-x: auto; }
+  #preview pre code { background: none; color: inherit; }
+  #placeholder { margin: auto; color: var(--muted); font-size: 14px; }
+  #toast {
+    position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
+    background: #1c2530; color: #fff; padding: 8px 16px; border-radius: 8px; font-size: 13px;
+    opacity: 0; transition: opacity .2s; pointer-events: none;
+  }
+  #toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+<aside id="sidebar">
+  <header>
+    <h1>Test-case Review</h1>
+    <p>Review &amp; edit planner output, then approve to release it to the generator.</p>
+  </header>
+  <div id="list"></div>
+</aside>
+
+<section id="main">
+  <div id="toolbar">
+    <span class="path" id="curPath">No file selected</span>
+    <span class="dirty" id="dirty" hidden>● unsaved</span>
+    <button id="btnReload">Reload</button>
+    <button id="btnSave" class="primary" disabled>Save</button>
+    <button id="btnApprove" class="approve" disabled hidden>Approve → generator</button>
+    <button id="btnUnapprove" disabled hidden>Move back to draft</button>
+  </div>
+  <div id="panes">
+    <textarea id="editor" spellcheck="false" placeholder="Select a plan on the left…"></textarea>
+    <div id="preview"><div id="placeholder">Preview appears here.</div></div>
+  </div>
+</section>
+
+<div id="toast"></div>
+
+<script>
+marked.setOptions({ gfm: true, breaks: false });
+
+const state = { path: null, saved: '', approved: false };
+const $ = (id) => document.getElementById(id);
+
+function toast(msg) {
+  const t = $('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => t.classList.remove('show'), 2200);
+}
+
+async function api(url, opts) {
+  const res = await fetch(url, opts);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || res.statusText);
+  return data;
+}
+
+function isDirty() { return state.path && $('editor').value !== state.saved; }
+
+function renderPreview() {
+  $('preview').innerHTML = state.path
+    ? marked.parse($('editor').value)
+    : '<div id="placeholder">Preview appears here.</div>';
+}
+
+function syncButtons() {
+  const dirty = isDirty();
+  $('dirty').hidden = !dirty;
+  $('btnSave').disabled = !dirty;
+  $('btnApprove').hidden = !state.path || state.approved;
+  $('btnApprove').disabled = !state.path || dirty;
+  $('btnUnapprove').hidden = !state.path || !state.approved;
+  $('btnUnapprove').disabled = !state.path;
+}
+
+async function loadList() {
+  const { drafts, approved } = await api('/api/plans');
+  const wrap = $('list');
+  wrap.innerHTML = '';
+  wrap.append(groupEl('Drafts — pending review', drafts, false));
+  wrap.append(groupEl('Approved — generator input', approved, true));
+}
+
+function groupEl(label, files, approved) {
+  const g = document.createElement('div');
+  g.className = 'group';
+  const l = document.createElement('div');
+  l.className = 'label';
+  l.innerHTML = `<span>${label}</span><span>${files.length}</span>`;
+  g.append(l);
+  if (!files.length) {
+    const e = document.createElement('div');
+    e.className = 'empty';
+    e.textContent = approved ? 'nothing approved yet' : 'no draft plans';
+    g.append(e);
+  }
+  for (const f of files) {
+    const el = document.createElement('div');
+    el.className = 'file' + (f === state.path ? ' active' : '');
+    const kind = f.endsWith('.cases.md') ? 'cases table' : 'test plan';
+    el.innerHTML = `<div>${f.replace(/^specs\//, '')}</div><span class="tag">${kind}</span>`;
+    el.onclick = () => openFile(f, approved);
+    g.append(el);
+  }
+  return g;
+}
+
+async function openFile(p, approved) {
+  if (isDirty() && !confirm('Discard unsaved changes?')) return;
+  const { content } = await api('/api/file?path=' + encodeURIComponent(p));
+  state.path = p;
+  state.saved = content;
+  state.approved = approved;
+  $('editor').value = content;
+  $('curPath').textContent = p;
+  renderPreview();
+  syncButtons();
+  loadList();
+}
+
+async function save() {
+  await api('/api/file', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path: state.path, content: $('editor').value }),
+  });
+  state.saved = $('editor').value;
+  syncButtons();
+  toast('Saved ' + state.path);
+}
+
+async function move(action) {
+  if (isDirty()) return toast('Save first');
+  const { moved } = await api('/api/' + action, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: state.path }),
+  });
+  toast((action === 'approve' ? 'Approved: ' : 'Back to draft: ') + moved.join(', '));
+  state.approved = action === 'approve';
+  const base = state.path.split('/').pop().replace(/\.cases\.md$/, '').replace(/\.md$/, '');
+  state.path = `specs/${state.approved ? 'approved/' : ''}${base}${state.path.endsWith('.cases.md') ? '.cases' : ''}.md`;
+  $('curPath').textContent = state.path;
+  syncButtons();
+  loadList();
+}
+
+$('editor').addEventListener('input', () => { renderPreview(); syncButtons(); });
+$('btnSave').onclick = save;
+$('btnReload').onclick = () => state.path && openFile(state.path, state.approved);
+$('btnApprove').onclick = () => move('approve');
+$('btnUnapprove').onclick = () => move('unapprove');
+window.addEventListener('beforeunload', (e) => { if (isDirty()) e.preventDefault(); });
+
+loadList().catch((e) => toast('Load failed: ' + e.message));
+</script>
+</body>
+</html>
