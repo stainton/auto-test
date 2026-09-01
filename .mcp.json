@@ -5,7 +5,10 @@
       "args": [
         "playwright",
         "run-test-mcp-server"
-      ]
+      ],
+      "env": {
+        "PATH": "${HOME}/.nvm/versions/node/v20.20.2/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+      }
     }
   }
 }

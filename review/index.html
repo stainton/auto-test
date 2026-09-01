@@ -1,62 +1,83 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Test-case Review</title>
+<title>测试方案评审</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
 <style>
   :root {
-    --bg: #f6f7f9; --panel: #fff; --border: #d9dde3; --text: #1c2530;
-    --muted: #6b7683; --accent: #2563eb; --accent-fg: #fff; --ok: #15803d; --warn: #b45309;
+    --bg: #f3f5f8; --panel: #fff; --border: #e1e5eb; --text: #172033;
+    --muted: #697386; --accent: #4f46e5; --accent-soft: #eef2ff; --accent-fg: #fff;
+    --ok: #16834a; --ok-soft: #eaf8f0; --warn: #b15c00; --shadow: 0 8px 28px rgba(23,32,51,.07);
     font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--text); height: 100vh; display: flex; }
+  button, textarea { color: inherit; }
   h1, h2, h3 { margin: 0; }
 
   #sidebar {
-    width: 280px; flex: none; background: var(--panel); border-right: 1px solid var(--border);
+    width: 310px; flex: none; background: #f9fafc; border-right: 1px solid var(--border);
     display: flex; flex-direction: column; overflow-y: auto;
   }
-  #sidebar header { padding: 14px 16px; border-bottom: 1px solid var(--border); }
-  #sidebar header h1 { font-size: 15px; }
-  #sidebar header p { margin: 4px 0 0; font-size: 12px; color: var(--muted); }
-  .group { padding: 10px 8px; }
+  .resizer { flex: none; position: relative; z-index: 5; width: 7px; margin: 0 -3px; cursor: col-resize; touch-action: none; }
+  .resizer::after { content: ""; position: absolute; inset: 0 3px; background: transparent; transition: background .15s, box-shadow .15s; }
+  .resizer:hover::after, .resizer.dragging::after, .resizer:focus-visible::after { background: var(--accent); box-shadow: 0 0 0 2px rgba(79,70,229,.12); }
+  .resizer:focus-visible { outline: none; }
+  body.resizing { cursor: col-resize; user-select: none; }
+  #sidebar header { padding: 24px 18px 18px; border-bottom: 1px solid var(--border); background: var(--panel); }
+  #sidebar header h1 { font-size: 21px; letter-spacing: -.02em; }
+  #sidebar header p { margin: 7px 0 14px; font-size: 13px; line-height: 1.5; color: var(--muted); }
+  .eyebrow { margin: 0 0 5px !important; color: var(--accent) !important; font-size: 10px !important; font-weight: 750; letter-spacing: .12em; }
+  .group { padding: 14px 10px 2px; }
   .group > .label {
     font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted);
-    padding: 4px 8px; display: flex; justify-content: space-between;
+    padding: 4px 9px 7px; display: flex; justify-content: space-between; font-weight: 700;
   }
-  .file { padding: 7px 10px; border-radius: 6px; cursor: pointer; font-size: 13px; word-break: break-all; }
-  .file:hover { background: #eef1f5; }
-  .file.active { background: var(--accent); color: var(--accent-fg); }
+  .count { min-width: 21px; padding: 1px 6px; border-radius: 99px; background: #e9edf3; text-align: center; }
+  .file { padding: 10px 11px; margin-bottom: 3px; border: 1px solid transparent; border-radius: 9px; cursor: pointer; font-size: 13px; word-break: break-all; transition: .15s ease; }
+  .file:hover { background: var(--panel); border-color: var(--border); transform: translateX(2px); }
+  .file.active { background: var(--accent-soft); border-color: #cfd3ff; color: #3730a3; box-shadow: 0 2px 8px rgba(79,70,229,.08); }
   .file .tag { font-size: 10px; color: var(--muted); }
-  .file.active .tag { color: #dbe4ff; }
+  .file.active .tag { color: #3b82f6; }
   .empty { padding: 6px 10px; font-size: 12px; color: var(--muted); font-style: italic; }
 
   #main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
   #toolbar {
-    padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--border);
+    min-height: 76px; padding: 12px 24px; background: var(--panel); border-bottom: 1px solid var(--border);
     display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
   }
-  #toolbar .path { font-weight: 600; font-size: 13px; margin-right: auto; }
+  #toolbar .path { font-weight: 700; font-size: 14px; margin-right: auto; min-width: 180px; }
+  #toolbar .hint { display: block; margin-top: 2px; color: var(--muted); font-size: 12px; font-weight: 400; }
   #toolbar .dirty { color: var(--warn); font-size: 12px; }
   button {
-    font: inherit; font-size: 13px; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--border);
-    background: var(--panel); cursor: pointer;
+    font: inherit; font-weight: 600; font-size: 13px; min-height: 36px; padding: 7px 13px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--panel); cursor: pointer; transition: background .15s, border-color .15s, box-shadow .15s, transform .1s;
   }
-  button:hover { background: #eef1f5; }
+  button:hover:not(:disabled) { background: #f2f4f7; border-color: #cbd1da; }
+  button:active:not(:disabled) { transform: translateY(1px); }
+  button:focus-visible, textarea:focus-visible, .file:focus-visible { outline: 3px solid rgba(79,70,229,.22); outline-offset: 2px; }
   button:disabled { opacity: .45; cursor: not-allowed; }
-  button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
-  button.approve { background: var(--ok); border-color: var(--ok); color: #fff; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); box-shadow: 0 3px 10px rgba(79,70,229,.18); }
+  button.primary:hover:not(:disabled) { background: #4338ca; border-color: #4338ca; }
+  button.approve { background: var(--ok); border-color: var(--ok); color: #fff; box-shadow: 0 3px 10px rgba(22,131,74,.16); }
+  button.approve:hover:not(:disabled) { background: #116b3c; border-color: #116b3c; }
 
-  #panes { flex: 1; display: flex; min-height: 0; }
+  #panes { flex: 1; display: flex; min-height: 0; background: var(--border); }
+  .pane { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--panel); }
+  .paneHeader { height: 42px; flex: none; padding: 0 18px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border); color: var(--muted); font-size: 11px; font-weight: 750; letter-spacing: .06em; text-transform: uppercase; }
+  .paneHeader span { font-weight: 500; letter-spacing: 0; text-transform: none; }
   #editor, #preview { flex: 1; min-width: 0; overflow: auto; }
   #editor {
     border: none; resize: none; padding: 16px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 13px; line-height: 1.5; background: #fbfcfd; border-right: 1px solid var(--border);
+    width: 100%; font-size: 14px; line-height: 1.65; background: #fbfcfe;
   }
-  #preview { padding: 16px 24px; background: var(--panel); }
+  #preview { padding: 26px 34px 60px; background: var(--panel); line-height: 1.72; }
+  #preview h1 { font-size: 28px; letter-spacing: -.025em; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+  #preview h2 { font-size: 20px; margin-top: 30px; } #preview h3 { font-size: 16px; margin-top: 24px; }
+  #preview p, #preview li { color: #354052; }
+  #preview > :first-child { margin-top: 0; }
   #preview table { border-collapse: collapse; font-size: 13px; display: block; overflow-x: auto; }
   #preview th, #preview td { border: 1px solid var(--border); padding: 6px 9px; text-align: left; vertical-align: top; }
   #preview code { background: #eef1f5; padding: 1px 4px; border-radius: 4px; }
@@ -65,42 +86,60 @@
   #placeholder { margin: auto; color: var(--muted); font-size: 14px; }
   #toast {
     position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
-    background: #1c2530; color: #fff; padding: 8px 16px; border-radius: 8px; font-size: 13px;
-    opacity: 0; transition: opacity .2s; pointer-events: none;
+    background: #172033; color: #fff; padding: 10px 16px; border-radius: 9px; font-size: 13px;
+    opacity: 0; transition: opacity .2s, transform .2s; pointer-events: none; box-shadow: var(--shadow);
   }
   #toast.show { opacity: 1; }
+  #viewSwitch { display: none; }
+  @media (max-width: 760px) {
+    body { display: block; } #sidebar { width: 100%; max-height: 42vh; border-right: 0; border-bottom: 1px solid var(--border); }
+    .resizer { display: none; }
+    #sidebar header { padding: 14px; } #sidebar header h1 { font-size: 18px; } #sidebar header > p:not(.eyebrow) { display: none; }
+    #list { display: flex; overflow-x: auto; padding: 5px; } .group { min-width: 180px; padding: 4px; }
+    #main { min-height: 58vh; } #toolbar { min-height: 58px; padding: 9px 12px; } #toolbar .path { flex: 1 1 100%; }
+    #viewSwitch { display: flex; gap: 6px; padding: 8px 12px; border-bottom: 1px solid var(--border); background: var(--panel); }
+    #viewSwitch button { flex: 1; } #viewSwitch button.selected { color: #1d4ed8; background: #eff6ff; border-color: #bfdbfe; }
+    #panes { gap: 0; } #panes.previewing .editorPane { display: none; } #panes.previewing .previewPane { display: flex; }
+    .pane { flex: none; width: 100%; } .previewPane { display: none; } #editor, #preview { width: 100%; border-right: 0; } #preview { padding: 20px; }
+  }
 </style>
 </head>
 <body>
 <aside id="sidebar">
   <header>
-    <h1>Test-case Review</h1>
-    <p>Review &amp; edit planner output, then approve to release it to the generator.</p>
+    <p class="eyebrow">TEST REVIEW</p>
+    <h1>测试方案评审</h1>
+    <p>编辑需求，检查测试方案；确认无误后批准，才会交给测试生成器。</p>
+    <button id="btnNew" class="primary" style="width:100%">＋ 新建需求</button>
   </header>
   <div id="list"></div>
 </aside>
 
+<div id="sidebarResizer" class="resizer" role="separator" aria-label="调整文件栏宽度" aria-orientation="vertical" tabindex="0" title="拖动调整宽度，双击恢复默认"></div>
+
 <section id="main">
   <div id="toolbar">
-    <span class="path" id="curPath">No file selected</span>
-    <span class="dirty" id="dirty" hidden>● unsaved</span>
-    <button id="btnReload">Reload</button>
-    <button id="btnSave" class="primary" disabled>Save</button>
-    <button id="btnApprove" class="approve" disabled hidden>Approve → generator</button>
-    <button id="btnUnapprove" disabled hidden>Move back to draft</button>
+    <span class="path" id="curPath">请选择左侧文件<span class="hint" id="fileHint">从需求开始，或查看待评审的测试方案</span></span>
+    <span class="dirty" id="dirty" hidden>● 有未保存修改</span>
+    <button id="btnReload" disabled>还原修改</button>
+    <button id="btnSave" class="primary" disabled>保存</button>
+    <button id="btnApprove" class="approve" disabled hidden>批准并交给生成器</button>
+    <button id="btnUnapprove" disabled hidden>退回待评审</button>
   </div>
-  <div id="panes">
-    <textarea id="editor" spellcheck="false" placeholder="Select a plan on the left…"></textarea>
-    <div id="preview"><div id="placeholder">Preview appears here.</div></div>
+  <div id="viewSwitch"><button data-view="edit" class="selected">编辑</button><button data-view="preview">预览</button></div>
+  <div id="panes" hidden>
+    <div class="pane editorPane"><div class="paneHeader">Markdown 编辑<span>支持 Ctrl / ⌘ + S 保存</span></div><textarea id="editor" aria-label="Markdown 编辑器" spellcheck="false" placeholder="在这里编辑 Markdown 内容…"></textarea></div>
+    <div id="paneResizer" class="resizer" role="separator" aria-label="调整编辑和预览区域宽度" aria-orientation="vertical" tabindex="0" title="拖动调整宽度，双击恢复默认"></div>
+    <div class="pane previewPane"><div class="paneHeader">实时预览<span>内容会随编辑同步</span></div><div id="preview"></div></div>
   </div>
 </section>
 
-<div id="toast"></div>
+<div id="toast" role="status" aria-live="polite"></div>
 
 <script>
 marked.setOptions({ gfm: true, breaks: false });
 
-const state = { path: null, saved: '', approved: false };
+const state = { path: null, saved: '', area: null, busy: false }; // area: 'requirement' | 'draft' | 'approved'
 const $ = (id) => document.getElementById(id);
 
 function toast(msg) {
@@ -121,101 +160,195 @@ async function api(url, opts) {
 function isDirty() { return state.path && $('editor').value !== state.saved; }
 
 function renderPreview() {
-  $('preview').innerHTML = state.path
-    ? marked.parse($('editor').value)
-    : '<div id="placeholder">Preview appears here.</div>';
+  $('preview').innerHTML = marked.parse($('editor').value || '*暂无内容*');
 }
 
 function syncButtons() {
   const dirty = isDirty();
   $('dirty').hidden = !dirty;
-  $('btnSave').disabled = !dirty;
-  $('btnApprove').hidden = !state.path || state.approved;
-  $('btnApprove').disabled = !state.path || dirty;
-  $('btnUnapprove').hidden = !state.path || !state.approved;
-  $('btnUnapprove').disabled = !state.path;
+  $('btnSave').disabled = !dirty || state.busy;
+  $('btnReload').disabled = !state.path || !dirty || state.busy;
+  $('btnApprove').hidden = state.area !== 'draft';
+  $('btnApprove').disabled = dirty || state.busy;
+  $('btnUnapprove').hidden = state.area !== 'approved';
+  $('btnUnapprove').disabled = state.busy;
+}
+
+function setBusy(busy) {
+  state.busy = busy;
+  document.body.style.cursor = busy ? 'progress' : '';
+  syncButtons();
 }
 
 async function loadList() {
-  const { drafts, approved } = await api('/api/plans');
+  const tree = await api('/api/tree');
+  const { requirements, drafts, approved } = tree;
   const wrap = $('list');
   wrap.innerHTML = '';
-  wrap.append(groupEl('Drafts — pending review', drafts, false));
-  wrap.append(groupEl('Approved — generator input', approved, true));
+  wrap.append(groupEl('需求文档', requirements, 'requirement', '还没有需求文档。'));
+  wrap.append(groupEl('待评审', drafts, 'draft', '暂无待评审的测试方案。'));
+  wrap.append(groupEl('已批准', approved, 'approved', '暂无已批准的方案。'));
+  return tree;
 }
 
-function groupEl(label, files, approved) {
+function groupEl(label, files, area, emptyText) {
   const g = document.createElement('div');
   g.className = 'group';
   const l = document.createElement('div');
   l.className = 'label';
-  l.innerHTML = `<span>${label}</span><span>${files.length}</span>`;
+  l.innerHTML = `<span>${label}</span><span class="count">${files.length}</span>`;
   g.append(l);
   if (!files.length) {
     const e = document.createElement('div');
     e.className = 'empty';
-    e.textContent = approved ? 'nothing approved yet' : 'no draft plans';
+    e.textContent = emptyText;
     g.append(e);
   }
   for (const f of files) {
     const el = document.createElement('div');
     el.className = 'file' + (f === state.path ? ' active' : '');
-    const kind = f.endsWith('.cases.md') ? 'cases table' : 'test plan';
-    el.innerHTML = `<div>${f.replace(/^specs\//, '')}</div><span class="tag">${kind}</span>`;
-    el.onclick = () => openFile(f, approved);
+    el.tabIndex = 0;
+    el.setAttribute('role', 'button');
+    if (f === state.path) el.setAttribute('aria-current', 'true');
+    const kind = area === 'requirement' ? '需求文档' : f.endsWith('.cases.md') ? '测试用例表' : '测试计划';
+    el.innerHTML = `<div>${f.replace(/^(specs|docs)\//, '')}</div><span class="tag">${kind}</span>`;
+    el.onclick = () => openFile(f, area);
+    el.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openFile(f, area); } };
     g.append(el);
   }
   return g;
 }
 
-async function openFile(p, approved) {
-  if (isDirty() && !confirm('Discard unsaved changes?')) return;
-  const { content } = await api('/api/file?path=' + encodeURIComponent(p));
-  state.path = p;
-  state.saved = content;
-  state.approved = approved;
-  $('editor').value = content;
-  $('curPath').textContent = p;
-  renderPreview();
-  syncButtons();
-  loadList();
+async function openFile(p, area) {
+  if (isDirty() && !confirm('当前修改尚未保存，确定放弃这些修改吗？')) return;
+  try {
+    const { content } = await api('/api/file?path=' + encodeURIComponent(p));
+    state.path = p; state.saved = content; state.area = area;
+    $('editor').value = content; $('curPath').firstChild.textContent = p;
+    $('fileHint').textContent = area === 'requirement' ? '需求文档' : area === 'draft' ? '待评审的测试方案' : '已批准的生成器输入';
+    $('panes').hidden = false;
+    renderPreview(); syncButtons(); loadList();
+  } catch (e) { toast('打开失败：' + e.message); }
 }
 
 async function save() {
-  await api('/api/file', {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ path: state.path, content: $('editor').value }),
-  });
-  state.saved = $('editor').value;
-  syncButtons();
-  toast('Saved ' + state.path);
+  try {
+    setBusy(true);
+    await api('/api/file', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: state.path, content: $('editor').value }),
+    });
+    state.saved = $('editor').value;
+    toast('✓ 修改已保存');
+    await loadList();
+  } catch (e) { toast('保存失败：' + e.message); }
+  finally { setBusy(false); }
 }
 
 async function move(action) {
-  if (isDirty()) return toast('Save first');
-  const { moved } = await api('/api/' + action, {
+  if (isDirty()) return toast('请先保存修改');
+  if (!confirm(action === 'approve' ? '批准后，测试计划及其用例表会成为生成器的输入。确定批准吗？' : '确定将此方案退回到待评审状态吗？')) return;
+  try {
+    setBusy(true);
+    await api('/api/' + action, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: state.path }),
+    });
+    toast(action === 'approve' ? '✓ 已批准，可交给生成器' : '已退回待评审');
+    state.area = action === 'approve' ? 'approved' : 'draft';
+    const isCases = state.path.endsWith('.cases.md');
+    const base = state.path.split('/').pop().replace(/\.cases\.md$/, '').replace(/\.md$/, '');
+    state.path = `specs/${state.area === 'approved' ? 'approved/' : ''}${base}${isCases ? '.cases' : ''}.md`;
+    $('curPath').firstChild.textContent = state.path;
+    $('fileHint').textContent = state.area === 'approved' ? '已批准的生成器输入' : '待评审的测试方案';
+    await loadList();
+  } catch (e) { toast('操作失败：' + e.message); }
+  finally { setBusy(false); }
+}
+
+async function newRequirement() {
+  const title = prompt('请输入需求标题：');
+  if (!title || !title.trim()) return;
+  const { path: p } = await api('/api/new-requirement', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: state.path }),
+    body: JSON.stringify({ title: title.trim() }),
   });
-  toast((action === 'approve' ? 'Approved: ' : 'Back to draft: ') + moved.join(', '));
-  state.approved = action === 'approve';
-  const base = state.path.split('/').pop().replace(/\.cases\.md$/, '').replace(/\.md$/, '');
-  state.path = `specs/${state.approved ? 'approved/' : ''}${base}${state.path.endsWith('.cases.md') ? '.cases' : ''}.md`;
-  $('curPath').textContent = state.path;
-  syncButtons();
-  loadList();
+  await loadList();
+  openFile(p, 'requirement');
 }
 
 $('editor').addEventListener('input', () => { renderPreview(); syncButtons(); });
 $('btnSave').onclick = save;
-$('btnReload').onclick = () => state.path && openFile(state.path, state.approved);
+$('btnNew').onclick = () => newRequirement().catch((e) => toast(e.message));
+$('btnReload').onclick = () => state.path && openFile(state.path, state.area);
 $('btnApprove').onclick = () => move('approve');
 $('btnUnapprove').onclick = () => move('unapprove');
 window.addEventListener('beforeunload', (e) => { if (isDirty()) e.preventDefault(); });
+document.addEventListener('keydown', (e) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); if (isDirty()) save(); } });
+document.querySelectorAll('[data-view]').forEach((button) => button.onclick = () => {
+  document.querySelectorAll('[data-view]').forEach((b) => b.classList.toggle('selected', b === button));
+  $('panes').classList.toggle('previewing', button.dataset.view === 'preview');
+});
 
-loadList().catch((e) => toast('Load failed: ' + e.message));
+function makeResizable(handle, onMove, onReset, onKey) {
+  handle.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    handle.setPointerCapture(e.pointerId);
+    handle.classList.add('dragging');
+    document.body.classList.add('resizing');
+    onMove(e.clientX);
+  });
+  handle.addEventListener('pointermove', (e) => {
+    if (handle.hasPointerCapture(e.pointerId)) onMove(e.clientX);
+  });
+  const stop = (e) => {
+    if (handle.hasPointerCapture(e.pointerId)) handle.releasePointerCapture(e.pointerId);
+    handle.classList.remove('dragging');
+    document.body.classList.remove('resizing');
+  };
+  handle.addEventListener('pointerup', stop);
+  handle.addEventListener('pointercancel', stop);
+  handle.addEventListener('dblclick', onReset);
+  handle.addEventListener('keydown', (e) => {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    e.preventDefault();
+    onKey(e.key === 'ArrowRight' ? 20 : -20);
+  });
+}
+
+const sidebar = $('sidebar');
+const editorPane = document.querySelector('.editorPane');
+makeResizable(
+  $('sidebarResizer'),
+  (x) => { sidebar.style.width = Math.max(220, Math.min(480, x)) + 'px'; },
+  () => { sidebar.style.width = '310px'; },
+  (delta) => { sidebar.style.width = Math.max(220, Math.min(480, sidebar.getBoundingClientRect().width + delta)) + 'px'; },
+);
+makeResizable(
+  $('paneResizer'),
+  (x) => {
+    const box = $('panes').getBoundingClientRect();
+    const width = Math.max(260, Math.min(box.width - 260, x - box.left));
+    editorPane.style.flex = `0 0 ${width}px`;
+  },
+  () => { editorPane.style.flex = '1 1 0'; },
+  (delta) => {
+    const box = $('panes').getBoundingClientRect();
+    const width = Math.max(260, Math.min(box.width - 260, editorPane.getBoundingClientRect().width + delta));
+    editorPane.style.flex = `0 0 ${width}px`;
+  },
+);
+
+async function initialize() {
+  const { requirements, drafts, approved } = await loadList();
+  if (drafts[0]) await openFile(drafts[0], 'draft');
+  else if (requirements[0]) await openFile(requirements[0], 'requirement');
+  else if (approved[0]) await openFile(approved[0], 'approved');
+}
+
+initialize().catch((e) => toast('加载失败：' + e.message));
 </script>
 </body>
 </html>

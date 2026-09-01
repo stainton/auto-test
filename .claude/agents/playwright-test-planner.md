@@ -12,6 +12,14 @@ planning.
 
 You will:
 
+00. **Read the requirement docs** (do this first)
+   - Read the relevant requirement file(s) under `docs/*.md`. If the user named a requirement, use that file;
+     otherwise read all of `docs/` and cover every requirement.
+   - Note each requirement's **Requirement id** (e.g. `REQ-001`) — it becomes the `request` value for every
+     test case traced to that requirement in the `.cases.md` table.
+   - Derive scenarios from the requirement's functional requirements and acceptance criteria; use the live
+     exploration below to make the steps concrete and accurate.
+
 0. **Load prior exploration experience** (do this before touching the browser)
    - Read `specs/exploration-notes.md` if it exists. It is a shared, cumulative record of what previous
      planner runs already discovered about this application.
@@ -38,6 +46,27 @@ You will:
        coverage to design the scenarios; further clicking rarely adds test value.
      - Before any `browser_*` call, confirm it will reveal something new. If it would only reproduce
        information already in context, skip it.
+     - **Treat every exploration step as a function that must return a result.**
+       - A step is not done until you have a concrete observed outcome (a snapshot, a value,
+         a state change) to record. "I tried and it didn't respond" is not a result — it is an
+         unfinished step.
+       - Bound every call with an explicit `timeout` (e.g. 5000ms) so it always returns instead
+         of hanging — pass it to every interaction that supports one (`browser_click`,
+         `browser_type`, `browser_hover`, `browser_wait_for`, `browser_select_option`,
+         `browser_drag`, ...). Do not rely on the default timeout. Even async work must be
+         bounded this way.
+     - **When a step fails, do not fall back to an evasive strategy** (skipping it, marking it
+       "flaky", leaving a TODO, or noting "couldn't verify"). Diagnose the root cause and fix
+       your approach, then re-run the step and get its real result.
+       - Drag-style interactions (**色相/hue slider drags**, range inputs, sliders, resizers,
+         drag-and-drop, canvas draws) are the usual failure point. If `browser_drag` times out,
+         switch approach — drive the control via `browser_evaluate` / `browser_run_code_unsafe`
+         (set the `<input type="range">` value + dispatch `input`/`change`, or compute and
+         replay the pointer path yourself) — and complete the step that way.
+       - Only after you have genuinely exhausted every approach may you record a limitation, and
+         then it must say exactly what was tried, why each failed, and what is actually blocked.
+       - Once a control is understood, note the reliable way to drive it under "Known issues /
+         gotchas" so future runs and the generator use that method from the start.
 
 2. **Analyze User Flows**
    - Map out the primary user journeys and identify critical paths through the application
@@ -79,7 +108,8 @@ You will:
      |---------|------|---------|----------|--------------|-------------|-------|---------|
 
    - Field rules:
-     - `request`: the requirement id this case traces to; use `-` if none is known.
+     - `request`: the Requirement id from the `docs/` file this case traces to (e.g. `REQ-001`); use `-` only
+       if the case traces to no documented requirement.
      - `name`: the scenario title (must match the scenario title used in the test plan).
      - `case_id`: stable, unique id, e.g. `TC-<area-abbrev>-001`, incrementing.
      - `priority`: one of `P0`/`P1`/`P2`/`P3` (P0 = critical happy path, P3 = minor edge case).

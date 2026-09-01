@@ -24,6 +24,15 @@ application behavior.
 - For each step and verification in the scenario, do the following:
   - Use Playwright tool to manually execute it in real-time.
   - Use the step description as the intent for each Playwright tool call.
+  - Each step must produce a concrete observed result before you move on — treat it as a function
+    that has to return. Bound every live tool call with an explicit `timeout` (e.g. 5000ms) so it
+    always returns instead of hanging; even async work must be bounded this way.
+  - If a step fails, do NOT skip it, mark it flaky, or leave it unverified. Diagnose the cause,
+    switch approach, and re-run the step until you have its real result. For drag-style steps
+    (色相/hue slider drags, range inputs, sliders, drag-and-drop, canvas draws), drive the control
+    via `browser_evaluate` (set the value + dispatch `input`/`change`) instead of a raw
+    `browser_drag`. In the generated test, reflect the working approach: a bounded action (or
+    `page.fill` on range inputs) rather than an unbounded `dragTo` that can stall the suite.
 - Retrieve generator log via `generator_read_log`
 - Immediately after reading the test log, invoke `generator_write_test` with the generated source code
   - File should contain single test
