@@ -18,6 +18,51 @@ application behavior.
     (`npm run review`), which moves it into `specs/approved/`.
 - Never copy, move, or "promote" a plan into `specs/approved/` yourself. Approval is a human action.
 
+# Preconditions & required inputs (do this before executing steps)
+- Read the scenario's `precondition` / seed. The generated test must be **self-sufficient and
+  idempotent**: it constructs whatever state it needs, then runs the case.
+  - Build a setup phase (`test.beforeEach` or an explicit `await test.step('precondition: ...')`)
+    that first checks whether the precondition already holds and, if not, constructs it
+    (seed via `localStorage`/API/UI, create the needed records, log in, navigate, etc.).
+    If it already holds, the setup is a no-op and the case executes directly.
+  - Add the matching teardown/cleanup so the test can run repeatedly and in any order.
+  - Never assume a human pre-seeded the environment; never leave a step that only works on a
+    "clean" or "already-populated" machine.
+- If a step needs an input you do not have and cannot synthesize — a real account/credentials,
+  an API token, a URL/host, a fixture file, a payment method, an external resource, test data
+  that must be real — **STOP and ask the user for it.** List exactly what you need and why.
+  Do not invent placeholder values, skip the step, or mark it flaky/fixme to get around a
+  missing input. Resume once the user provides it.
+
+# Exploring the target page (when the plan steps are not concrete enough)
+- When a plan step is ambiguous or a locator/behavior is unknown, explore the live page to make
+  it concrete — the same discipline as the planner agent
+  (`.claude/agents/playwright-test-planner.md`, step 1): every exploration action is a function
+  that must return a concrete result, every call is bounded by an explicit `timeout`, and a
+  failed exploration action is diagnosed and retried with a working approach, never skipped or
+  worked around. The only difference from the planner is the timeout value: **use 30s** as the
+  default cap here (most operations not finished within 30s must be timed out).
+- Also read `specs/exploration-notes.md` for what previous runs already discovered (locators,
+  quirks, reliable ways to drive tricky controls) so you do not re-explore.
+- **Record what you discover back into `specs/exploration-notes.md`** as you go — new locators,
+  the working way to drive a tricky control, quirks, flakiness risks, anything a future planner
+  or generator run could reuse. Merge with the existing content, never drop what earlier runs
+  wrote; keep it concise (facts, not prose). This is not optional cleanup — do it before you
+  finish, so no exploration effort is spent twice.
+
+# Incremental, resumable generation
+- Treat a plan as a queue of scenarios. Process them **one at a time**, and the moment a
+  scenario's test is working, call `generator_write_test` to save it — do not batch saves to
+  the end. A crash or interruption must never lose more than the one in-flight scenario.
+- Before starting, determine what is already done: list the output directory and skip any
+  scenario whose spec file already exists and passes. Only work the remaining scenarios.
+- Keep a short progress record next to the generated tests (e.g. `<plan-name>.progress.md`):
+  one line per scenario — `done` / `pending` / `blocked: <what is needed>`. Update it as each
+  scenario is saved. On a later run, read it first and continue from the `pending` / `blocked`
+  entries.
+- When you stop (all done, or blocked waiting on a user-provided input), report which scenarios
+  are done, which remain, and exactly what unblocks each remaining one.
+
 # For each test you generate
 - Obtain the test plan with all the steps and verification specification
 - Run the `generator_setup_page` tool to set up page for the scenario
@@ -25,8 +70,10 @@ application behavior.
   - Use Playwright tool to manually execute it in real-time.
   - Use the step description as the intent for each Playwright tool call.
   - Each step must produce a concrete observed result before you move on — treat it as a function
-    that has to return. Bound every live tool call with an explicit `timeout` (e.g. 5000ms) so it
-    always returns instead of hanging; even async work must be bounded this way.
+    that has to return. Bound every live tool call with an explicit `timeout` so it always returns
+    instead of hanging; even async work must be bounded this way. **Default timeout is 30s** — any
+    operation not finished within 30s must be timed out (shorter only with a specific reason,
+    never longer).
   - If a step fails, do NOT skip it, mark it flaky, or leave it unverified. Diagnose the cause,
     switch approach, and re-run the step until you have its real result. For drag-style steps
     (色相/hue slider drags, range inputs, sliders, drag-and-drop, canvas draws), drive the control

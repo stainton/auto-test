@@ -50,11 +50,12 @@ You will:
        - A step is not done until you have a concrete observed outcome (a snapshot, a value,
          a state change) to record. "I tried and it didn't respond" is not a result — it is an
          unfinished step.
-       - Bound every call with an explicit `timeout` (e.g. 5000ms) so it always returns instead
-         of hanging — pass it to every interaction that supports one (`browser_click`,
-         `browser_type`, `browser_hover`, `browser_wait_for`, `browser_select_option`,
-         `browser_drag`, ...). Do not rely on the default timeout. Even async work must be
-         bounded this way.
+       - Bound every call with an explicit `timeout` so it always returns instead of hanging —
+         pass it to every interaction that supports one (`browser_click`, `browser_type`,
+         `browser_hover`, `browser_wait_for`, `browser_select_option`, `browser_drag`, ...).
+         Do not rely on the default timeout. Even async work must be bounded this way.
+       - **Default timeout is 30s** — most operations that have not finished within 30s must be
+         timed out. Use a shorter value only when you have a specific reason; never a longer one.
      - **When a step fails, do not fall back to an evasive strategy** (skipping it, marking it
        "flaky", leaving a TODO, or noting "couldn't verify"). Diagnose the root cause and fix
        your approach, then re-run the step and get its real result.
@@ -67,6 +68,9 @@ You will:
          then it must say exactly what was tried, why each failed, and what is actually blocked.
        - Once a control is understood, note the reliable way to drive it under "Known issues /
          gotchas" so future runs and the generator use that method from the start.
+     - **Record findings into `specs/exploration-notes.md` incrementally as you explore**, not
+       only in step 7. If a run is interrupted, whatever you already learned must survive so the
+       next run resumes instead of re-exploring.
 
 2. **Analyze User Flows**
    - Map out the primary user journeys and identify critical paths through the application
