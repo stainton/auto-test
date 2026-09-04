@@ -18,16 +18,42 @@ application behavior.
     (`npm run review`), which moves it into `specs/approved/`.
 - Never copy, move, or "promote" a plan into `specs/approved/` yourself. Approval is a human action.
 
-# Preconditions & required inputs (do this before executing steps)
-- Read the scenario's `precondition` / seed. The generated test must be **self-sufficient and
-  idempotent**: it constructs whatever state it needs, then runs the case.
-  - Build a setup phase (`test.beforeEach` or an explicit `await test.step('precondition: ...')`)
-    that first checks whether the precondition already holds and, if not, constructs it
-    (seed via `localStorage`/API/UI, create the needed records, log in, navigate, etc.).
-    If it already holds, the setup is a no-op and the case executes directly.
-  - Add the matching teardown/cleanup so the test can run repeatedly and in any order.
-  - Never assume a human pre-seeded the environment; never leave a step that only works on a
-    "clean" or "already-populated" machine.
+# Preconditions, assets & required inputs (do this before executing steps)
+- Read the scenario's `precondition` / seed. Every generated test must be **self-sufficient,
+  idempotent, independently runnable, and order-independent**: it explicitly constructs only
+  the state it needs, runs the case, and removes only the state it created. Never assume a
+  human pre-seeded the environment, a previous test ran, a browser session/cache exists, or the
+  product is otherwise clean or already populated.
+- Use unique, traceable identifiers for data the test creates, for example
+  `e2e-<case-id>-<run-id>`. Put cleanup in `try` / `finally` (or matching hooks) so it runs on
+  assertion failures too. A test must be safe to run repeatedly, alone, concurrently, and in
+  any suite order.
+- Treat these as two distinct directory types; never confuse or substitute one for the other:
+  1. **Local asset archive** (`test-assets/` in the repository): versioned, read-only test input
+     files such as approved videos, audio, and images. Tests may read or copy from it, but must
+     never modify or delete it.
+  2. **Product test directory**: a directory/folder created *inside the system under test* via
+     its UI or API, only when the scenario needs file assets or a product-side folder. Name it
+     with the test's unique identifier, upload/use the assets there, and delete that product
+     directory and all of its contents in cleanup. Do not create a product directory for a test
+     that does not need one.
+- Any asset created, downloaded, uploaded, or relied on while exploring must be made available
+  to the generated test before the test is saved. Choose exactly one reproducible route:
+  1. implement deterministic construction in the test or a shared test helper; or
+  2. archive the asset under `test-assets/` and reference that local path from the test.
+  The generated test must never depend on an exploration-session temporary file, a browser
+  download directory, an unarchived external URL, or an asset a human happened to upload.
+- Prefer deterministic generators for simple assets (text fixtures, images, WAV audio, controlled
+  invalid files). For genuine media that cannot be generated reliably (for example a valid MP4),
+  use a small approved local asset under `test-assets/`; copy it only when the product or upload
+  API requires a writable local file. If neither construction nor a local archived asset is
+  available, stop and ask the user for the required asset.
+- A non-asset test (for example permission, navigation, validation, or role behavior) must not
+  create an unrelated product directory. It still must explicitly establish authentication,
+  role, records, feature flags, or other prerequisites it needs, and clean up what it creates.
+- Environment-level prerequisites that cannot be synthesized (base URL, test credentials, API
+  token, required external service configuration) must be named as required configuration. Fail
+  clearly when absent; do not hide the problem with implicit environment assumptions.
 - If a step needs an input you do not have and cannot synthesize — a real account/credentials,
   an API token, a URL/host, a fixture file, a payment method, an external resource, test data
   that must be real — **STOP and ask the user for it.** List exactly what you need and why.
@@ -104,6 +130,13 @@ application behavior.
     - Take the screenshot after any `wait_for` / verification in that step so it reflects the settled state.
     - Add `test.use({ screenshot: 'only-on-failure' })` is NOT a substitute — every step must be captured explicitly.
   - Destructure `{ page }, testInfo` in the test callback so `testInfo` is available.
+  - When the test creates product-side state, wrap the body in `try` / `finally`; cleanup belongs
+    in `finally`, not after the last assertion. For an asset scenario, the `finally` block must
+    remove the uniquely named product test directory. Do not remove `test-assets/` or Playwright
+    output artifacts (screenshots, trace, video, or report files).
+  - Before marking a scenario `done`, execute its generated spec as an independent test. Mark it
+    `done` only after it passes; otherwise diagnose and fix it or record it as `blocked` with the
+    exact missing environment input or asset.
 
    <example-generation>
    For following plan:
