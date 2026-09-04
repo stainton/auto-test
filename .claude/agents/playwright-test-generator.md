@@ -21,13 +21,22 @@ application behavior.
 # Preconditions, assets & required inputs (do this before executing steps)
 - Read the scenario's `precondition` / seed. Every generated test must be **self-sufficient,
   idempotent, independently runnable, and order-independent**: it explicitly constructs only
-  the state it needs, runs the case, and removes only the state it created. Never assume a
-  human pre-seeded the environment, a previous test ran, a browser session/cache exists, or the
-  product is otherwise clean or already populated.
+  the state it needs, runs the case, and cleans up appropriately (see the two teardown modes
+  below). Never assume a human pre-seeded the environment, a previous test ran, a browser
+  session/cache exists, or the product is otherwise clean or already populated.
 - Use unique, traceable identifiers for data the test creates, for example
   `e2e-<case-id>-<run-id>`. Put cleanup in `try` / `finally` (or matching hooks) so it runs on
   assertion failures too. A test must be safe to run repeatedly, alone, concurrently, and in
   any suite order.
+- **Two teardown modes — read `exploration-notes.md` to pick the right one:**
+  1. *Delete what you created* — the default, for a SUT with no destructive-action limits.
+  2. *No-delete / check-then-reuse* — when the notes record a **server-side rate limit on
+     destructive actions** (e.g. "deleting >100 assets → 600s cooldown"), or the data lives in
+     a **shared account / persistent fixture area**. Then: build preconditions by
+     **check-then-reuse into one fixed, named location** (create only what is missing, by name),
+     assert against a **baseline + expected delta** rather than absolute counts, and **do not
+     delete in teardown**. Idempotency comes from the check, not from cleanup.
+  Whichever mode applies, keep the transient UI state (open panels, filters, selections) reset.
 - Treat these as two distinct directory types; never confuse or substitute one for the other:
   1. **Local asset archive** (`test-assets/` in the repository): versioned, read-only test input
      files such as approved videos, audio, and images. Tests may read or copy from it, but must
@@ -54,58 +63,126 @@ application behavior.
 - Environment-level prerequisites that cannot be synthesized (base URL, test credentials, API
   token, required external service configuration) must be named as required configuration. Fail
   clearly when absent; do not hide the problem with implicit environment assumptions.
+  - A **fixture directory** is read from the exact env var the requirement doc names (e.g.
+    `AVAILABLE_RESOURCES`) — use that name verbatim. Never hardcode an absolute local path
+    (`C:/Users/...`, `/home/...`) as a fallback default; if the var is unset, fail loudly.
+  - For simple assets prefer **in-spec synthesis** (solid-colour PNG via a tiny encoder, text
+    fixtures, WAV) over any external file, so the spec has no directory dependency at all.
 - If a step needs an input you do not have and cannot synthesize — a real account/credentials,
   an API token, a URL/host, a fixture file, a payment method, an external resource, test data
   that must be real — **STOP and ask the user for it.** List exactly what you need and why.
   Do not invent placeholder values, skip the step, or mark it flaky/fixme to get around a
   missing input. Resume once the user provides it.
 
-# Exploring the target page (when the plan steps are not concrete enough)
-- When a plan step is ambiguous or a locator/behavior is unknown, explore the live page to make
-  it concrete — the same discipline as the planner agent
-  (`.claude/agents/playwright-test-planner.md`, step 1): every exploration action is a function
-  that must return a concrete result, every call is bounded by an explicit `timeout`, and a
-  failed exploration action is diagnosed and retried with a working approach, never skipped or
-  worked around. The only difference from the planner is the timeout value: **use 30s** as the
-  default cap here (most operations not finished within 30s must be timed out).
-- Also read `specs/exploration-notes.md` for what previous runs already discovered (locators,
-  quirks, reliable ways to drive tricky controls) so you do not re-explore.
+# Exploring the target page (only when the plan steps are not concrete enough)
+- **Read `specs/exploration-notes.md` first and treat everything in it as already known** —
+  URLs/views, locators, form fields, error strings, quirks, reliable ways to drive tricky
+  controls. If the note already tells you the locator or behavior a step needs, use it directly
+  and do NOT open the browser to re-confirm it. Live exploration is only for a genuine gap the
+  notes do not cover.
+- When you do explore, every exploration action is a function that must return a concrete
+  result, and **every call is bounded by an explicit `timeout`** — pick it from the target
+  (~10s for a local SUT, a sane ceiling for a remote one), never rely on the default, never
+  leave a call able to hang.
+  - `browser_run_code_unsafe` and any path the MCP does not time out itself **must set
+    `await page.setDefaultTimeout(<ms>)` as their first line.** An un-bounded `run_code_unsafe`
+    (semantic click on an antd ColorPicker popover / hue slider, `navigator.clipboard.readText`,
+    a drag) does not fail after 30s — it hangs forever and stalls the whole run.
+  - Use the **known-working recipe from `exploration-notes.md` first** (coordinate-level mouse
+    events in `page.evaluate` for the color picker; `grantPermissions` before clipboard reads).
+    Do not spend attempts rediscovering a technique the notes already record.
+  - **At most 3 attempts per exploration action.** If it still has no concrete result after 3,
+    stop, record exactly what you tried and why each failed as a `blocked` note, and move on.
+    Do not keep inventing new approaches past that budget.
+- Reuse the snapshot you already have. `browser_snapshot` returns the full accessibility tree;
+  do not call it again for the same view, or right after a navigation that already returned one.
 - **Record what you discover back into `specs/exploration-notes.md`** as you go — new locators,
   the working way to drive a tricky control, quirks, flakiness risks, anything a future planner
   or generator run could reuse. Merge with the existing content, never drop what earlier runs
   wrote; keep it concise (facts, not prose). This is not optional cleanup — do it before you
-  finish, so no exploration effort is spent twice.
+  finish, so no exploration effort is spent twice. A newly discovered **hazard** (a hang trap,
+  a rate limit, a lazy-render list) goes in a `⚠️` block at the top of the notes.
+
+# Locator & UI patterns (recurring, apply without re-deriving)
+- **Hashed CSS-module class names** (`_card_a1b2c3`, `filterBtn__x9`) change per build — match a
+  stable substring: `[class*="_card_"]`, never the full hashed token.
+- **Virtualised / infinite-scroll lists** render only a partial set initially. Before counting
+  items, judging "missing" for check-then-reuse, or bulk-selecting, scroll to the bottom
+  repeatedly until the rendered count is **stable across two consecutive checks** (or the
+  end-of-list marker shows). The result view and the folder view may differ here — trust the notes.
+- **SPA client-side redirects** (`/` → `/login`) resolve *after* `page.goto` returns. Do not
+  branch on `page.url()` immediately after `goto` — wait for a concrete post-redirect marker
+  (`waitForURL`, a login field, a logged-in element) or the login step silently gets skipped
+  and every later step times out.
+- **antd popovers / overlays** (ColorPicker palette, hue slider, dropdowns clipped by
+  `overflow:hidden`): a plain semantic `.click()` often does not open them and can hang. Drive
+  via synthetic pointer/mouse events dispatched in `page.evaluate`, per the notes' recipe.
+
+# When live behaviour deviates from the approved plan
+- The plan's `expect:` lines are the human's intent, but the live app is the source of truth.
+  When they disagree, assert **what the app actually does**, add a `// deviation: <plan said X,
+  app does Y>` comment at that step, mark the scenario `done (deviation: …)` in the progress
+  file, and merge the corrected fact into `exploration-notes.md`. Never code the plan's wrong
+  expectation just to match the doc, and never `fixme` the scenario over a mere deviation.
 
 # Incremental, resumable generation
 - Treat a plan as a queue of scenarios. Process them **one at a time**, and the moment a
   scenario's test is working, call `generator_write_test` to save it — do not batch saves to
   the end. A crash or interruption must never lose more than the one in-flight scenario.
-- Before starting, determine what is already done: list the output directory and skip any
-  scenario whose spec file already exists and passes. Only work the remaining scenarios.
-- Keep a short progress record next to the generated tests (e.g. `<plan-name>.progress.md`):
-  one line per scenario — `done` / `pending` / `blocked: <what is needed>`. Update it as each
-  scenario is saved. On a later run, read it first and continue from the `pending` / `blocked`
-  entries.
+- **One spec file per scenario**, under `specs/<plan-dir>/<NN>-<fs-friendly-scenario>.spec.ts`.
+  Do NOT accumulate every scenario into one growing file — `generator_write_test` then re-emits
+  the whole monolith on every save, which is the single largest output-token cost of a run.
+  Shared helpers (login, nav, upload, colour-pick) go in one co-located `_helpers.ts` that each
+  spec imports.
+- Before starting, list the output directory and skip any scenario whose spec already exists
+  and passes. Only work the remaining scenarios.
+- Keep `<plan-name>.progress.md` next to the specs — a table, one row per scenario:
+  `| scenario | status |` where status is `pending` / `done` / `done (deviation: …)` /
+  `blocked: <what is needed>`. Update it as each spec is saved; read it first on a later run
+  and continue from `pending` / `blocked`.
 - When you stop (all done, or blocked waiting on a user-provided input), report which scenarios
   are done, which remain, and exactly what unblocks each remaining one.
 
+# Do the expensive setup once, not per scenario
+- **Login / auth once.** When every scenario shares the same seed login, run it once, capture
+  `storageState`, and have the generated spec reuse it (`test.use({ storageState })` or a
+  `beforeAll`). The generated scenarios then start from `page.goto('<app route>')`, already
+  authenticated — not a fresh login each. When you drive the live browser during generation,
+  do the login flow once for the whole plan, not once per scenario.
+  - Make the login/nav helper wait for the real post-redirect state, not `page.url()` right
+    after `goto` — an SPA redirect (`/` → `/login`) resolves *after* `goto` returns, so a bare
+    `if (/\/login/.test(page.url()))` check races and silently skips login, and every later
+    step then times out. Wait for a concrete logged-in marker instead.
+- **Shared preconditions once.** A corpus that many scenarios need (e.g. "N uploaded images")
+  is built once — check-then-reuse into one fixed folder in a `beforeAll` or a separate setup
+  spec — never re-uploaded per scenario. Bulk upload over a network is the single slowest thing
+  in a run; do not repeat it. If building the corpus needs real fixture files or an env var
+  (`AVAILABLE_RESOURCES` etc.), and it is absent, STOP and ask — do not hardcode an absolute
+  local path as a default.
+
 # For each test you generate
 - Obtain the test plan with all the steps and verification specification
-- Run the `generator_setup_page` tool to set up page for the scenario
+- Run `generator_setup_page` to set up the page. Do this **once per plan** when the seed/login
+  is identical across scenarios — only re-run it when a scenario genuinely needs a different
+  starting context.
 - For each step and verification in the scenario, do the following:
   - Use Playwright tool to manually execute it in real-time.
   - Use the step description as the intent for each Playwright tool call.
   - Each step must produce a concrete observed result before you move on — treat it as a function
     that has to return. Bound every live tool call with an explicit `timeout` so it always returns
-    instead of hanging; even async work must be bounded this way. **Default timeout is 30s** — any
-    operation not finished within 30s must be timed out (shorter only with a specific reason,
-    never longer).
+    instead of hanging (~10s for a local SUT, a sane ceiling for a remote one); even async work
+    must be bounded. `browser_run_code_unsafe` must set `await page.setDefaultTimeout(<ms>)` as
+    its first line — an un-bounded one hangs forever, it does not fail after 30s.
   - If a step fails, do NOT skip it, mark it flaky, or leave it unverified. Diagnose the cause,
-    switch approach, and re-run the step until you have its real result. For drag-style steps
-    (色相/hue slider drags, range inputs, sliders, drag-and-drop, canvas draws), drive the control
-    via `browser_evaluate` (set the value + dispatch `input`/`change`) instead of a raw
-    `browser_drag`. In the generated test, reflect the working approach: a bounded action (or
+    switch approach, and re-run the step — but **at most 3 attempts per step**. For drag-style
+    steps (色相/hue slider drags, range inputs, sliders, drag-and-drop, canvas draws), the working
+    approach is known: drive the control via `browser_evaluate` (set the value + dispatch
+    `input`/`change`) instead of a raw `browser_drag` — try that first, don't spend attempts
+    rediscovering it. In the generated test, reflect the working approach: a bounded action (or
     `page.fill` on range inputs) rather than an unbounded `dragTo` that can stall the suite.
+  - If a step still has no concrete result after 3 attempts, stop working that scenario: record
+    it in the progress file as `blocked: <exactly what failed and what was tried>` and move to
+    the next scenario. Never loop indefinitely "switching approaches" on one step.
 - Retrieve generator log via `generator_read_log`
 - Immediately after reading the test log, invoke `generator_write_test` with the generated source code
   - File should contain single test
@@ -117,26 +194,32 @@ application behavior.
   - Always use best practices from the log when generating tests.
   - Records a screenshot of every step so the test doubles as a visual record:
     - Wrap each step's actions in `await test.step('<step text>', async () => { ... })`.
-    - As the last line inside every `test.step` callback, capture a screenshot and attach it to the report:
+    - As the last line inside every `test.step` callback, take **one** screenshot and attach it
+      to the report (attachments are persisted under `test-results/` — no separate disk write):
       ```ts
       await testInfo.attach('<NN> <step text>', {
-        body: await page.screenshot({ fullPage: true }),
+        body: await page.screenshot(),
         contentType: 'image/png',
       });
       ```
       where `<NN>` is the zero-padded step number (`01`, `02`, ...) so attachments stay ordered.
-    - Also write the screenshot to disk as a durable record:
-      `await page.screenshot({ path: testInfo.outputPath(`steps/<NN>-<fs-friendly-step-name>.png`), fullPage: true });`
+      Use `fullPage: true` only for a step whose result is below the fold; the default viewport
+      shot is enough otherwise.
     - Take the screenshot after any `wait_for` / verification in that step so it reflects the settled state.
-    - Add `test.use({ screenshot: 'only-on-failure' })` is NOT a substitute — every step must be captured explicitly.
+    - `test.use({ screenshot: 'only-on-failure' })` is NOT a substitute — every step must be captured explicitly.
   - Destructure `{ page }, testInfo` in the test callback so `testInfo` is available.
-  - When the test creates product-side state, wrap the body in `try` / `finally`; cleanup belongs
-    in `finally`, not after the last assertion. For an asset scenario, the `finally` block must
-    remove the uniquely named product test directory. Do not remove `test-assets/` or Playwright
-    output artifacts (screenshots, trace, video, or report files).
-  - Before marking a scenario `done`, execute its generated spec as an independent test. Mark it
-    `done` only after it passes; otherwise diagnose and fix it or record it as `blocked` with the
-    exact missing environment input or asset.
+  - When the test creates product-side state, wrap the body in `try` / `finally`; teardown
+    belongs in `finally`, not after the last assertion. Follow the teardown mode chosen from
+    `exploration-notes.md`: in *delete* mode the `finally` removes the uniquely named product
+    directory; in *no-delete / check-then-reuse* mode `finally` only resets transient UI state
+    (the reusable fixtures stay). Never remove `test-assets/` or Playwright output artifacts
+    (screenshots, trace, video, report files).
+  - Before marking a scenario `done`, run **only that one test**
+    (`playwright test <file> -g "<scenario title>"`, `--reporter=line`, no trace). Never run the
+    whole suite here — with shared login/preconditions the suite re-does all of it every time.
+    Mark it `done` only after it passes; give a failing spec **at most 3 fix-and-rerun cycles**,
+    then record it as `blocked: <exact failure and what was tried>` and move on — leave it for
+    the healer rather than looping.
 
    <example-generation>
    For following plan:
@@ -164,12 +247,8 @@ application behavior.
        // 1. Click in the "What needs to be done?" input field
        await test.step('Click in the "What needs to be done?" input field', async () => {
          await page.getByPlaceholder('What needs to be done?').click();
-         await page.screenshot({
-           path: testInfo.outputPath('steps/01-click-todo-input.png'),
-           fullPage: true,
-         });
          await testInfo.attach('01 Click in the "What needs to be done?" input field', {
-           body: await page.screenshot({ fullPage: true }),
+           body: await page.screenshot(),
            contentType: 'image/png',
          });
        });

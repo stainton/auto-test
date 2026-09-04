@@ -15,7 +15,7 @@ specs/<name>.md + specs/<name>.cases.md   draft test plan + case table (test-mod
 specs/approved/<name>.md        generator input
         │
         ▼  playwright-test-generator  (refuses anything not under specs/approved/)
-tests/**/*.spec.ts              generated tests — screenshot recorded per step
+specs/<plan-dir>/*.spec.ts      generated tests — one file per scenario, screenshot per step
         │
         ▼  playwright-test-healer
 passing tests

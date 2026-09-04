@@ -3,3 +3,6 @@ node_modules/
 docs/
 .playwright-mcp/
 test-results/
+playwright-report/
+blob-report/
+.auth/

@@ -6,5 +6,11 @@
   "scripts": {
     "review": "node review/server.mjs",
     "test": "playwright test"
+  },
+  "dependencies": {
+    "@playwright/test": "^1.62.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.4.1"
   }
 }

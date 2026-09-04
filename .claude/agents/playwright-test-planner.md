@@ -29,7 +29,9 @@ You will:
    - If the file does not exist, create it in step 7 from scratch.
 
 1. **Navigate and Explore** (be credit-efficient — do not repeat exploration)
-   - Invoke the `planner_setup_page` tool once to set up page before using any other tools
+   - Invoke the `planner_setup_page` tool once to set up page before using any other tools.
+     **Always pass the `seedFile`** (the repo login/seed spec) — planner, generator and healer
+     all rely on it to reach an authenticated starting state.
    - Explore the browser snapshot
    - Do not take screenshots unless absolutely necessary
    - Use `browser_*` tools to navigate and discover interface
@@ -54,18 +56,21 @@ You will:
          pass it to every interaction that supports one (`browser_click`, `browser_type`,
          `browser_hover`, `browser_wait_for`, `browser_select_option`, `browser_drag`, ...).
          Do not rely on the default timeout. Even async work must be bounded this way.
-       - **Default timeout is 30s** — most operations that have not finished within 30s must be
-         timed out. Use a shorter value only when you have a specific reason; never a longer one.
+       - Pick the timeout from the target: ~10s for a local SUT, a sane ceiling for a remote
+         one. Never rely on the default; never leave a call able to hang. Anything the MCP
+         does not time out itself (`browser_run_code_unsafe`, drags, `navigator.clipboard.*`)
+         must bound itself — `run_code_unsafe`'s first line is `await page.setDefaultTimeout(<ms>)`.
      - **When a step fails, do not fall back to an evasive strategy** (skipping it, marking it
        "flaky", leaving a TODO, or noting "couldn't verify"). Diagnose the root cause and fix
-       your approach, then re-run the step and get its real result.
+       your approach, then re-run the step — but **at most 3 attempts per step**.
        - Drag-style interactions (**色相/hue slider drags**, range inputs, sliders, resizers,
-         drag-and-drop, canvas draws) are the usual failure point. If `browser_drag` times out,
-         switch approach — drive the control via `browser_evaluate` / `browser_run_code_unsafe`
-         (set the `<input type="range">` value + dispatch `input`/`change`, or compute and
-         replay the pointer path yourself) — and complete the step that way.
-       - Only after you have genuinely exhausted every approach may you record a limitation, and
-         then it must say exactly what was tried, why each failed, and what is actually blocked.
+         drag-and-drop, canvas draws) are the usual failure point. The working approach is
+         known: drive the control via `browser_evaluate` / `browser_run_code_unsafe` (set the
+         `<input type="range">` value + dispatch `input`/`change`, or compute and replay the
+         pointer path yourself). Use it first rather than spending attempts on `browser_drag`.
+       - After 3 attempts with no concrete result, stop: record a limitation saying exactly what
+         was tried, why each failed, and what is blocked, then move on. Do not keep inventing
+         new approaches past that budget.
        - Once a control is understood, note the reliable way to drive it under "Known issues /
          gotchas" so future runs and the generator use that method from the start.
      - **Record findings into `specs/exploration-notes.md` incrementally as you explore**, not
@@ -89,8 +94,13 @@ You will:
    - Clear, descriptive title
    - Detailed step-by-step instructions
    - Expected outcomes where appropriate
-   - Assumptions about starting state (always assume blank/fresh state)
+   - Assumptions about starting state — assume nothing is pre-seeded, but when the SUT has a
+     **shared/persistent fixture area or a destructive-action rate limit** (see the notes' ⚠️
+     Hazards), the precondition must say "check-then-reuse into `<fixed location>`, no teardown
+     delete", not "create fresh / delete after".
    - Success criteria and failure conditions
+   - For any step touching a known hazard (hang-prone control, lazy-render list), state the
+     working technique inline so the generator does not re-derive it.
 
 5. **Create Documentation**
 
@@ -135,14 +145,21 @@ You will:
    # Exploration Notes
    _Last updated: <YYYY-MM-DD> by planner run for "<what this run targeted>"_
 
+   ## ⚠️ Hazards (read before generating — these change how tests must be built)
+   - <e.g. server-side rate limit on deletes → teardown must not delete; check-then-reuse>
+   - <e.g. control X hangs on semantic click → drive via page.evaluate synthetic events>
+   - <e.g. list Y is infinite-scroll → scroll-to-stable before counting/selecting>
+   (Only real, confirmed hazards. Each must say the consequence for the generated test.)
+
    ## Application
    - Base URL / entry point:
-   - Auth / seed / preconditions needed to reach main UI:
+   - Auth / seed / preconditions needed to reach main UI (name the seed file + any env vars):
+   - Shared / persistent fixture areas (what must be check-then-reused, not recreated):
 
    ## Views explored
    ### <View name> — <url or route>
    - Purpose:
-   - Key interactive elements (with stable locators where known):
+   - Key interactive elements (stable locators — use `[class*="_x_"]` for hashed CSS-module names):
    - Forms & validation behavior:
    - Navigation in/out:
    - Quirks / dynamic data / flakiness risks:
@@ -151,7 +168,7 @@ You will:
    - <area> — <why it was skipped>
 
    ## Known issues / gotchas
-   - <observation>
+   - <observation, incl. the reliable way to drive any tricky control>
    ```
 
 **Quality Standards**:
