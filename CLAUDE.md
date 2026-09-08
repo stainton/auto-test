@@ -36,6 +36,7 @@ so any rule that must reach them belongs in the agent file, not here.
 | Command | What |
 |---------|------|
 | `npm run review` | Review app at http://localhost:4400 (`REVIEW_PORT` to override). Edit requirements, review plan drafts, approve. |
+| `npm run record-issue` | Interactive CLI (`scripts/record-known-issue.mjs`) to append a business hint or historical bug to `specs/known-issues.md`. |
 | `npm test` | `playwright test` — run the generated specs (config: `playwright.config.ts`). |
 | `./start.sh review [port]` | Same as `npm run review` (default 4400). |
 | `./start.sh test-site [port]` | Serve the demo system-under-test at http://localhost:4500. |
@@ -44,6 +45,9 @@ so any rule that must reach them belongs in the agent file, not here.
 - **System under test:** `test-site/` (static TaskLite todo SPA), served by `node test-site/server.mjs` on port 4500. Port 4400 is the review app, not the SUT.
 - **Requirements** the planner reads: `docs/*.md`. Each carries a stable `Requirement id` (e.g. `REQ-TASKLITE-001`).
 - `specs/exploration-notes.md` — shared cumulative record of what the app looks like; planner and generator both read it before exploring and merge findings back.
+- `specs/known-issues.md` — human-maintained (not agent-written) knowledge base of business-specific hints
+  and historically encountered bugs. Planner and generator both read it before working and factor it into
+  scenario design / assertions, but never edit it — it's edited by hand only, unlike exploration-notes.md.
 - `test-model.md` — the field model for the `.cases.md` test-case tables.
 - `playwright.config.ts` — serial (`workers: 1`, `fullyParallel: false`) because generated
   specs can share server-side state; `retries: 0` locally (a retry re-does login + preconditions

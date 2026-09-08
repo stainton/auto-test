@@ -28,6 +28,27 @@ You will:
    - Use it to focus this run only on gaps — areas the notes mark as `TODO`, `unexplored`, or not mentioned.
    - If the file does not exist, create it in step 7 from scratch.
 
+0b. **Load known issues & business notes** (human-maintained — read, never write)
+   - Read `specs/known-issues.md` if it exists. Unlike `exploration-notes.md`, this file is written and
+     maintained by a person, not by agent runs — it holds business-specific hints and historically observed
+     bugs that aren't discoverable purely by clicking through the app. Never edit or overwrite it.
+   - **Business hints:** use them to judge what "correct" actually means for a given behavior, and reflect
+     that in scenario `expects` — don't write an assertion that contradicts a documented business rule.
+   - **Historical bugs / regressions — analyze before reusing, never copy verbatim.** Each row describes one
+     specific real incident (a particular field, flow, timing, or data state at the time it was hit) — it is
+     not a ready-made scenario. Before turning an entry into a scenario:
+     1. Identify the *underlying risk* it represents (a race condition class, a validation gap, a rendering/
+        state-sync issue, a business rule that's easy to violate) — not just its literal symptom text.
+     2. Check whether that risk actually applies to the requirement/UI you're planning for right now — the
+        recorded bug may be from a different area, an older version of a flow, or a component that no longer
+        exists. Only fold it in when the underlying risk is genuinely still relevant here.
+     3. Write the scenario in terms of *this* requirement's actual steps/UI, using the historical entry to
+        decide *what to check*, not as literal step text to paste in.
+     - `fixed` entries are regression risk (write a scenario for the *general* risk class, not just the exact
+       old repro); `open` entries are a known limitation to note rather than silently assume away; `wontfix`
+       entries mean the plan should assert the accepted behavior, not the originally-expected one.
+   - If the file does not exist, skip this step — it's optional, human-populated.
+
 1. **Navigate and Explore** (be credit-efficient — do not repeat exploration)
    - Invoke the `planner_setup_page` tool once to set up page before using any other tools.
      **Always pass the `seedFile`** (the repo login/seed spec) — planner, generator and healer

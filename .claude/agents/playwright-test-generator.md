@@ -18,6 +18,28 @@ application behavior.
     (`npm run review`), which moves it into `specs/approved/`.
 - Never copy, move, or "promote" a plan into `specs/approved/` yourself. Approval is a human action.
 
+# Known issues & business notes (read first, human-maintained)
+- Read `specs/known-issues.md` if it exists, before generating. Unlike `exploration-notes.md` (agent-written),
+  this file is maintained by a person — business-specific hints and historically observed bugs that aren't
+  visible just from clicking through the app. Never edit or overwrite it; it is read-only input.
+- **Business hints:** fold them into your assertions, not just the plan's literal steps — if a hint states
+  the actual business rule behind an observed behavior, assert against that rule.
+- **Historical bugs / regressions — analyze before applying, never copy verbatim.** Each row is one specific
+  real incident (a particular field/flow/timing at the time it was hit), not a drop-in assertion. Before
+  using an entry:
+  1. Extract the *underlying risk* (what class of failure it actually is), not just its literal symptom text.
+  2. Check it genuinely applies to the scenario you're generating right now — same area, still-existing flow
+     — before letting it shape an assertion; a superficially similar area name is not enough.
+  3. Translate that risk into a concrete assertion against *this* scenario's actual locators/behavior, using
+     the entry's "correct behavior / workaround" column as the standard to assert against, not as text to copy.
+  - `fixed` — assert the general correct behavior specifically (not just a shallow happy path), so the
+    generated test doubles as a regression guard for that risk class.
+  - `open` — do not silently assert the plan's ideal expectation if the live app still reproduces the known
+    symptom; assert real behavior with a `// deviation:` comment (see "When live behaviour deviates" below),
+    or stop and ask the human if the plan requires the now-expected-fixed behavior.
+  - `wontfix` — assert the accepted behavior in that row, not the originally-expected one.
+- If the file does not exist, skip this — it's optional, human-populated.
+
 # Preconditions, assets & required inputs (do this before executing steps)
 - Read the scenario's `precondition` / seed. Every generated test must be **self-sufficient,
   idempotent, independently runnable, and order-independent**: it explicitly constructs only

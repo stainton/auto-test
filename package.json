@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "review": "node review/server.mjs",
+    "record-issue": "node scripts/record-known-issue.mjs",
     "test": "playwright test"
   },
   "dependencies": {
