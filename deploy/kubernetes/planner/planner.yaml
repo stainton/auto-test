@@ -1,0 +1,123 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: planner-data
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: planner
+spec:
+  # File task storage has one owner. Recreate avoids overlapping writers.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: auto-test-planner
+  template:
+    metadata:
+      labels:
+        app: auto-test-planner
+    spec:
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: planner
+          image: auto-test-planner:local
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 4501
+          env:
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: planner-secrets
+                  key: anthropic-api-key
+                  optional: true
+            - name: PLANNER_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: planner-secrets
+                  key: api-token
+            - name: PLANNER_CONCURRENCY
+              value: '1'
+            - name: PLANNER_TIMEOUT_MS
+              value: '900000'
+            - name: PLANNER_MAX_JOBS
+              value: '100'
+            - name: PLANNER_RETENTION_MS
+              value: '86400000'
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+          startupProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            failureThreshold: 30
+            periodSeconds: 2
+          resources:
+            requests:
+              cpu: '1'
+              memory: 1Gi
+              ephemeral-storage: 1Gi
+            limits:
+              cpu: '2'
+              memory: 3Gi
+              ephemeral-storage: 4Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/planner
+            - name: temporary
+              mountPath: /tmp
+            - name: shared-memory
+              mountPath: /dev/shm
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: planner-data
+        - name: temporary
+          emptyDir:
+            sizeLimit: 2Gi
+        - name: shared-memory
+          emptyDir:
+            medium: Memory
+            sizeLimit: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: planner
+spec:
+  selector:
+    app: auto-test-planner
+  ports:
+    - name: http
+      port: 4501
+      targetPort: http
+  type: ClusterIP

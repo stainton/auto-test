@@ -1,0 +1,1028 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Auto Test Planner HTTP API",
+    "version": "1.0.0",
+    "description": "Asynchronous requirement-driven browser test planning. All business input is supplied in the request. Results are drafts for human review. Generator and healer are not part of this API. Jobs persist status, events and results; unfinished jobs fail after a server restart and must be resubmitted. Request inputs and credentials are not persisted. Default retention is 24 hours. This is an HTTP API, not an MCP endpoint."
+  },
+  "servers": [
+    {
+      "url": "http://localhost:4501",
+      "description": "Local or port-forwarded service"
+    }
+  ],
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "Planner"
+    },
+    {
+      "name": "Operations"
+    }
+  ],
+  "paths": {
+    "/v1/planner/jobs": {
+      "post": {
+        "tags": [
+          "Planner"
+        ],
+        "operationId": "createPlannerJob",
+        "summary": "Submit a planner task",
+        "description": "Returns immediately with a queued job. Maximum JSON request size: 2 MiB. No local file paths or MCP commands are accepted. Supply requirements, browser target/authentication and any prior knowledge in this request. No idempotency key is supported: repeated submissions create separate jobs.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlannerInput"
+              },
+              "example": {
+                "requirements": [
+                  {
+                    "id": "REQ-LOGIN-001",
+                    "title": "用户登录",
+                    "content": "正确账号密码登录成功；错误密码显示提示且保留登录页面。"
+                  }
+                ],
+                "target": {
+                  "baseUrl": "https://test.example.com/login"
+                },
+                "context": {
+                  "instructions": "覆盖正常流程和错误密码。账号由调用方在 testData 中提供。",
+                  "testData": {
+                    "username": "test-user",
+                    "password": "provided-by-caller"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Task accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Job"
+                }
+              }
+            },
+            "headers": {
+              "Location": {
+                "description": "Relative URL for job status",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed JSON or invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid bearer token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Request exceeds 2 MiB",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Content-Type is not application/json",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal service error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Server shutting down or retained job capacity reached",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/planner/jobs/{jobId}": {
+      "parameters": [
+        {
+          "name": "jobId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "get": {
+        "tags": [
+          "Planner"
+        ],
+        "operationId": "getPlannerJob",
+        "summary": "Read task status",
+        "responses": {
+          "200": {
+            "description": "Current task state; fetch output from the result endpoint after success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Job"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid bearer token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown or expired job",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal service error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Planner"
+        ],
+        "operationId": "cancelPlannerJob",
+        "summary": "Cancel a queued or running task",
+        "description": "Idempotent for terminal jobs. A running task can briefly remain running with stage cancelling until its runtime and browser stop. Does not delete retained results.",
+        "responses": {
+          "202": {
+            "description": "Current state after cancellation request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Job"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid bearer token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown or expired job",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal service error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/planner/jobs/{jobId}/result": {
+      "parameters": [
+        {
+          "name": "jobId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "get": {
+        "tags": [
+          "Planner"
+        ],
+        "operationId": "getPlannerResult",
+        "summary": "Read generated cases and Markdown artifacts",
+        "responses": {
+          "200": {
+            "description": "Validated draft test cases",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlannerResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid bearer token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown or expired job",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Job is queued, running, failed or cancelled; inspect job status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal service error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/planner/jobs/{jobId}/events": {
+      "parameters": [
+        {
+          "name": "jobId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "get": {
+        "tags": [
+          "Planner"
+        ],
+        "operationId": "streamPlannerEvents",
+        "summary": "Subscribe to progress using Server-Sent Events",
+        "description": "Authenticated fetch streaming is recommended for browsers because native EventSource cannot set Authorization. First emits snapshot with the Job schema, then progress events after the cursor. Each progress event carries a monotonically increasing id. Last-Event-ID takes precedence over after. At most 500 recent progress events are retained; a reset event indicates a gap, followed by retained events. Snapshot has current state even if no newer progress exists. Terminal tasks close the stream; do not reconnect after a terminal snapshot/progress. Comments provide 15-second heartbeats. A disconnected drawer does not cancel the job. Slow consumers are disconnected and can resume with their last received id. Replayed events preceding snapshot.lastEventId are historical timeline entries and must not overwrite the current snapshot status.",
+        "parameters": [
+          {
+            "name": "Last-Event-ID",
+            "in": "header",
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d+$"
+            },
+            "description": "Last received progress id (0 for all retained events)"
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            },
+            "description": "Fallback event cursor; cannot exceed job.lastEventId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "SSE stream. Event data: snapshot=Job, progress=ProgressEvent, reset=EventReset.",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                },
+                "example": "event: snapshot\ndata: {\"id\":\"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa\",\"kind\":\"planner\",\"status\":\"running\",\"stage\":\"exploring\",\"createdAt\":\"2026-09-11T00:00:00Z\",\"updatedAt\":\"2026-09-11T00:00:01Z\",\"lastEventId\":3}\n\nid: 4\nevent: progress\ndata: {\"id\":4,\"jobId\":\"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa\",\"status\":\"running\",\"stage\":\"exploring\",\"message\":\"Running browser_snapshot\",\"createdAt\":\"2026-09-11T00:00:02Z\"}\n\n"
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid or future event cursor",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid bearer token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown or expired job",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal service error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-sse-event-schemas": {
+          "snapshot": {
+            "$ref": "#/components/schemas/Job"
+          },
+          "progress": {
+            "$ref": "#/components/schemas/ProgressEvent"
+          },
+          "reset": {
+            "$ref": "#/components/schemas/EventReset"
+          }
+        }
+      }
+    },
+    "/healthz": {
+      "get": {
+        "tags": [
+          "Operations"
+        ],
+        "operationId": "health",
+        "summary": "Process liveness",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Process is alive",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "status"
+                  ],
+                  "properties": {
+                    "status": {
+                      "const": "ok",
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/readyz": {
+      "get": {
+        "tags": [
+          "Operations"
+        ],
+        "operationId": "readiness",
+        "summary": "Service readiness",
+        "description": "CLI and browser prerequisites are checked before listening. This probe does not call the model provider or target site.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Accepting requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "status"
+                  ],
+                  "properties": {
+                    "status": {
+                      "const": "ready",
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Shutting down or unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "status"
+                  ],
+                  "properties": {
+                    "status": {
+                      "const": "unavailable",
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/openapi.json": {
+      "get": {
+        "tags": [
+          "Operations"
+        ],
+        "operationId": "getPlannerOpenApi",
+        "summary": "Retrieve this OpenAPI document",
+        "responses": {
+          "200": {
+            "description": "OpenAPI 3.1 document",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid bearer token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Service token configured with PLANNER_API_TOKEN. Optional only for local loopback development; required for non-loopback and Kubernetes."
+      }
+    },
+    "schemas": {
+      "PlannerInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "requirements",
+          "target"
+        ],
+        "properties": {
+          "requirements": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 50,
+            "description": "Unique IDs; \"-\" is reserved and forbidden",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "title",
+                "content"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "description": "Stable requirement ID",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "not": {
+                    "const": "-"
+                  }
+                },
+                "title": {
+                  "type": "string",
+                  "description": "Requirement title",
+                  "minLength": 1,
+                  "maxLength": 500
+                },
+                "content": {
+                  "type": "string",
+                  "description": "Complete requirement/acceptance criteria, normally Markdown",
+                  "minLength": 1,
+                  "maxLength": 200000
+                }
+              }
+            }
+          },
+          "target": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "baseUrl"
+            ],
+            "properties": {
+              "baseUrl": {
+                "type": "string",
+                "description": "HTTP(S) target URL; embedded username/password not allowed",
+                "format": "uri",
+                "pattern": "^https?://",
+                "minLength": 1,
+                "maxLength": 4096
+              },
+              "storageState": {
+                "$ref": "#/components/schemas/StorageState"
+              },
+              "extraHTTPHeaders": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "description": "Headers used by the browser, including target authentication if necessary. Values are not included in the model prompt."
+              }
+            }
+          },
+          "context": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [],
+            "properties": {
+              "explorationNotes": {
+                "type": "string",
+                "description": "Prior exploration record; omission means no prior knowledge",
+                "maxLength": 200000
+              },
+              "knownIssues": {
+                "type": "string",
+                "description": "Business rules/historical bugs; read-only for planner",
+                "maxLength": 200000
+              },
+              "instructions": {
+                "type": "string",
+                "description": "Scope, login instructions and environment prerequisites",
+                "maxLength": 200000
+              },
+              "testData": {
+                "type": "object",
+                "additionalProperties": true,
+                "description": "Caller-supplied account/test data. Sent to the model when needed for planning/login; do not send the planner service bearer token or model API key."
+              }
+            }
+          }
+        }
+      },
+      "StorageState": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "cookies",
+          "origins"
+        ],
+        "properties": {
+          "cookies": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true,
+              "required": [
+                "name",
+                "value",
+                "domain",
+                "path",
+                "expires",
+                "httpOnly",
+                "secure",
+                "sameSite"
+              ],
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "value": {
+                  "type": "string"
+                },
+                "domain": {
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string"
+                },
+                "expires": {
+                  "type": "number"
+                },
+                "httpOnly": {
+                  "type": "boolean"
+                },
+                "secure": {
+                  "type": "boolean"
+                },
+                "sameSite": {
+                  "type": "string",
+                  "enum": [
+                    "Strict",
+                    "Lax",
+                    "None"
+                  ]
+                }
+              }
+            }
+          },
+          "origins": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true,
+              "required": [
+                "origin",
+                "localStorage"
+              ],
+              "properties": {
+                "origin": {
+                  "type": "string"
+                },
+                "localStorage": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "required": [
+                      "name",
+                      "value"
+                    ],
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      },
+                      "value": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                "indexedDB": {
+                  "type": "array",
+                  "items": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "Case": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "request",
+          "name",
+          "case_id",
+          "priority",
+          "precondition",
+          "description",
+          "steps",
+          "expects"
+        ],
+        "properties": {
+          "request": {
+            "type": "string",
+            "minLength": 1
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "case_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "priority": {
+            "type": "string",
+            "enum": [
+              "P0",
+              "P1",
+              "P2",
+              "P3"
+            ]
+          },
+          "precondition": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1
+          },
+          "steps": {
+            "type": "string",
+            "minLength": 1
+          },
+          "expects": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "description": "Exact eight fields from test-model.md. request references a supplied requirement; case_id is unique within a result. steps and expects use numbered lines separated by newline characters; expected-result numbers refer to step numbers."
+      },
+      "PlannerResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "reviewStatus",
+          "cases",
+          "casesMarkdown",
+          "planMarkdown",
+          "explorationNotes",
+          "limitations"
+        ],
+        "properties": {
+          "reviewStatus": {
+            "type": "string",
+            "const": "draft"
+          },
+          "cases": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 500,
+            "items": {
+              "$ref": "#/components/schemas/Case"
+            }
+          },
+          "casesMarkdown": {
+            "type": "string",
+            "description": "Markdown table in test-model.md column order; newlines become <br>, pipes/HTML are escaped"
+          },
+          "planMarkdown": {
+            "type": "string",
+            "description": "Draft plan derived from the same cases; human review is required"
+          },
+          "explorationNotes": {
+            "type": "string",
+            "description": "Merged supplied and newly observed exploration notes for the caller to persist and pass into future requests"
+          },
+          "limitations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Blocked or unverified areas; success means a valid draft exists, not that every behavior was verified"
+          }
+        },
+        "description": "The raw model structured output is limited to 2 MiB before deterministic Markdown formatting."
+      },
+      "Job": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "kind",
+          "status",
+          "stage",
+          "createdAt",
+          "updatedAt",
+          "lastEventId"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "type": "string",
+            "const": "planner"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "running",
+              "succeeded",
+              "failed",
+              "cancelled"
+            ]
+          },
+          "stage": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "finishedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "lastEventId": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "error": {
+            "$ref": "#/components/schemas/ErrorDetail"
+          }
+        }
+      },
+      "ProgressEvent": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "jobId",
+          "status",
+          "stage",
+          "message",
+          "createdAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "jobId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "running",
+              "succeeded",
+              "failed",
+              "cancelled"
+            ]
+          },
+          "stage": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "toolStatus": {
+            "type": "string",
+            "enum": [
+              "started",
+              "completed",
+              "failed"
+            ]
+          },
+          "casesGenerated": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "EventReset": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "firstAvailableEventId",
+          "message"
+        ],
+        "properties": {
+          "firstAvailableEventId": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "ErrorDetail": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "code",
+          "message"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "Machine-readable error code; task errors include PLANNER_FAILED, JOB_TIMEOUT, JOB_CANCELLED and SERVER_RESTARTED"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/ErrorDetail"
+          }
+        }
+      }
+    }
+  }
+}

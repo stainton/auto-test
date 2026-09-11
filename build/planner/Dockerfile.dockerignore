@@ -1,0 +1,11 @@
+**
+!build/
+!build/planner/
+!build/planner/package.json
+!build/planner/package-lock.json
+!build/planner/setting.json
+!build/planner/setting.example.json
+!build/planner/install-settings.mjs
+!server/
+!server/**
+server/tests/

@@ -1,0 +1,30 @@
+FROM node:24-bookworm-slim
+
+WORKDIR /app
+COPY build/planner/package.json build/planner/package-lock.json ./
+RUN npm ci --omit=dev --no-audit --no-fund \
+    && npx playwright install --with-deps chromium \
+    && apt-get update && apt-get install -y --no-install-recommends tini \
+    && rm -rf /var/lib/apt/lists/* /root/.npm \
+    && mv /root/.cache/ms-playwright /opt/ms-playwright \
+    && chmod -R a+rX /opt/ms-playwright \
+    && mkdir -p /var/lib/planner \
+    && chown node:node /var/lib/planner
+COPY --chown=node:node server ./server
+COPY build/planner/setting*.json /tmp/planner-settings/
+COPY build/planner/install-settings.mjs ./build/planner/install-settings.mjs
+RUN node build/planner/install-settings.mjs /tmp/planner-settings /app/config/claude/settings.json \
+    && chown node:node /app/config/claude/settings.json \
+    && rm -rf /tmp/planner-settings /app/build
+ENV NODE_ENV=production \
+    PATH=/app/node_modules/.bin:$PATH \
+    PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright \
+    CLAUDE_CONFIG_DIR=/tmp/planner-claude \
+    PLANNER_CLAUDE_SETTINGS=/app/config/claude/settings.json \
+    PLANNER_HOST=0.0.0.0 \
+    PLANNER_PORT=4501 \
+    PLANNER_DATA_DIR=/var/lib/planner
+USER node
+EXPOSE 4501
+ENTRYPOINT ["/usr/bin/tini", "--"]
+CMD ["node", "server/planner/main.mjs"]
