@@ -8,13 +8,11 @@ RUN npm ci --omit=dev --no-audit --no-fund \
     && rm -rf /var/lib/apt/lists/* /root/.npm \
     && mv /root/.cache/ms-playwright /opt/ms-playwright \
     && chmod -R a+rX /opt/ms-playwright \
-    && mkdir -p /var/lib/planner \
-    && chown node:node /var/lib/planner
-COPY --chown=node:node server ./server
+    && mkdir -p /var/lib/planner
+COPY server ./server
 COPY build/planner/setting*.json /tmp/planner-settings/
 COPY build/planner/install-settings.mjs ./build/planner/install-settings.mjs
 RUN node build/planner/install-settings.mjs /tmp/planner-settings /app/config/claude/settings.json \
-    && chown node:node /app/config/claude/settings.json \
     && rm -rf /tmp/planner-settings /app/build
 ENV NODE_ENV=production \
     PATH=/app/node_modules/.bin:$PATH \
@@ -24,7 +22,6 @@ ENV NODE_ENV=production \
     PLANNER_HOST=0.0.0.0 \
     PLANNER_PORT=4501 \
     PLANNER_DATA_DIR=/var/lib/planner
-USER node
 EXPOSE 4501
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["node", "server/planner/main.mjs"]

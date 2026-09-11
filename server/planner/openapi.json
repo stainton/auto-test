@@ -3,7 +3,7 @@
   "info": {
     "title": "Auto Test Planner HTTP API",
     "version": "1.0.0",
-    "description": "Asynchronous requirement-driven browser test planning. All business input is supplied in the request. Results are drafts for human review. Generator and healer are not part of this API. Jobs persist status, events and results; unfinished jobs fail after a server restart and must be resubmitted. Request inputs and credentials are not persisted. Default retention is 24 hours. This is an HTTP API, not an MCP endpoint."
+    "description": "Asynchronous requirement-driven browser test planning. All business input is supplied in the request. Results are drafts for human review. Generator and healer are not part of this API. Jobs persist status, events and results; unfinished jobs fail after a server restart and must be resubmitted. Request inputs and credentials are not persisted. Default retention is 24 hours. This is an HTTP API, not an MCP endpoint. No service token is required. Cross-origin browser requests are supported."
   },
   "servers": [
     {
@@ -11,11 +11,7 @@
       "description": "Local or port-forwarded service"
     }
   ],
-  "security": [
-    {
-      "bearerAuth": []
-    }
-  ],
+  "security": [],
   "tags": [
     {
       "name": "Planner"
@@ -83,16 +79,6 @@
           },
           "400": {
             "description": "Malformed JSON or invalid request",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Missing or invalid bearer token",
             "content": {
               "application/json": {
                 "schema": {
@@ -173,16 +159,6 @@
               }
             }
           },
-          "401": {
-            "description": "Missing or invalid bearer token",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
           "404": {
             "description": "Unknown or expired job",
             "content": {
@@ -219,16 +195,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Job"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Missing or invalid bearer token",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
@@ -285,16 +251,6 @@
               }
             }
           },
-          "401": {
-            "description": "Missing or invalid bearer token",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
           "404": {
             "description": "Unknown or expired job",
             "content": {
@@ -346,7 +302,7 @@
         ],
         "operationId": "streamPlannerEvents",
         "summary": "Subscribe to progress using Server-Sent Events",
-        "description": "Authenticated fetch streaming is recommended for browsers because native EventSource cannot set Authorization. First emits snapshot with the Job schema, then progress events after the cursor. Each progress event carries a monotonically increasing id. Last-Event-ID takes precedence over after. At most 500 recent progress events are retained; a reset event indicates a gap, followed by retained events. Snapshot has current state even if no newer progress exists. Terminal tasks close the stream; do not reconnect after a terminal snapshot/progress. Comments provide 15-second heartbeats. A disconnected drawer does not cancel the job. Slow consumers are disconnected and can resume with their last received id. Replayed events preceding snapshot.lastEventId are historical timeline entries and must not overwrite the current snapshot status.",
+        "description": "No authentication is required. Native EventSource or fetch streaming can be used directly, including across origins (CORS enabled). First emits snapshot with the Job schema, then progress events after the cursor. Each progress event carries a monotonically increasing id. Last-Event-ID takes precedence over after. At most 500 recent progress events are retained; a reset event indicates a gap, followed by retained events. Snapshot has current state even if no newer progress exists. Terminal tasks close the stream; do not reconnect after a terminal snapshot/progress. Comments provide 15-second heartbeats. A disconnected drawer does not cancel the job. Slow consumers are disconnected and can resume with their last received id. Replayed events preceding snapshot.lastEventId are historical timeline entries and must not overwrite the current snapshot status.",
         "parameters": [
           {
             "name": "Last-Event-ID",
@@ -382,16 +338,6 @@
           },
           "400": {
             "description": "Invalid or future event cursor",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Missing or invalid bearer token",
             "content": {
               "application/json": {
                 "schema": {
@@ -536,29 +482,12 @@
                 }
               }
             }
-          },
-          "401": {
-            "description": "Missing or invalid bearer token",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
           }
         }
       }
     }
   },
   "components": {
-    "securitySchemes": {
-      "bearerAuth": {
-        "type": "http",
-        "scheme": "bearer",
-        "description": "Service token configured with PLANNER_API_TOKEN. Optional only for local loopback development; required for non-loopback and Kubernetes."
-      }
-    },
     "schemas": {
       "PlannerInput": {
         "type": "object",
@@ -615,7 +544,7 @@
             "properties": {
               "baseUrl": {
                 "type": "string",
-                "description": "HTTP(S) target URL; embedded username/password not allowed",
+                "description": "HTTP(S) target URL",
                 "format": "uri",
                 "pattern": "^https?://",
                 "minLength": 1,
@@ -656,7 +585,7 @@
               "testData": {
                 "type": "object",
                 "additionalProperties": true,
-                "description": "Caller-supplied account/test data. Sent to the model when needed for planning/login; do not send the planner service bearer token or model API key."
+                "description": "Caller-supplied account/test data sent to the model when needed for planning/login."
               }
             }
           }

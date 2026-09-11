@@ -3,7 +3,7 @@ import { StringDecoder } from 'node:string_decoder';
 
 // Shared runtime boundary: a workflow supplies prompt, schema, MCP configuration and a tool allowlist.
 // No repository settings, built-in filesystem tools or arbitrary shell commands are inherited.
-export function runClaude({ cwd, prompt, systemPrompt, schema, mcpConfig, allowedTools, signal, onMessage,
+export function runClaude({ cwd, prompt, systemPrompt, schema, mcpConfig, allowedTools, disallowedTools = [], signal, onMessage,
   command = 'claude', model, settingsPath, maxOutputBytes = 16 * 1024 * 1024 }) {
   return new Promise((resolve, reject) => {
     if (signal.aborted) return reject(signal.reason);
@@ -12,10 +12,11 @@ export function runClaude({ cwd, prompt, systemPrompt, schema, mcpConfig, allowe
       '--permission-mode', 'dontAsk', '--tools', '', '--allowedTools', allowedTools.join(','),
       '--strict-mcp-config', '--mcp-config', JSON.stringify(mcpConfig),
       '--system-prompt', systemPrompt, '--json-schema', JSON.stringify(schema)];
+    if (disallowedTools.length) args.push('--disallowedTools', disallowedTools.join(','));
     if (model) args.push('--model', model);
     if (settingsPath) args.push('--settings', settingsPath);
     const child = spawn(command, args, { cwd, env: { ...process.env, ENABLE_TOOL_SEARCH: 'false' }, stdio: ['pipe', 'pipe', 'pipe'], detached: process.platform !== 'win32' });
-    let buffer = '', bytes = 0, result, failure, killTimer;
+    let buffer = '', diagnostics = '', bytes = 0, result, failure, killTimer;
     const decoder = new StringDecoder('utf8');
     function kill(sig) {
       if (!child.pid) return;
@@ -36,7 +37,7 @@ export function runClaude({ cwd, prompt, systemPrompt, schema, mcpConfig, allowe
         const message = JSON.parse(line);
         if (message.type === 'result') result = message;
         onMessage(message);
-      } catch { stop(new Error('Invalid planner runtime event stream')); }
+      } catch (error) { stop(error instanceof SyntaxError ? new Error('Invalid planner runtime event stream') : error); }
     }
     child.stdout.on('data', chunk => {
       bytes += chunk.length;
@@ -47,8 +48,7 @@ export function runClaude({ cwd, prompt, systemPrompt, schema, mcpConfig, allowe
         consume(buffer.slice(0, index)); buffer = buffer.slice(index + 1);
       }
     });
-    // Drain diagnostics, but never send raw provider logs or credentials to API consumers.
-    child.stderr.on('data', () => {});
+    child.stderr.on('data', chunk => { diagnostics = (diagnostics + chunk.toString()).slice(-8000); });
     child.stdin.on('error', () => stop(new Error('Planner input pipe failed')));
     child.on('error', () => { failure ??= new Error('Cannot start Claude runtime; verify PLANNER_CLAUDE_COMMAND'); });
     child.on('close', code => {
@@ -59,7 +59,7 @@ export function runClaude({ cwd, prompt, systemPrompt, schema, mcpConfig, allowe
       kill('SIGKILL');
       if (failure) return reject(failure);
       if (code !== 0 || !result || result.is_error || result.subtype !== 'success')
-        return reject(new Error('Planner runtime failed; verify provider credentials, model access and browser configuration'));
+        return reject(new Error(result?.errors?.join('\n') || result?.result || diagnostics.trim() || 'Planner runtime failed; verify model and browser configuration'));
       if (!result.structured_output) return reject(new Error('Planner runtime returned no structured result'));
       resolve(result.structured_output);
     });

@@ -103,7 +103,7 @@ export class Jobs extends EventEmitter {
       job.status = reason?.code === 'JOB_CANCELLED' ? 'cancelled' : 'failed';
       job.finishedAt = now(); delete job.result;
       job.error = { code: reason?.code === 'JOB_TIMEOUT' ? 'JOB_TIMEOUT' : job.status === 'cancelled' ? 'JOB_CANCELLED' : 'PLANNER_FAILED',
-        message: job.status === 'cancelled' ? 'Planner task cancelled' : reason?.code === 'JOB_TIMEOUT' ? reason.message : 'Planner execution or output validation failed; verify runtime configuration and supplied prerequisites' };
+        message: job.status === 'cancelled' ? 'Planner task cancelled' : reason?.message || 'Planner execution failed' };
       this.event(job, { stage: job.status, message: job.error.message });
     } finally { clearTimeout(timer); }
   }

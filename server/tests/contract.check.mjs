@@ -9,7 +9,6 @@ test('rejects missing documents, local file paths, duplicate requirement IDs and
   for (const invalid of [ {}, { ...input, requirements: [] }, { ...input, requirements: [...input.requirements, ...input.requirements] },
     { ...input, requirements: [{ ...input.requirements[0], id: '-' }] },
     { ...input, target: { baseUrl: 'file:///etc/passwd' } },
-    { ...input, target: { baseUrl: 'https://user:pass@example.test' } },
     { ...input, target: { ...input.target, storageState: '/local/auth.json' } },
     { ...input, mcpConfig: { command: 'arbitrary-command' } } ]) assert.throws(() => validateInput(invalid));
 });

@@ -11,15 +11,15 @@ npm ci
 npx playwright install chromium
 # 如尚未安装 Claude Code：
 npm install -g @anthropic-ai/claude-code@2.1.236
-# 提供 build/planner/setting.json（或环境中的模型凭据），并设置 PLANNER_API_TOKEN 后启动：
+# 提供 build/planner/setting.json（或环境中的模型凭据）后启动：
 node server/planner/main.mjs
 ```
 
-默认监听 `127.0.0.1:4501`。Claude 使用 bare 模式，显式加载 `PLANNER_CLAUDE_SETTINGS` 指定的配置；源码运行时也会自动查找 `build/planner/setting.json`。模型鉴权可放在配置文件的 env、apiKeyHelper 或服务端环境中，不依赖个人订阅登录。未配置模型时默认 haiku；设置 `PLANNER_MODEL` 可显式覆盖 Claude 配置中的模型。配置路径不存在或 JSON 无效时启动失败，实际鉴权在任务运行时由 Claude 验证。服务端提供 API 凭据，调用方提供被测系统的 URL、登录状态/登录指引和测试数据。
+默认监听 `0.0.0.0:4501`，本机访问 `http://localhost:4501`。Claude 使用 bare 模式，显式加载 `PLANNER_CLAUDE_SETTINGS` 指定的配置；源码运行时也会自动查找 `build/planner/setting.json`。模型鉴权可放在配置文件的 env、apiKeyHelper 或服务端环境中，不依赖个人订阅登录。未配置模型时默认 haiku；设置 `PLANNER_MODEL` 可显式覆盖 Claude 配置中的模型。配置路径不存在或 JSON 无效时启动失败，实际鉴权在任务运行时由 Claude 验证。服务端提供 API 凭据，调用方提供被测系统的 URL、登录状态/登录指引和测试数据。
 
 ## 外部接口
 
-完整 OpenAPI 3.1 规范：[openapi.json](openapi.json)。服务启动后也提供带鉴权的 `GET /openapi.json`。
+完整 OpenAPI 3.1 规范：[openapi.json](openapi.json)。服务启动后也提供 `GET /openapi.json`。
 
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
@@ -30,7 +30,7 @@ node server/planner/main.mjs
 | DELETE | `/v1/planner/jobs/{jobId}` | 取消任务，不删除已有结果 |
 | GET | `/healthz`、`/readyz` | 无鉴权健康检查 |
 
-调用方通过 `Authorization: Bearer <PLANNER_API_TOKEN>` 鉴权；非 loopback 监听必须设置 Token。由业务后端转发给前端抽屉，不在浏览器保存服务 Token。
+所有接口直接调用，无需 Token。已开放 CORS，浏览器可直接跨端口提交任务、查询结果，并使用原生 EventSource 订阅进度。CaseHub 也可通过自己的代理调用；只需要服务 URL。
 
 请求示例（保存为调用方的 `request.json`，服务不会读取该文件）：
 
@@ -57,14 +57,11 @@ node server/planner/main.mjs
 
 ```sh
 curl -X POST http://localhost:4501/v1/planner/jobs \
-  -H "Authorization: Bearer $PLANNER_API_TOKEN" \
   -H 'Content-Type: application/json' --data-binary @request.json
 
-curl -N http://localhost:4501/v1/planner/jobs/JOB_ID/events \
-  -H "Authorization: Bearer $PLANNER_API_TOKEN"
+curl -N http://localhost:4501/v1/planner/jobs/JOB_ID/events
 
-curl http://localhost:4501/v1/planner/jobs/JOB_ID/result \
-  -H "Authorization: Bearer $PLANNER_API_TOKEN"
+curl http://localhost:4501/v1/planner/jobs/JOB_ID/result
 ```
 
 `target.storageState` 可以直接传 Playwright 导出的 cookies/origins 对象（不接受本地文件路径），`target.extraHTTPHeaders` 可以携带目标系统的请求头。登录仍需交互时，将指引与专用测试账号放入 context。当前不接收自定义 seed 源码、本地附件路径或自定义 MCP 命令；需要上传附件的场景会注明缺少输入。
@@ -88,11 +85,11 @@ curl http://localhost:4501/v1/planner/jobs/JOB_ID/result \
 
 ## 进度和任务生命周期
 
-状态为 queued → running → succeeded / failed / cancelled。阶段和工具开始/完成事件来自运行过程，不使用虚构百分比。SSE 首先发送 snapshot，然后回放游标之后的 progress；使用 `Last-Event-ID` 或 `?after=N` 重连。最多保留最近 500 条，较旧记录丢失时先发送 reset。snapshot 表示当前任务状态，回放的旧 progress 用于过程记录，不应覆盖较新的状态。每 15 秒有心跳；终态关闭连接。抽屉关闭不影响任务，重新打开按 ID 查看即可。服务 Token 不支持 URL 查询参数。
+状态为 queued → running → succeeded / failed / cancelled。阶段和工具开始/完成事件来自运行过程，不使用虚构百分比。SSE 首先发送 snapshot，然后回放游标之后的 progress；使用 `Last-Event-ID` 或 `?after=N` 重连。最多保留最近 500 条，较旧记录丢失时先发送 reset。snapshot 表示当前任务状态，回放的旧 progress 用于过程记录，不应覆盖较新的状态。每 15 秒有心跳；终态关闭连接。抽屉关闭不影响任务，重新打开按 ID 查看即可。
 
 取消后阶段先变为 cancelling，等待 Agent/MCP/浏览器进程终止再进入 cancelled。整任务默认 15 分钟超时。重启后未完成任务标记 SERVER_RESTARTED，由调用方重新提交。当前没有幂等提交或自动续跑；重复 POST 会创建新任务。
 
-任务文件保存状态、进度和结果，不保存请求正文、storageState、headers 或队列输入。浏览器配置临时写入每任务独立目录，任务退出后清理，不从仓库 docs/specs 读取。用例/探索笔记仍可能包含业务数据，调用方应传入适合测试环境的数据并按需归档结果。结果默认保留 24 小时；超期在下一次访问/提交/启动时清理，返回 404。最多保留 100 个任务，满时新请求返回 503。
+任务文件保存状态、进度和结果，不保存请求正文、storageState、headers 或队列输入。浏览器配置临时写入每任务独立目录，任务退出后清理，不从仓库 docs/specs 读取。调用方可按需归档结果。结果默认保留 24 小时；超期在下一次访问/提交/启动时清理，返回 404。最多保留 100 个任务，满时新请求返回 503。
 
 ## 配置
 
@@ -100,8 +97,7 @@ curl http://localhost:4501/v1/planner/jobs/JOB_ID/result \
 | --- | --- | --- |
 | ANTHROPIC_API_KEY | 按鉴权方式配置 | 可由 Claude settings 提供，也可使用 Token/helper/其他 provider |
 | PLANNER_CLAUDE_SETTINGS | 源码自动查找 build/planner/setting.json | Claude 配置路径；镜像为 /app/config/claude/settings.json |
-| PLANNER_API_TOKEN | loopback 可省略 | HTTP 服务鉴权 Token；对外监听必须配置 |
-| PLANNER_HOST | 127.0.0.1 | 监听地址；镜像为 0.0.0.0 |
+| PLANNER_HOST | 0.0.0.0 | 监听地址 |
 | PLANNER_PORT | 4501 | 监听端口 |
 | PLANNER_MODEL | 不覆盖已有 Claude 模型配置 | 显式指定时优先；完全未配置模型时回退 haiku |
 | PLANNER_CLAUDE_COMMAND | claude | 受信任的运行时可执行文件，不接受请求指定 |

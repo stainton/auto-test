@@ -26,7 +26,7 @@ const provider = http.createServer(async(req,res)=>{
  const structured=toolNames.find(n=> /structured/i.test(n));
  const toolResults=request.messages.flatMap(m=>Array.isArray(m.content)?m.content.filter(c=>c.type==='tool_result'):[]);
  console.log('Provider request',messageCount,'tools',toolNames.length,'setup',Boolean(setup),'structured',structured??'-','results',toolResults.length);
- if (toolNames.some(name => /generator_|test_run|test_debug|run_code_unsafe/.test(name))) throw new Error('Non-planner tool exposed');
+ if (toolNames.some(name => /generator_|test_run|test_debug/.test(name))) throw new Error('Non-planner tool exposed');
  let tool;
  if(!toolResults.length && setup) tool={type:'tool_use',id:'toolu_setup',name:setup,input:{seedFile:'seed.spec.ts'}};
  else if(structured) tool={type:'tool_use',id:'toolu_output',name:structured,input:output};

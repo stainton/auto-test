@@ -2,28 +2,15 @@ import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import { fileURLToPath } from 'node:url';
 import { runClaude } from '../runtime/claude.mjs';
 import { OUTPUT_SCHEMA, formatResult } from './contract.mjs';
 import { SYSTEM_PROMPT, buildPrompt } from './prompt.mjs';
 
 const require = createRequire(import.meta.url);
-export const TOOL_NAMES = ['planner_setup_page', 'browser_click', 'browser_close', 'browser_console_messages',
-  'browser_drag', 'browser_evaluate', 'browser_handle_dialog', 'browser_hover', 'browser_navigate',
-  'browser_navigate_back', 'browser_network_requests', 'browser_press_key', 'browser_select_option',
-  'browser_snapshot', 'browser_take_screenshot', 'browser_type', 'browser_wait_for'];
+// Keep generator/test execution out of the planner workflow using native CLI configuration.
+export const EXCLUDED_TOOLS = ['generator_setup_page', 'generator_read_log', 'generator_write_test',
+  'test_list', 'test_run', 'test_debug', 'planner_save_plan', 'planner_submit_plan'];
 const STAGES = new Set(['reading_requirements', 'preparing', 'exploring', 'designing', 'finalizing']);
-
-function redactProgress(message, input) {
-  const values = [];
-  function collect(value) {
-    if (typeof value === 'string' && value.length >= 3) values.push(value);
-    else if (value && typeof value === 'object') Object.values(value).forEach(collect);
-  }
-  collect(input.target.storageState); collect(input.target.extraHTTPHeaders); collect(input.context?.testData);
-  for (const value of values.sort((a, b) => b.length - a.length)) message = message.split(value).join('[redacted]');
-  return message.slice(0, 1000);
-}
 
 export function createPlannerWorker({ runtime = runClaude, command, model, settingsPath, playwrightPackage,
   temporaryRoot = tmpdir() } = {}) {
@@ -46,12 +33,12 @@ export function createPlannerWorker({ runtime = runClaude, command, model, setti
       await writeFile(path.join(workspace, 'seed.spec.ts'),
         `const { test } = require(${JSON.stringify(testEntry)});\ntest('planner seed', async ({ page }) => { await page.goto(${JSON.stringify(input.target.baseUrl)}, { waitUntil: 'domcontentloaded', timeout: 30000 }); });\n`, { mode: 0o600 });
       const mcpConfig = { mcpServers: { 'playwright-test': { type: 'stdio', command: process.execPath,
-        args: [fileURLToPath(new URL('../runtime/mcp-filter.mjs', import.meta.url)), JSON.stringify(TOOL_NAMES),
-          process.execPath, cli, 'run-test-mcp-server', '--headless', '--config', configPath] } } };
+        args: [cli, 'run-test-mcp-server', '--headless', '--config', configPath] } } };
       const calls = new Map();
       let setupSucceeded = false;
       const output = await runtime({ cwd: workspace, prompt: buildPrompt(input), systemPrompt: SYSTEM_PROMPT,
-        schema: OUTPUT_SCHEMA, mcpConfig, allowedTools: TOOL_NAMES.map(t => `mcp__playwright-test__${t}`),
+        schema: OUTPUT_SCHEMA, mcpConfig, allowedTools: ['mcp__playwright-test__*'],
+        disallowedTools: EXCLUDED_TOOLS.map(t => `mcp__playwright-test__${t}`),
         signal, command, model, settingsPath,
         onMessage(message) {
           if (message.type === 'system' && message.subtype === 'init') {
@@ -63,7 +50,6 @@ export function createPlannerWorker({ runtime = runClaude, command, model, setti
           for (const block of blocks) {
             if (message.type === 'assistant' && block.type === 'tool_use' && block.name.startsWith('mcp__playwright-test__')) {
               const tool = block.name.replace('mcp__playwright-test__', '');
-              if (!TOOL_NAMES.includes(tool)) throw new Error('Unexpected planner tool');
               calls.set(block.id, tool);
               emit({ stage: tool === 'planner_setup_page' ? 'preparing' : 'exploring', message: `Running ${tool}`, tool, toolStatus: 'started' });
             }
@@ -80,7 +66,7 @@ export function createPlannerWorker({ runtime = runClaude, command, model, setti
                 let progress;
                 try { progress = JSON.parse(line.slice('PLANNER_PROGRESS '.length)); } catch { continue; }
                 if (STAGES.has(progress.stage) && typeof progress.message === 'string')
-                  emit({ stage: progress.stage, message: redactProgress(progress.message, input) });
+                  emit({ stage: progress.stage, message: progress.message });
               }
             }
           }

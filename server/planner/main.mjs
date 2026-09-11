@@ -16,10 +16,7 @@ function positive(name, fallback) {
   return n;
 }
 export async function main() {
-  const host = process.env.PLANNER_HOST ?? '127.0.0.1';
-  const token = process.env.PLANNER_API_TOKEN;
-  if (!['127.0.0.1', '::1', 'localhost'].includes(host) && !token)
-    throw new Error('PLANNER_API_TOKEN is required when listening beyond loopback');
+  const host = process.env.PLANNER_HOST ?? '0.0.0.0';
   const claudeOptions = await resolveClaudeOptions({
     defaultSettingsPath: fileURLToPath(new URL('../../build/planner/setting.json', import.meta.url))
   });
@@ -36,7 +33,7 @@ export async function main() {
     concurrency: positive('PLANNER_CONCURRENCY', 1), timeoutMs: positive('PLANNER_TIMEOUT_MS', 900000),
     maxJobs: positive('PLANNER_MAX_JOBS', 100), retentionMs: positive('PLANNER_RETENTION_MS', 86400000)
   });
-  const server = createHttpServer({ jobs, validateInput, token,
+  const server = createHttpServer({ jobs, validateInput,
     openapiPath: fileURLToPath(new URL('./openapi.json', import.meta.url)) });
   server.listen(positive('PLANNER_PORT', 4501), host, () => console.log(`Planner HTTP service listening on ${host}:${server.address().port}`));
   let stopping = false;

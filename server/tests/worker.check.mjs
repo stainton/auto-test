@@ -17,15 +17,17 @@ function browserSetup(options) {
   options.onMessage({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'setup-1', content: 'Ready' }] } });
 }
 
-test('uses caller input, isolated config, safe tools, progress and strict structured output', async t => {
+test('uses caller input, isolated config, direct MCP tools, progress and strict structured output', async t => {
   const events = [];
   const { worker, temporaryRoot } = await setup(t, async options => {
     const prompt = JSON.parse(options.prompt);
     assert.deepEqual(prompt.requirements, input.requirements);
     assert.equal(prompt.context.explorationNotes, input.context.explorationNotes);
     assert.equal(prompt.target.storageState, undefined);
-    assert.ok(options.allowedTools.includes('mcp__playwright-test__planner_setup_page'));
-    assert.ok(options.allowedTools.every(name => !/generator|healer|save_plan|unsafe/.test(name)));
+    assert.deepEqual(options.allowedTools, ['mcp__playwright-test__*']);
+    assert.ok(options.disallowedTools.includes('mcp__playwright-test__generator_write_test'));
+    assert.ok(options.mcpConfig.mcpServers['playwright-test'].args.includes('run-test-mcp-server'));
+    assert.ok(!options.mcpConfig.mcpServers['playwright-test'].args.some(arg => arg.includes('mcp-filter')));
     const config = await readFile(path.join(options.cwd, 'playwright.config.cjs'), 'utf8');
     assert.match(config, /example.test\/login/);
     assert.match(config, /"headless":true/);
@@ -37,7 +39,7 @@ test('uses caller input, isolated config, safe tools, progress and strict struct
   const result = await worker(input, { signal: new AbortController().signal, emit: event => events.push(event) });
   assert.equal(result.cases[0].request, 'REQ-001');
   assert.ok(events.some(e => e.toolStatus === 'completed'));
-  assert.ok(events.some(e => e.message === '[redacted]'));
+  assert.ok(events.some(e => e.message === 'super-secret-password'));
   assert.deepEqual(await readdir(temporaryRoot), []);
 });
 

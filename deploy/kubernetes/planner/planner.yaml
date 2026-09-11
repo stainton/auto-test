@@ -26,13 +26,6 @@ spec:
         app: auto-test-planner
     spec:
       terminationGracePeriodSeconds: 30
-      securityContext:
-        runAsNonRoot: true
-        runAsUser: 1000
-        runAsGroup: 1000
-        fsGroup: 1000
-        seccompProfile:
-          type: RuntimeDefault
       containers:
         - name: planner
           image: auto-test-planner:local
@@ -41,17 +34,6 @@ spec:
             - name: http
               containerPort: 4501
           env:
-            - name: ANTHROPIC_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: planner-secrets
-                  key: anthropic-api-key
-                  optional: true
-            - name: PLANNER_API_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: planner-secrets
-                  key: api-token
             - name: PLANNER_CONCURRENCY
               value: '1'
             - name: PLANNER_TIMEOUT_MS
@@ -85,25 +67,15 @@ spec:
               cpu: '2'
               memory: 3Gi
               ephemeral-storage: 4Gi
-          securityContext:
-            allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true
-            capabilities:
-              drop: [ALL]
           volumeMounts:
             - name: data
               mountPath: /var/lib/planner
-            - name: temporary
-              mountPath: /tmp
             - name: shared-memory
               mountPath: /dev/shm
       volumes:
         - name: data
           persistentVolumeClaim:
             claimName: planner-data
-        - name: temporary
-          emptyDir:
-            sizeLimit: 2Gi
         - name: shared-memory
           emptyDir:
             medium: Memory

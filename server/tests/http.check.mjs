@@ -12,7 +12,7 @@ import { input, output, eventually } from './fixtures.mjs';
 async function setup(t, worker, options = {}) {
   const dataDir = await mkdtemp(path.join(tmpdir(), 'planner-http-test-'));
   const jobs = new Jobs({ dataDir, worker, maxEvents: 3 });
-  const server = createHttpServer({ jobs, validateInput, token: 'test-token',
+  const server = createHttpServer({ jobs, validateInput,
     openapiPath: fileURLToPath(new URL('../planner/openapi.json', import.meta.url)), ...options });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(async () => {
@@ -21,21 +21,25 @@ async function setup(t, worker, options = {}) {
     await rm(dataDir, { recursive: true, force: true });
   });
   const request = (url, init = {}) => fetch(`http://127.0.0.1:${server.address().port}${url}`, {
-    ...init, headers: { Authorization: 'Bearer test-token', ...init.headers }
+    ...init
   });
   const submit = payload => request('/v1/planner/jobs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
   return { jobs, server, request, submit };
 }
 
-test('HTTP auth, validation, async result and terminal SSE replay follow documented contract', async t => {
+test('HTTP validation, async result and terminal SSE replay follow documented contract', async t => {
   const { request, submit, jobs } = await setup(t, async (_input, { emit }) => {
     for (let i = 0; i < 8; i++) emit({ stage: 'exploring', message: `Observed action ${i}` });
     return formatResult(output, input);
   });
-  assert.equal((await request('/healthz', { headers: { Authorization: '' } })).status, 200);
-  assert.equal((await request('/openapi.json', { headers: { Authorization: '' } })).status, 401);
+  assert.equal((await request('/healthz')).status, 200);
+  const preflight = await request('/v1/planner/jobs', { method: 'OPTIONS', headers: { Origin: 'http://localhost:8080', 'Access-Control-Request-Method': 'POST', 'Access-Control-Request-Headers': 'content-type' } });
+  assert.equal(preflight.status, 204);
+  assert.equal(preflight.headers.get('access-control-allow-origin'), '*');
   const spec = await (await request('/openapi.json')).json();
   assert.equal(spec.openapi, '3.1.0');
+  assert.deepEqual(spec.security, []);
+  assert.equal(spec.components.securitySchemes, undefined);
   assert.equal((await submit({ ...input, target: { baseUrl: 'file:///tmp/a' } })).status, 400);
   assert.equal((await request('/v1/planner/jobs', { method: 'POST', body: '{}' })).status, 415);
   const response = await submit(input); assert.equal(response.status, 202);

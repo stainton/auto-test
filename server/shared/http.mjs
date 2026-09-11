@@ -1,5 +1,4 @@
 import http from 'node:http';
-import { timingSafeEqual } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { ServiceError, TERMINAL } from './jobs.mjs';
 
@@ -19,25 +18,19 @@ async function body(req, maxBytes) {
   try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); }
   catch { throw new ServiceError(400, 'INVALID_JSON', 'Request body must contain valid JSON'); }
 }
-function authorized(req, token) {
-  if (!token) return true;
-  const supplied = Buffer.from(req.headers.authorization ?? '');
-  const expected = Buffer.from(`Bearer ${token}`);
-  return supplied.length === expected.length && timingSafeEqual(supplied, expected);
-}
-
-export function createHttpServer({ jobs, validateInput, token, openapiPath, maxBodyBytes = 2 * 1024 * 1024 }) {
+export function createHttpServer({ jobs, validateInput, openapiPath, maxBodyBytes = 2 * 1024 * 1024 }) {
   const spec = readFileSync(openapiPath, 'utf8');
   const streams = new Set();
   const server = http.createServer(async (req, res) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Last-Event-ID');
+    res.setHeader('Access-Control-Expose-Headers', 'Location');
+    if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
     try {
       const url = new URL(req.url, 'http://planner.local');
       if (req.method === 'GET' && url.pathname === '/healthz') return json(res, 200, { status: 'ok' });
       if (req.method === 'GET' && url.pathname === '/readyz') return json(res, jobs.closing ? 503 : 200, { status: jobs.closing ? 'unavailable' : 'ready' });
-      if (!authorized(req, token)) {
-        res.setHeader('WWW-Authenticate', 'Bearer');
-        throw new ServiceError(401, 'UNAUTHORIZED', 'Valid bearer token required');
-      }
       if (req.method === 'GET' && url.pathname === '/openapi.json') {
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' }); return res.end(spec);
       }
@@ -90,7 +83,7 @@ export function createHttpServer({ jobs, validateInput, token, openapiPath, maxB
     } catch (error) {
       if (res.headersSent) return res.destroy();
       json(res, error.status ?? 500, { error: { code: error.code && error.status ? error.code : 'INTERNAL_ERROR',
-        message: error.status ? error.message : 'Internal server error' } });
+        message: error.message || 'Internal server error' } });
     }
   });
   server.requestTimeout = 30000; server.headersTimeout = 15000;

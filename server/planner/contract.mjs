@@ -24,7 +24,7 @@ export function validateInput(input) {
   }
   keys(input.target, ['baseUrl', 'storageState', 'extraHTTPHeaders'], 'target');
   const url = new URL(string(input.target.baseUrl, 'target.baseUrl', 4096));
-  check(['http:', 'https:'].includes(url.protocol) && !url.username && !url.password, 'target.baseUrl must be HTTP(S) without embedded credentials');
+  check(['http:', 'https:'].includes(url.protocol), 'target.baseUrl must be HTTP(S)');
   if (input.target.storageState !== undefined) {
     const state = input.target.storageState;
     keys(state, ['cookies', 'origins'], 'target.storageState');
