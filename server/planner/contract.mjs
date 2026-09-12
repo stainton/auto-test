@@ -52,20 +52,29 @@ export function validateInput(input) {
   return structuredClone(input);
 }
 
+// Steps/expects are arrays here: one entry per step, ordered, expects[i] is the outcome of steps[i].
+// The model is structurally required to produce this shape (Claude Code validates tool-call args against
+// this schema) instead of being asked in prose to hand-format numbered "1. ...\n2. ..." lines, which is
+// exactly the kind of instruction models drift on (e.g. switching to full-width Chinese punctuation).
+// formatResult() below joins the arrays into that numbered-line string, which stays the documented wire
+// format (openapi.json, casehub, test-model.md) — only the model-facing shape changes.
+const STEP_LIST = { type: 'array', minItems: 1, maxItems: 50, items: { type: 'string', minLength: 1 } };
 export const OUTPUT_SCHEMA = {
   type: 'object', additionalProperties: false,
   required: ['cases', 'explorationNotes', 'limitations'],
   properties: {
     cases: { type: 'array', minItems: 1, maxItems: 500, items: {
       type: 'object', additionalProperties: false, required: CASE_FIELDS,
-      properties: Object.fromEntries(CASE_FIELDS.map(field => [field, field === 'priority'
-        ? { type: 'string', enum: ['P0', 'P1', 'P2', 'P3'] }
+      properties: Object.fromEntries(CASE_FIELDS.map(field => [field,
+        field === 'priority' ? { type: 'string', enum: ['P0', 'P1', 'P2', 'P3'] }
+        : field === 'steps' || field === 'expects' ? STEP_LIST
         : { type: 'string', minLength: 1 }]))
     } },
     explorationNotes: { type: 'string' },
     limitations: { type: 'array', items: { type: 'string' } }
   }
 };
+const numberedLines = list => list.map((line, index) => `${index + 1}. ${line}`).join('\n');
 
 const cell = value => value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\|/g, '&#124;').replace(/\r\n|\r|\n/g, '<br>');
 export function formatResult(output, input) {
@@ -75,17 +84,21 @@ export function formatResult(output, input) {
   const ids = new Set(), requirements = new Set(input.requirements.map(r => r.id));
   const cases = output.cases.map(item => {
     keys(item, CASE_FIELDS, 'case');
-    for (const field of CASE_FIELDS) string(item[field], `case.${field}`);
+    for (const field of CASE_FIELDS) {
+      if (field === 'steps' || field === 'expects') {
+        check(Array.isArray(item[field]) && item[field].length >= 1 && item[field].length <= 50 &&
+          item[field].every(line => typeof line === 'string' && line.trim().length > 0),
+          `case.${field} must be a non-empty array of non-empty strings`);
+      } else {
+        string(item[field], `case.${field}`);
+      }
+    }
     check(requirements.has(item.request), 'case.request must reference a supplied requirement');
     check(!ids.has(item.case_id), 'duplicate case_id'); ids.add(item.case_id);
     check(['P0', 'P1', 'P2', 'P3'].includes(item.priority), 'invalid priority');
-    for (const field of ['steps', 'expects']) {
-      check(item[field].split(/\r?\n/).every(line => /^\d+\.\s+\S/.test(line)), `case.${field} must use numbered lines`);
-    }
-    const stepNumbers = item.steps.split(/\r?\n/).map(line => Number(line.match(/^\d+/)[0]));
-    check(stepNumbers.every((n, index) => n === index + 1), 'case.steps must be numbered consecutively from 1');
-    check(item.expects.split(/\r?\n/).every(line => stepNumbers.includes(Number(line.match(/^\d+/)[0]))), 'case.expects must reference an existing step');
-    return Object.fromEntries(CASE_FIELDS.map(field => [field, item[field]]));
+    check(item.expects.length === item.steps.length, 'case.expects must have exactly one entry per step');
+    return Object.fromEntries(CASE_FIELDS.map(field => [field,
+      field === 'steps' || field === 'expects' ? numberedLines(item[field]) : item[field]]));
   });
   check(typeof output.explorationNotes === 'string', 'explorationNotes must be a string');
   check(Array.isArray(output.limitations) && output.limitations.every(v => typeof v === 'string'), 'limitations must be a string array');

@@ -30,7 +30,7 @@ test('returns exact case fields and escaped Markdown in original model order', (
 });
 
 test('rejects untraceable, duplicate and malformed generated cases', () => {
-  for (const patch of [{ request: 'REQ-OTHER' }, { priority: 'P4' }, { steps: 'click login' }, { expects: '1. ' }, { steps: '2. Start' }, { expects: '99. Not a step' }, { name: '' }, { extra: 'field' }]) {
+  for (const patch of [{ request: 'REQ-OTHER' }, { priority: 'P4' }, { steps: [] }, { expects: [''] }, { steps: 'click login' }, { expects: ['显示表单'] }, { name: '' }, { extra: 'field' }]) {
     const custom = structuredClone(output); Object.assign(custom.cases[0], patch);
     assert.throws(() => formatResult(custom, input));
   }
