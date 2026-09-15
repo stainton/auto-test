@@ -28,6 +28,7 @@ node server/planner/main.mjs
 | GET | `/v1/planner/jobs/{jobId}/events` | SSE 进度、重连回放 |
 | GET | `/v1/planner/jobs/{jobId}/result` | 获取已成功完成的草稿 |
 | DELETE | `/v1/planner/jobs/{jobId}` | 取消任务，不删除已有结果 |
+| POST | `/v1/planner/simplify` | 同步接口（非任务队列）：把已设计用例的前置条件/步骤/预期结果改写成非技术人员可读的精简版，不调用浏览器/工具，保留原有步骤数与含义，只去掉选择器、testid、属性值等自动化实现细节 |
 | GET | `/healthz`、`/readyz` | 无鉴权健康检查 |
 
 所有接口直接调用，无需 Token。已开放 CORS，浏览器可直接跨端口提交任务、查询结果，并使用原生 EventSource 订阅进度。CaseHub 也可通过自己的代理调用；只需要服务 URL。
@@ -106,6 +107,7 @@ curl http://localhost:4501/v1/planner/jobs/JOB_ID/result
 | PLANNER_TIMEOUT_MS | 900000 | 单个执行任务的最长时间，不含排队 |
 | PLANNER_MAX_JOBS | 100 | 包括终态任务在内的保留数量上限 |
 | PLANNER_RETENTION_MS | 86400000 | 终态任务保留时间 |
+| PLANNER_SIMPLIFY_TIMEOUT_MS | 60000 | `/v1/planner/simplify` 单次改写的最长等待时间 |
 
 ## 验证
 

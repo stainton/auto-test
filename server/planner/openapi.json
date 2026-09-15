@@ -380,6 +380,84 @@
         }
       }
     },
+    "/v1/planner/simplify": {
+      "post": {
+        "tags": [
+          "Planner"
+        ],
+        "operationId": "simplifyCase",
+        "summary": "Rewrite one designed test case into a plain-language version",
+        "description": "Synchronous, not a job: rewrites a single case's precondition/steps/expected into a short version a non-technical reviewer can skim, stripping automation detail (selectors, testids, raw attribute values) while preserving meaning and step count. No browser, no tools, no job/event lifecycle. Maximum JSON request size: 2 MiB.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SimplifyInput"
+              },
+              "example": {
+                "title": "正确账号密码登录",
+                "preconditions": "用户账号已启用",
+                "steps": "1. 在 input[data-testid=username] 输入账号\n2. 点击 button.submit",
+                "expected": "进入系统首页"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Simplified case",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SimplifyOutput"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed JSON or invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Service built without this feature enabled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Request exceeds 2 MiB",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "The rewrite runtime failed or timed out",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/healthz": {
       "get": {
         "tags": [
@@ -919,6 +997,54 @@
             "minimum": 1
           },
           "message": {
+            "type": "string"
+          }
+        }
+      },
+      "SimplifyInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "steps"
+        ],
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "Case title, for context only",
+            "maxLength": 500
+          },
+          "preconditions": {
+            "type": "string",
+            "maxLength": 20000
+          },
+          "steps": {
+            "type": "string",
+            "description": "Nonempty; normally a numbered list (\"1. ...\\n2. ...\")",
+            "minLength": 1,
+            "maxLength": 20000
+          },
+          "expected": {
+            "type": "string",
+            "maxLength": 20000
+          }
+        }
+      },
+      "SimplifyOutput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "preconditions",
+          "steps",
+          "expected"
+        ],
+        "properties": {
+          "preconditions": {
+            "type": "string"
+          },
+          "steps": {
+            "type": "string"
+          },
+          "expected": {
             "type": "string"
           }
         }

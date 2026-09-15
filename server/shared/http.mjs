@@ -18,7 +18,8 @@ async function body(req, maxBytes) {
   try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); }
   catch { throw new ServiceError(400, 'INVALID_JSON', 'Request body must contain valid JSON'); }
 }
-export function createHttpServer({ jobs, validateInput, openapiPath, maxBodyBytes = 2 * 1024 * 1024 }) {
+export function createHttpServer({ jobs, validateInput, openapiPath, maxBodyBytes = 2 * 1024 * 1024,
+  validateSimplifyInput, simplify, simplifyTimeoutMs = 60000 }) {
   const spec = readFileSync(openapiPath, 'utf8');
   const streams = new Set();
   const server = http.createServer(async (req, res) => {
@@ -42,6 +43,19 @@ export function createHttpServer({ jobs, validateInput, openapiPath, maxBodyByte
         const job = jobs.submit(input);
         res.setHeader('Location', `/v1/planner/jobs/${job.id}`);
         return json(res, 202, job);
+      }
+      if (req.method === 'POST' && url.pathname === '/v1/planner/simplify' && simplify && validateSimplifyInput) {
+        const payload = await body(req, maxBodyBytes);
+        let input;
+        try { input = validateSimplifyInput(payload); }
+        catch (error) { throw new ServiceError(400, 'INVALID_REQUEST', error.message); }
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(new Error('Simplify request timed out')), simplifyTimeoutMs);
+        let output;
+        try { output = await simplify(input, controller.signal); }
+        catch (error) { throw new ServiceError(502, 'SIMPLIFY_FAILED', error.message || 'Simplify failed'); }
+        finally { clearTimeout(timer); }
+        return json(res, 200, output);
       }
       const match = /^\/v1\/planner\/jobs\/([0-9a-f-]{36})(?:\/(result|events))?$/.exec(url.pathname);
       if (!match) throw new ServiceError(404, 'NOT_FOUND', 'Route not found');
