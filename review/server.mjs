@@ -36,6 +36,32 @@ const rel = (abs) => path.relative(ROOT, abs).split(path.sep).join('/');
 const slugify = (s) =>
   String(s).trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
 
+// --- Requirement cross-linking ("关联需求") -------------------------------
+// A requirement doc may carry a `## 关联需求` section listing markdown links to
+// other docs/*.md files. The review app's picker reads/writes this section;
+// the planner agent follows it to pull in related requirements' context.
+const RELATED_HEADING = '## 关联需求';
+
+function extractRelatedSection(content) {
+  const m = content.match(new RegExp(`${RELATED_HEADING}\\s*\\n([\\s\\S]*?)(?=\\n## |$)`));
+  if (!m) return [];
+  const out = [];
+  const linkRe = /^-\s*\[([^\]]*)\]\(([^)]+)\)\s*$/gm;
+  let lm;
+  while ((lm = linkRe.exec(m[1]))) out.push({ title: lm[1], path: `docs/${path.basename(lm[2])}` });
+  return out;
+}
+
+function extractReqMeta(content) {
+  const titleMatch = content.match(/^#\s+(.+)$/m);
+  const idMatch = content.match(/\*\*Requirement id:?\*\*\s*[:：]?\s*(\S+)/);
+  return {
+    title: titleMatch ? titleMatch[1].trim() : '',
+    reqId: idMatch ? idMatch[1].trim() : '',
+    related: extractRelatedSection(content),
+  };
+}
+
 async function listDir(dir) {
   let entries;
   try {
@@ -131,6 +157,19 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === 'GET' && (url.pathname === '/api/tree' || url.pathname === '/api/plans')) {
       return send(res, 200, await listTree());
+    }
+
+    if (req.method === 'GET' && url.pathname === '/api/requirements-index') {
+      const files = await listDir(DOCS);
+      const index = [];
+      for (const f of files) {
+        try {
+          index.push({ path: f, ...extractReqMeta(await readFile(path.join(ROOT, f), 'utf8')) });
+        } catch {
+          // skip unreadable file
+        }
+      }
+      return send(res, 200, index);
     }
 
     if (req.method === 'GET' && url.pathname === '/api/file') {
