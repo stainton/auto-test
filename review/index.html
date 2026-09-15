@@ -195,6 +195,11 @@ function insertRelatedLink(target) {
   toast(`已插入「${label}」的引用，记得保存`);
 }
 
+// Below this many candidates, skip the search box entirely — with only a
+// handful of requirement docs, making the user type first (rather than just
+// clicking one of the docs already visible in the list) is friction, not help.
+const REF_SEARCH_THRESHOLD = 7;
+
 function renderRefList(query) {
   const list = $('refList');
   list.innerHTML = '';
@@ -203,8 +208,12 @@ function renderRefList(query) {
   const matches = !q
     ? others
     : others.filter((r) => `${r.reqId} ${r.title} ${r.path}`.toLowerCase().includes(q));
+  if (!others.length) {
+    list.innerHTML = '<div class="refEmpty">项目里目前没有其他需求文档 —— 先在左侧「＋ 新建需求」创建一份，再来引用。</div>';
+    return;
+  }
   if (!matches.length) {
-    list.innerHTML = `<div class="refEmpty">${others.length ? '没有匹配的需求文档。' : '没有其他需求文档可引用。'}</div>`;
+    list.innerHTML = '<div class="refEmpty">没有匹配的需求文档。</div>';
     return;
   }
   for (const r of matches) {
@@ -230,9 +239,12 @@ function openRefDropdown() {
   dd.style.top = rect.bottom + 6 + 'px';
   dd.style.right = window.innerWidth - rect.right + 'px';
   dd.hidden = false;
+  const showSearch = state.reqIndex.length - 1 > REF_SEARCH_THRESHOLD;
+  $('refFilter').hidden = !showSearch;
   $('refFilter').value = '';
   renderRefList('');
-  $('refFilter').focus();
+  if (showSearch) $('refFilter').focus();
+  else $('refList').querySelector('.refItem, .refEmpty')?.focus();
   document.addEventListener('mousedown', onRefDropdownOutsideClick, true);
 }
 
