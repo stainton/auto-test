@@ -45,8 +45,8 @@ so any rule that must reach them belongs in the agent file, not here.
 - **System under test:** `test-site/` (static TaskLite todo SPA), served by `node test-site/server.mjs` on port 4500. Port 4400 is the review app, not the SUT.
 - **Requirements** the planner reads: `docs/*.md`. Each carries a stable `Requirement id` (e.g. `REQ-TASKLITE-001`).
   A doc can reference other requirement docs via an ordinary markdown link anywhere in its text (the
-  review app's "🔗 引用需求" tool inserts one at the cursor); the planner follows one level of these
-  links, see `docs/README.md`.
+  review app's "🔗 引用需求" tool inserts one at the cursor); the planner reads one level of these links
+  as background context only — it never designs cases for a merely-referenced requirement, see `docs/README.md`.
 - `specs/exploration-notes.md` — shared cumulative record of what the app looks like; planner and generator both read it before exploring and merge findings back.
 - `specs/known-issues.md` — human-maintained (not agent-written) knowledge base of business-specific hints
   and historically encountered bugs. Planner and generator both read it before working and factor it into
