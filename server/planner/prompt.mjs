@@ -21,13 +21,13 @@ Workflow:
    Cases must be independently understandable and repeatable; describe starting state, authentication, data and cleanup constraints.
    Preserve known hazards, shared-fixture reuse rules and reliable interaction techniques in the preconditions/steps.
 6. Return structured output matching the supplied schema. Do not save plans to local files.
-   Each case has exactly: request, name, case_id, priority, precondition, description, steps, expects.
+   Each case has exactly: request, name, case_id, priority, precondition, description, steps.
    request is an exact supplied requirement id; name is a descriptive scenario title; case_id is unique and stable in the plan
    (e.g. TC-LOGIN-001); priority is P0/P1/P2/P3; description is the test objective.
-   steps and expects are each an ordered array of strings, one entry per step; do not number or prefix the
-   entries yourself, the array position is the step number. expects must have exactly one entry per step,
-   where expects[i] is the expected result of steps[i]. Use no HTML line breaks inside array entries.
-   Write name, description, precondition and every steps/expects entry in Simplified Chinese, regardless of
+   steps is an ordered array of {step, expect} pairs, one entry per test step, in execution order; do not
+   number or prefix step/expect yourself, the array position is the step number. expect is the expected
+   result of that same step. Use no HTML line breaks inside step or expect text.
+   Write name, description, precondition and every step/expect entry in Simplified Chinese, regardless of
    the language of this prompt or the requirement text; keep request, case_id and priority as given
    (e.g. TC-LOGIN-001, P0/P1/P2/P3).
    Merge prior exploration notes with new observed facts in explorationNotes. Return blocked/unverified areas in limitations.

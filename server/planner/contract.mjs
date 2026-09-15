@@ -52,22 +52,26 @@ export function validateInput(input) {
   return structuredClone(input);
 }
 
-// Steps/expects are arrays here: one entry per step, ordered, expects[i] is the outcome of steps[i].
-// The model is structurally required to produce this shape (Claude Code validates tool-call args against
-// this schema) instead of being asked in prose to hand-format numbered "1. ...\n2. ..." lines, which is
-// exactly the kind of instruction models drift on (e.g. switching to full-width Chinese punctuation).
-// formatResult() below joins the arrays into that numbered-line string, which stays the documented wire
-// format (openapi.json, casehub, test-model.md) — only the model-facing shape changes.
-const STEP_LIST = { type: 'array', minItems: 1, maxItems: 50, items: { type: 'string', minLength: 1 } };
+// The model produces one array of {step, expect} pairs instead of two parallel arrays: JSON Schema
+// cannot express "these two arrays have equal length", so asking for separate steps/expects arrays
+// (even structurally, as arrays rather than prose) still lets the model emit mismatched counts, which
+// used to fail the whole job post-hoc in formatResult() after a full (expensive) exploration run.
+// Pairing them in one array makes a mismatch structurally impossible. formatResult() below splits the
+// pairs back into the two numbered-line strings that stay the documented wire format (openapi.json,
+// casehub, test-model.md) — only the model-facing shape changes.
+const STEP_LIST = { type: 'array', minItems: 1, maxItems: 50, items: {
+  type: 'object', additionalProperties: false, required: ['step', 'expect'],
+  properties: { step: { type: 'string', minLength: 1 }, expect: { type: 'string', minLength: 1 } } } };
+const MODEL_CASE_FIELDS = CASE_FIELDS.filter(field => field !== 'expects');
 export const OUTPUT_SCHEMA = {
   type: 'object', additionalProperties: false,
   required: ['cases', 'explorationNotes', 'limitations'],
   properties: {
     cases: { type: 'array', minItems: 1, maxItems: 500, items: {
-      type: 'object', additionalProperties: false, required: CASE_FIELDS,
-      properties: Object.fromEntries(CASE_FIELDS.map(field => [field,
+      type: 'object', additionalProperties: false, required: MODEL_CASE_FIELDS,
+      properties: Object.fromEntries(MODEL_CASE_FIELDS.map(field => [field,
         field === 'priority' ? { type: 'string', enum: ['P0', 'P1', 'P2', 'P3'] }
-        : field === 'steps' || field === 'expects' ? STEP_LIST
+        : field === 'steps' ? STEP_LIST
         : { type: 'string', minLength: 1 }]))
     } },
     explorationNotes: { type: 'string' },
@@ -83,12 +87,13 @@ export function formatResult(output, input) {
   check(Array.isArray(output.cases) && output.cases.length > 0 && output.cases.length <= 500, 'planner must return 1–500 cases');
   const ids = new Set(), requirements = new Set(input.requirements.map(r => r.id));
   const cases = output.cases.map(item => {
-    keys(item, CASE_FIELDS, 'case');
-    for (const field of CASE_FIELDS) {
-      if (field === 'steps' || field === 'expects') {
-        check(Array.isArray(item[field]) && item[field].length >= 1 && item[field].length <= 50 &&
-          item[field].every(line => typeof line === 'string' && line.trim().length > 0),
-          `case.${field} must be a non-empty array of non-empty strings`);
+    keys(item, MODEL_CASE_FIELDS, 'case');
+    for (const field of MODEL_CASE_FIELDS) {
+      if (field === 'steps') {
+        check(Array.isArray(item.steps) && item.steps.length >= 1 && item.steps.length <= 50 &&
+          item.steps.every(s => object(s) && typeof s.step === 'string' && s.step.trim().length > 0 &&
+            typeof s.expect === 'string' && s.expect.trim().length > 0),
+          'case.steps must be a non-empty array of {step, expect} entries with non-empty text');
       } else {
         string(item[field], `case.${field}`);
       }
@@ -96,9 +101,10 @@ export function formatResult(output, input) {
     check(requirements.has(item.request), 'case.request must reference a supplied requirement');
     check(!ids.has(item.case_id), 'duplicate case_id'); ids.add(item.case_id);
     check(['P0', 'P1', 'P2', 'P3'].includes(item.priority), 'invalid priority');
-    check(item.expects.length === item.steps.length, 'case.expects must have exactly one entry per step');
     return Object.fromEntries(CASE_FIELDS.map(field => [field,
-      field === 'steps' || field === 'expects' ? numberedLines(item[field]) : item[field]]));
+      field === 'steps' ? numberedLines(item.steps.map(s => s.step))
+      : field === 'expects' ? numberedLines(item.steps.map(s => s.expect))
+      : item[field]]));
   });
   check(typeof output.explorationNotes === 'string', 'explorationNotes must be a string');
   check(Array.isArray(output.limitations) && output.limitations.every(v => typeof v === 'string'), 'limitations must be a string array');
