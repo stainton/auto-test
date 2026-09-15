@@ -24,13 +24,19 @@ export function validateSimplifyInput(input) {
   return { title, preconditions, steps, expected };
 }
 
+// steps is an array of {step, expect} pairs rather than two free-text strings so the 30-character cap
+// (below) is a hard per-item schema constraint the model must satisfy, not a prose limit it can drift
+// past — the same reasoning as contract.mjs's step/expect pairing.
+const STEP_MAX_CHARS = 30;
+const FRIENDLY_STEP = { type: 'object', additionalProperties: false, required: ['step', 'expect'],
+  properties: { step: { type: 'string', minLength: 1, maxLength: STEP_MAX_CHARS },
+    expect: { type: 'string', minLength: 1, maxLength: STEP_MAX_CHARS } } };
 export const SIMPLIFY_OUTPUT_SCHEMA = {
   type: 'object', additionalProperties: false,
-  required: ['preconditions', 'steps', 'expected'],
+  required: ['preconditions', 'steps'],
   properties: {
     preconditions: { type: 'string' },
-    steps: { type: 'string' },
-    expected: { type: 'string' }
+    steps: { type: 'array', minItems: 1, maxItems: 50, items: FRIENDLY_STEP }
   }
 };
 
@@ -48,9 +54,11 @@ Rules:
   value, or an action performed in a different context/session/role. A step that is itself the point of
   the test (the thing being verified) stays as its own line even if mechanically short.
 - Do not preserve the original step count or one-line-per-step structure — write as few steps as make the
-  flow understandable to someone unfamiliar with the UI. Many cases read best as a single sentence; use a
-  short numbered list only when the case genuinely has multiple distinct stages a reviewer must tell apart.
-  Keep expected aligned the same way: one outcome per merged step, or a short sentence overall.
+  flow understandable to someone unfamiliar with the UI. Many cases read best as a single step; use more
+  than one only when the case genuinely has multiple distinct stages a reviewer must tell apart.
+- Each step and its expected result must be at most ${STEP_MAX_CHARS} Chinese characters (punctuation
+  counts) — one short clause each. If an action doesn't fit, cut qualifiers and detail down to the
+  essential clause rather than exceed the limit; never truncate mid-word.
 - Strip implementation detail meant for automation, not humans: CSS/XPath selectors, data-testid/class/id
   references, exact element attribute values, raw URLs/paths, and code-like syntax. Describe the
   user-visible action or outcome instead (e.g. "在用户名输入框中输入账号" instead of
@@ -66,12 +74,21 @@ export function buildSimplifyPrompt(input) {
   return JSON.stringify({ title: input.title, preconditions: input.preconditions, steps: input.steps, expected: input.expected });
 }
 
+// Wire format stays the plain preconditions/steps/expected strings documented in openapi.json
+// (SimplifyOutput) — only the model-facing shape changed, same split as contract.mjs's formatResult().
+const joinFriendly = list => list.length === 1 ? list[0] : list.map((line, index) => `${index + 1}. ${line}`).join('\n');
+
 export function createSimplifier({ runtime = runClaude, command, model, settingsPath } = {}) {
-  return function simplify(input, signal) {
-    return runtime({
+  return async function simplify(input, signal) {
+    const output = await runtime({
       cwd: process.cwd(), prompt: buildSimplifyPrompt(input), systemPrompt: SIMPLIFY_SYSTEM_PROMPT,
       schema: SIMPLIFY_OUTPUT_SCHEMA, mcpConfig: { mcpServers: {} }, allowedTools: [],
       signal, command, model, settingsPath
     });
+    return {
+      preconditions: output.preconditions,
+      steps: joinFriendly(output.steps.map(s => s.step)),
+      expected: joinFriendly(output.steps.map(s => s.expect))
+    };
   };
 }

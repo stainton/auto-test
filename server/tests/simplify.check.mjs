@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { Jobs } from '../shared/jobs.mjs';
 import { createHttpServer } from '../shared/http.mjs';
 import { validateInput } from '../planner/contract.mjs';
-import { validateSimplifyInput, createSimplifier } from '../planner/simplify.mjs';
+import { validateSimplifyInput, createSimplifier, SIMPLIFY_OUTPUT_SCHEMA } from '../planner/simplify.mjs';
 
 const simplifyInput = { title: '正确账号密码登录', preconditions: '用户账号已启用',
   steps: '1. 在 input[data-testid=username] 输入 demo\n2. 点击 button.submit', expected: '进入系统首页' };
@@ -76,16 +76,32 @@ test('route is absent (404) when the server is built without a simplifier', asyn
 test('createSimplifier calls the injected runtime with a tool-free, no-MCP prompt', async t => {
   let captured;
   const simplify = createSimplifier({
-    runtime: async options => { captured = options; return { preconditions: '', steps: '1. 步骤', expected: '结果' }; },
+    runtime: async options => { captured = options; return { preconditions: '', steps: [{ step: '步骤', expect: '结果' }] }; },
     command: 'claude', model: 'haiku', settingsPath: '/tmp/settings.json'
   });
   const controller = new AbortController();
   const result = await simplify(simplifyInput, controller.signal);
-  assert.deepEqual(result, { preconditions: '', steps: '1. 步骤', expected: '结果' });
+  assert.deepEqual(result, { preconditions: '', steps: '步骤', expected: '结果' });
   assert.deepEqual(captured.allowedTools, []);
   assert.deepEqual(captured.mcpConfig, { mcpServers: {} });
   assert.equal(captured.model, 'haiku');
   assert.equal(captured.signal, controller.signal);
   const prompt = JSON.parse(captured.prompt);
   assert.equal(prompt.steps, simplifyInput.steps);
+});
+
+test('createSimplifier numbers multiple friendly steps and joins their expected results', async () => {
+  const simplify = createSimplifier({
+    runtime: async () => ({ preconditions: '账号已启用',
+      steps: [{ step: '输入用户名和密码', expect: '按钮变为可点击' }, { step: '点击登录', expect: '进入系统首页' }] })
+  });
+  const result = await simplify(simplifyInput, new AbortController().signal);
+  assert.deepEqual(result, { preconditions: '账号已启用',
+    steps: '1. 输入用户名和密码\n2. 点击登录', expected: '1. 按钮变为可点击\n2. 进入系统首页' });
+});
+
+test('SIMPLIFY_OUTPUT_SCHEMA caps each friendly step/expect at 30 characters', () => {
+  const item = SIMPLIFY_OUTPUT_SCHEMA.properties.steps.items;
+  assert.equal(item.properties.step.maxLength, 30);
+  assert.equal(item.properties.expect.maxLength, 30);
 });
