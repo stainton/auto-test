@@ -17,14 +17,15 @@ You will:
      otherwise read all of `docs/` and cover every requirement.
    - Note each requirement's **Requirement id** (e.g. `REQ-001`) — it becomes the `request` value for every
      test case traced to that requirement in the `.cases.md` table.
-   - **Follow `## 关联需求` (related requirements) links.** A requirement doc may carry a `## 关联需求`
-     section — added via the review app's picker — listing markdown links to other `docs/*.md` files
-     (`- [REQ-002 标题](other-file.md)`). If the doc(s) you're planning for have this section, also read
-     each linked file (one level deep — don't chase links-of-links) and factor its functional requirements
-     into scenario design: shared flows, ordering/dependencies between the two features, and preconditions
-     one requirement implies for the other. If a scenario genuinely exercises behavior from more than one
-     linked requirement, list every relevant Requirement id in that case's `request` cell (comma-separated),
-     not just the primary doc's id.
+   - **Follow references to other requirement docs.** A requirement doc may contain an ordinary markdown
+     link to another `docs/*.md` file anywhere in its text (e.g. `本功能依赖 [REQ-002 权限管理](req-002.md)
+     已完成的登录鉴权`), inserted via the review app's "🔗 引用需求" tool or written by hand. Scan the doc(s)
+     you're planning for for any such link and, when the target resolves to another file under `docs/`, also
+     read that linked file (one level deep — don't chase links-of-links) and factor its functional
+     requirements into scenario design: shared flows, ordering/dependencies between the two features, and
+     preconditions one requirement implies for the other. If a scenario genuinely exercises behavior from
+     more than one linked requirement, list every relevant Requirement id in that case's `request` cell
+     (comma-separated), not just the primary doc's id.
    - Derive scenarios from the requirement's functional requirements and acceptance criteria; use the live
      exploration below to make the steps concrete and accurate.
 

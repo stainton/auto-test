@@ -37,18 +37,24 @@ const slugify = (s) =>
   String(s).trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
 
 // --- Requirement cross-linking ("关联需求") -------------------------------
-// A requirement doc may carry a `## 关联需求` section listing markdown links to
-// other docs/*.md files. The review app's picker reads/writes this section;
-// the planner agent follows it to pull in related requirements' context.
-const RELATED_HEADING = '## 关联需求';
-
-function extractRelatedSection(content) {
-  const m = content.match(new RegExp(`${RELATED_HEADING}\\s*\\n([\\s\\S]*?)(?=\\n## |$)`));
-  if (!m) return [];
+// A requirement doc references another by containing an ordinary markdown
+// link to it (e.g. `[REQ-002 权限管理](req-002-permission.md)`), inserted
+// anywhere in the text via the review app's "引用需求" tool, or by hand. Any
+// link whose target resolves to another file in docs/ counts as a reference
+// — the planner agent follows these to pull in related requirements' context.
+function extractRelatedLinks(content, selfPath, docPathSet) {
   const out = [];
-  const linkRe = /^-\s*\[([^\]]*)\]\(([^)]+)\)\s*$/gm;
-  let lm;
-  while ((lm = linkRe.exec(m[1]))) out.push({ title: lm[1], path: `docs/${path.basename(lm[2])}` });
+  const seen = new Set();
+  const linkRe = /\[([^\]]*)\]\(([^)\s]+)\)/g;
+  let m;
+  while ((m = linkRe.exec(content))) {
+    const href = m[2];
+    if (!/\.md(?:[?#].*)?$/.test(href) || /^[a-z]+:\/\//i.test(href)) continue;
+    const target = `docs/${path.basename(href).replace(/[?#].*$/, '')}`;
+    if (target === selfPath || seen.has(target) || !docPathSet.has(target)) continue;
+    seen.add(target);
+    out.push({ title: m[1], path: target });
+  }
   return out;
 }
 
@@ -58,7 +64,6 @@ function extractReqMeta(content) {
   return {
     title: titleMatch ? titleMatch[1].trim() : '',
     reqId: idMatch ? idMatch[1].trim() : '',
-    related: extractRelatedSection(content),
   };
 }
 
@@ -161,10 +166,12 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === 'GET' && url.pathname === '/api/requirements-index') {
       const files = await listDir(DOCS);
+      const fileSet = new Set(files);
       const index = [];
       for (const f of files) {
         try {
-          index.push({ path: f, ...extractReqMeta(await readFile(path.join(ROOT, f), 'utf8')) });
+          const content = await readFile(path.join(ROOT, f), 'utf8');
+          index.push({ path: f, ...extractReqMeta(content), related: extractRelatedLinks(content, f, fileSet) });
         } catch {
           // skip unreadable file
         }

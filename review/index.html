@@ -45,16 +45,23 @@
   .file .relTag { font-size: 10px; color: var(--accent); cursor: help; }
   .empty { padding: 6px 10px; font-size: 12px; color: var(--muted); font-style: italic; }
 
-  #relatedPanel { padding: 10px 24px; background: var(--panel); border-bottom: 1px solid var(--border); }
-  #relatedPanel > summary { cursor: pointer; font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; list-style: none; display: flex; align-items: center; gap: 6px; }
-  #relatedPanel > summary::-webkit-details-marker { display: none; }
-  #relatedPanel > summary::before { content: '▸'; font-size: 11px; transition: transform .12s; }
-  #relatedPanel[open] > summary::before { transform: rotate(90deg); }
-  #relatedList { margin-top: 9px; max-height: 150px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; padding-right: 4px; }
-  #relatedList label { display: flex; align-items: center; gap: 7px; font-size: 13px; padding: 3px 4px; border-radius: 6px; cursor: pointer; }
-  #relatedList label:hover { background: #f2f4f7; }
-  #relatedList .reqId { color: var(--accent); font-weight: 600; font-size: 11px; }
-  #relatedList .none { font-size: 12px; color: var(--muted); font-style: italic; padding: 3px 4px; }
+  .paneHeaderRight { display: flex; align-items: center; gap: 10px; }
+  #btnInsertRef { min-height: 26px; padding: 3px 10px; font-size: 12px; font-weight: 600; text-transform: none; letter-spacing: 0; color: var(--accent); border-color: #cfd3ff; background: var(--accent-soft); }
+  #btnInsertRef:hover:not(:disabled) { background: #e0e4ff; }
+
+  #refDropdown {
+    position: fixed; z-index: 50; width: 300px; max-height: 340px; display: flex; flex-direction: column;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow); overflow: hidden;
+  }
+  #refDropdown input {
+    margin: 8px; padding: 7px 10px; border: 1px solid var(--border); border-radius: 7px; font: inherit; font-size: 13px;
+  }
+  #refDropdown input:focus-visible { outline: 3px solid rgba(79,70,229,.22); outline-offset: 1px; }
+  #refList { overflow-y: auto; padding: 0 6px 8px; }
+  .refItem { padding: 7px 9px; border-radius: 7px; cursor: pointer; font-size: 13px; line-height: 1.4; }
+  .refItem:hover, .refItem:focus-visible { background: var(--accent-soft); outline: none; }
+  .refItem .reqId { display: block; color: var(--accent); font-weight: 700; font-size: 11px; }
+  .refEmpty { padding: 10px 12px; font-size: 12px; color: var(--muted); font-style: italic; }
 
   #main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
   #toolbar {
@@ -110,7 +117,7 @@
     #sidebar header { padding: 14px; } #sidebar header h1 { font-size: 18px; } #sidebar header > p:not(.eyebrow) { display: none; }
     #list { display: flex; overflow-x: auto; padding: 5px; } .group { min-width: 180px; padding: 4px; }
     #main { min-height: 58vh; } #toolbar { min-height: 58px; padding: 9px 12px; } #toolbar .path { flex: 1 1 100%; }
-    #relatedPanel { padding: 8px 12px; }
+    #refDropdown { width: calc(100vw - 24px); left: 12px !important; right: 12px !important; }
     #viewSwitch { display: flex; gap: 6px; padding: 8px 12px; border-bottom: 1px solid var(--border); background: var(--panel); }
     #viewSwitch button { flex: 1; } #viewSwitch button.selected { color: #1d4ed8; background: #eff6ff; border-color: #bfdbfe; }
     #panes { gap: 0; } #panes.previewing .editorPane { display: none; } #panes.previewing .previewPane { display: flex; }
@@ -140,17 +147,21 @@
     <button id="btnApprove" class="approve" disabled hidden>批准并交给生成器</button>
     <button id="btnUnapprove" disabled hidden>退回待评审</button>
   </div>
-  <details id="relatedPanel" hidden>
-    <summary>关联需求 <span id="relatedCount" class="count" style="display:inline-block;font-size:10px;"></span></summary>
-    <div id="relatedList"></div>
-  </details>
   <div id="viewSwitch"><button data-view="edit" class="selected">编辑</button><button data-view="preview">预览</button></div>
   <div id="panes" hidden>
-    <div class="pane editorPane"><div class="paneHeader">Markdown 编辑<span>支持 Ctrl / ⌘ + S 保存</span></div><textarea id="editor" aria-label="Markdown 编辑器" spellcheck="false" placeholder="在这里编辑 Markdown 内容…"></textarea></div>
+    <div class="pane editorPane">
+      <div class="paneHeader">Markdown 编辑<span class="paneHeaderRight"><button id="btnInsertRef" type="button" hidden>🔗 引用需求</button><span>支持 Ctrl / ⌘ + S 保存</span></span></div>
+      <textarea id="editor" aria-label="Markdown 编辑器" spellcheck="false" placeholder="在这里编辑 Markdown 内容…"></textarea>
+    </div>
     <div id="paneResizer" class="resizer" role="separator" aria-label="调整编辑和预览区域宽度" aria-orientation="vertical" tabindex="0" title="拖动调整宽度，双击恢复默认"></div>
     <div class="pane previewPane"><div class="paneHeader">实时预览<span>内容会随编辑同步</span></div><div id="preview"></div></div>
   </div>
 </section>
+
+<div id="refDropdown" hidden>
+  <input id="refFilter" type="text" placeholder="搜索需求 id / 标题…" aria-label="搜索需求文档" />
+  <div id="refList"></div>
+</div>
 
 <div id="toast" role="status" aria-live="polite"></div>
 
@@ -160,31 +171,74 @@ marked.setOptions({ gfm: true, breaks: false });
 const state = { path: null, saved: '', area: null, busy: false, reqIndex: [] }; // area: 'requirement' | 'draft' | 'approved'
 const $ = (id) => document.getElementById(id);
 
-// --- Requirement cross-linking ("关联需求") -------------------------------
-// Mirrors review/server.mjs's extractRelatedSection/RELATED_HEADING so the
-// picker below can read/write the same markdown section the planner reads.
-const RELATED_HEADING = '## 关联需求';
-
-function parseRelated(content) {
-  const m = content.match(new RegExp(`${RELATED_HEADING}\\s*\\n([\\s\\S]*?)(?=\\n## |$)`));
-  if (!m) return [];
-  const out = [];
-  const linkRe = /^-\s*\[([^\]]*)\]\(([^)]+)\)\s*$/gm;
-  let lm;
-  while ((lm = linkRe.exec(m[1]))) out.push({ title: lm[1], path: 'docs/' + lm[2].split('/').pop() });
-  return out;
+// --- Requirement cross-linking ("引用需求") --------------------------------
+// Clicking "🔗 引用需求" opens a searchable dropdown of the other requirement
+// docs; picking one inserts an ordinary markdown link at the cursor. Any
+// markdown link whose target resolves to another docs/*.md file counts as a
+// reference — review/server.mjs's /api/requirements-index scans for these
+// anywhere in the file, matching what the planner agent follows.
+function refLabel(meta) {
+  return [meta.reqId, meta.title].filter(Boolean).join(' ') || meta.path.replace(/^docs\//, '');
 }
 
-function setRelated(content, links) {
-  const block = links.length
-    ? `${RELATED_HEADING}\n${links.map((l) => `- [${l.title}](${l.path.split('/').pop()})`).join('\n')}\n`
-    : '';
-  const re = new RegExp(`${RELATED_HEADING}\\s*\\n[\\s\\S]*?(?=\\n## |$)\\n?`);
-  if (re.test(content)) return block ? content.replace(re, block + '\n') : content.replace(re, '');
-  if (!block) return content;
-  const idx = content.search(/\n## /);
-  if (idx === -1) return content.replace(/\n*$/, '\n\n' + block);
-  return content.slice(0, idx + 1) + block + '\n' + content.slice(idx + 1);
+function insertRelatedLink(target) {
+  const editor = $('editor');
+  const label = refLabel(target);
+  const linkText = `[${label}](${target.path.split('/').pop()})`;
+  const start = editor.selectionStart ?? editor.value.length;
+  const end = editor.selectionEnd ?? start;
+  editor.value = editor.value.slice(0, start) + linkText + editor.value.slice(end);
+  const newPos = start + linkText.length;
+  renderPreview(); syncButtons();
+  editor.focus();
+  editor.setSelectionRange(newPos, newPos);
+  toast(`已插入「${label}」的引用，记得保存`);
+}
+
+function renderRefList(query) {
+  const list = $('refList');
+  list.innerHTML = '';
+  const q = query.trim().toLowerCase();
+  const others = state.reqIndex.filter((r) => r.path !== state.path);
+  const matches = !q
+    ? others
+    : others.filter((r) => `${r.reqId} ${r.title} ${r.path}`.toLowerCase().includes(q));
+  if (!matches.length) {
+    list.innerHTML = `<div class="refEmpty">${others.length ? '没有匹配的需求文档。' : '没有其他需求文档可引用。'}</div>`;
+    return;
+  }
+  for (const r of matches) {
+    const el = document.createElement('div');
+    el.className = 'refItem';
+    el.tabIndex = 0;
+    el.innerHTML = `<span class="reqId">${r.reqId || ''}</span>${r.title || r.path.replace(/^docs\//, '')}`;
+    const pick = () => { insertRelatedLink(r); closeRefDropdown(); };
+    el.onclick = pick;
+    el.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); } };
+    list.append(el);
+  }
+}
+
+function onRefDropdownOutsideClick(e) {
+  if (!$('refDropdown').contains(e.target) && e.target !== $('btnInsertRef')) closeRefDropdown();
+}
+
+function openRefDropdown() {
+  const btn = $('btnInsertRef');
+  const dd = $('refDropdown');
+  const rect = btn.getBoundingClientRect();
+  dd.style.top = rect.bottom + 6 + 'px';
+  dd.style.right = window.innerWidth - rect.right + 'px';
+  dd.hidden = false;
+  $('refFilter').value = '';
+  renderRefList('');
+  $('refFilter').focus();
+  document.addEventListener('mousedown', onRefDropdownOutsideClick, true);
+}
+
+function closeRefDropdown() {
+  $('refDropdown').hidden = true;
+  document.removeEventListener('mousedown', onRefDropdownOutsideClick, true);
 }
 
 function docLabel(meta, fallbackPath) {
@@ -252,42 +306,6 @@ function relationsFor(f) {
   return { out, inn };
 }
 
-function renderRelatedPanel() {
-  const panel = $('relatedPanel');
-  if (state.area !== 'requirement') { panel.hidden = true; return; }
-  panel.hidden = false;
-  const others = state.reqIndex.filter((r) => r.path !== state.path);
-  const selected = new Set(parseRelated($('editor').value).map((r) => r.path));
-  $('relatedCount').textContent = selected.size ? String(selected.size) : '';
-  const list = $('relatedList');
-  list.innerHTML = '';
-  if (!others.length) {
-    list.innerHTML = '<div class="none">没有其他需求文档可关联。</div>';
-    return;
-  }
-  for (const r of others) {
-    const label = document.createElement('label');
-    const cb = document.createElement('input');
-    cb.type = 'checkbox';
-    cb.checked = selected.has(r.path);
-    cb.onchange = () => toggleRelated(r, cb.checked);
-    const span = document.createElement('span');
-    span.innerHTML = `<span class="reqId">${r.reqId || ''}</span> ${r.title || r.path.replace(/^docs\//, '')}`;
-    label.append(cb, span);
-    list.append(label);
-  }
-}
-
-function toggleRelated(target, checked) {
-  const label = [target.reqId, target.title].filter(Boolean).join(' ') || target.path.replace(/^docs\//, '');
-  const current = parseRelated($('editor').value);
-  const next = checked
-    ? [...current.filter((c) => c.path !== target.path), { title: label, path: target.path }]
-    : current.filter((c) => c.path !== target.path);
-  $('editor').value = setRelated($('editor').value, next);
-  renderPreview(); syncButtons(); renderRelatedPanel();
-}
-
 function groupEl(label, files, area, emptyText) {
   const g = document.createElement('div');
   g.className = 'group';
@@ -335,7 +353,9 @@ async function openFile(p, area) {
     $('editor').value = content; $('curPath').firstChild.textContent = p;
     $('fileHint').textContent = area === 'requirement' ? '需求文档' : area === 'draft' ? '待评审的测试方案' : '已批准的生成器输入';
     $('panes').hidden = false;
-    renderPreview(); syncButtons(); renderRelatedPanel(); loadList();
+    $('btnInsertRef').hidden = area !== 'requirement';
+    closeRefDropdown();
+    renderPreview(); syncButtons(); loadList();
   } catch (e) { toast('打开失败：' + e.message); }
 }
 
@@ -386,7 +406,13 @@ async function newRequirement() {
   openFile(p, 'requirement');
 }
 
-$('editor').addEventListener('input', () => { renderPreview(); syncButtons(); if (state.area === 'requirement') renderRelatedPanel(); });
+$('editor').addEventListener('input', () => { renderPreview(); syncButtons(); });
+$('btnInsertRef').onclick = () => { if ($('refDropdown').hidden) openRefDropdown(); else closeRefDropdown(); };
+$('refFilter').addEventListener('input', () => renderRefList($('refFilter').value));
+$('refFilter').addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') { closeRefDropdown(); $('btnInsertRef').focus(); }
+  else if (e.key === 'ArrowDown') { e.preventDefault(); $('refList').querySelector('.refItem')?.focus(); }
+});
 $('btnSave').onclick = save;
 $('btnNew').onclick = () => newRequirement().catch((e) => toast(e.message));
 $('btnReload').onclick = () => state.path && openFile(state.path, state.area);
