@@ -3,7 +3,7 @@ import { StringDecoder } from 'node:string_decoder';
 
 // Shared runtime boundary: a workflow supplies prompt, schema, MCP configuration and a tool allowlist.
 // No repository settings, built-in filesystem tools or arbitrary shell commands are inherited.
-export function runClaude({ cwd, prompt, systemPrompt, schema, mcpConfig, allowedTools, disallowedTools = [], signal, onMessage,
+export function runClaude({ cwd, prompt, systemPrompt, schema, mcpConfig, allowedTools, disallowedTools = [], signal, onMessage = () => {},
   command = 'claude', model, settingsPath, maxOutputBytes = 16 * 1024 * 1024 }) {
   return new Promise((resolve, reject) => {
     if (signal.aborted) return reject(signal.reason);
