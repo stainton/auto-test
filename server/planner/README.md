@@ -29,6 +29,7 @@ node server/planner/main.mjs
 | GET | `/v1/planner/jobs/{jobId}/result` | 获取已成功完成的草稿 |
 | DELETE | `/v1/planner/jobs/{jobId}` | 取消任务，不删除已有结果 |
 | POST | `/v1/planner/simplify` | 同步接口（非任务队列）：把已设计用例的前置条件/步骤/预期结果改写成非技术人员可读的精简版，不调用浏览器/工具，保留原有步骤数与含义，只去掉选择器、testid、属性值等自动化实现细节 |
+| POST | `/v1/planner/estimate` | 同步接口（非任务队列）：只根据需求文本（不调用浏览器/工具）评估"建议覆盖用例数量"，考虑约 30% 需求因鉴权等原因无法自动化、手工测试至多单人 2 天。结果供人确认/修改后作为任务的 `caseCount` 提交 |
 | GET | `/healthz`、`/readyz` | 无鉴权健康检查 |
 
 所有接口直接调用，无需 Token。已开放 CORS，浏览器可直接跨端口提交任务、查询结果，并使用原生 EventSource 订阅进度。CaseHub 也可通过自己的代理调用；只需要服务 URL。
@@ -82,6 +83,8 @@ curl http://localhost:4501/v1/planner/jobs/JOB_ID/result
 }
 ```
 
+请求可带可选的 `caseCount`（1–500 的整数，通常先调用 `/v1/planner/estimate` 预填、人工确认后传入）：此时 planner 必须输出 `[max(1, caseCount-5), caseCount]` 条用例，超出范围的草稿校验失败。
+
 结果还包含 `reviewStatus: draft`、`casesMarkdown`、`planMarkdown`、合并后的 `explorationNotes` 和 `limitations`。单次模型结构化结果限制 2 MiB。JSON 的步骤使用换行，Markdown 表格使用 `<br>`，列顺序保持不变。服务不自动批准草稿，不生成执行脚本。成功状态表示产出了合规草稿，查看 limitations 判断尚未验证的范围。
 
 ## 进度和任务生命周期
@@ -108,6 +111,7 @@ curl http://localhost:4501/v1/planner/jobs/JOB_ID/result
 | PLANNER_MAX_JOBS | 100 | 包括终态任务在内的保留数量上限 |
 | PLANNER_RETENTION_MS | 86400000 | 终态任务保留时间 |
 | PLANNER_SIMPLIFY_TIMEOUT_MS | 60000 | `/v1/planner/simplify` 单次改写的最长等待时间 |
+| PLANNER_ESTIMATE_TIMEOUT_MS | 120000 | `/v1/planner/estimate` 单次评估的最长等待时间 |
 
 ## 验证
 

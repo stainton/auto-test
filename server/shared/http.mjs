@@ -19,9 +19,15 @@ async function body(req, maxBytes) {
   catch { throw new ServiceError(400, 'INVALID_JSON', 'Request body must contain valid JSON'); }
 }
 export function createHttpServer({ jobs, validateInput, openapiPath, maxBodyBytes = 2 * 1024 * 1024,
-  validateSimplifyInput, simplify, simplifyTimeoutMs = 60000 }) {
+  validateSimplifyInput, simplify, simplifyTimeoutMs = 60000,
+  validateEstimateInput, estimate, estimateTimeoutMs = 120000 }) {
   const spec = readFileSync(openapiPath, 'utf8');
   const streams = new Set();
+  // Synchronous (non-job) model calls: validate, run with a hard timeout, map runtime failures to 502.
+  const syncRoutes = new Map([
+    ['/v1/planner/simplify', { run: simplify, validate: validateSimplifyInput, timeoutMs: simplifyTimeoutMs, code: 'SIMPLIFY_FAILED', label: 'Simplify' }],
+    ['/v1/planner/estimate', { run: estimate, validate: validateEstimateInput, timeoutMs: estimateTimeoutMs, code: 'ESTIMATE_FAILED', label: 'Estimate' }]
+  ]);
   const server = http.createServer(async (req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
@@ -44,16 +50,17 @@ export function createHttpServer({ jobs, validateInput, openapiPath, maxBodyByte
         res.setHeader('Location', `/v1/planner/jobs/${job.id}`);
         return json(res, 202, job);
       }
-      if (req.method === 'POST' && url.pathname === '/v1/planner/simplify' && simplify && validateSimplifyInput) {
+      const sync = req.method === 'POST' && syncRoutes.get(url.pathname);
+      if (sync && sync.run && sync.validate) {
         const payload = await body(req, maxBodyBytes);
         let input;
-        try { input = validateSimplifyInput(payload); }
+        try { input = sync.validate(payload); }
         catch (error) { throw new ServiceError(400, 'INVALID_REQUEST', error.message); }
         const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(new Error('Simplify request timed out')), simplifyTimeoutMs);
+        const timer = setTimeout(() => controller.abort(new Error(`${sync.label} request timed out`)), sync.timeoutMs);
         let output;
-        try { output = await simplify(input, controller.signal); }
-        catch (error) { throw new ServiceError(502, 'SIMPLIFY_FAILED', error.message || 'Simplify failed'); }
+        try { output = await sync.run(input, controller.signal); }
+        catch (error) { throw new ServiceError(502, sync.code, error.message || `${sync.label} failed`); }
         finally { clearTimeout(timer); }
         return json(res, 200, output);
       }

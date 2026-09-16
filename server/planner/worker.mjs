@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { runClaude } from '../runtime/claude.mjs';
-import { OUTPUT_SCHEMA, formatResult } from './contract.mjs';
+import { outputSchema, formatResult } from './contract.mjs';
 import { SYSTEM_PROMPT, buildPrompt } from './prompt.mjs';
 
 const require = createRequire(import.meta.url);
@@ -37,7 +37,7 @@ export function createPlannerWorker({ runtime = runClaude, command, model, setti
       const calls = new Map();
       let setupSucceeded = false;
       const output = await runtime({ cwd: workspace, prompt: buildPrompt(input), systemPrompt: SYSTEM_PROMPT,
-        schema: OUTPUT_SCHEMA, mcpConfig, allowedTools: ['mcp__playwright-test__*'],
+        schema: outputSchema(input), mcpConfig, allowedTools: ['mcp__playwright-test__*'],
         disallowedTools: EXCLUDED_TOOLS.map(t => `mcp__playwright-test__${t}`),
         signal, command, model, settingsPath,
         onMessage(message) {

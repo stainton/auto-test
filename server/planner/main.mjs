@@ -10,6 +10,7 @@ import { validateInput } from './contract.mjs';
 import { resolveClaudeOptions } from '../runtime/settings.mjs';
 import { createPlannerWorker } from './worker.mjs';
 import { createSimplifier, validateSimplifyInput } from './simplify.mjs';
+import { createEstimator, validateEstimateInput } from './estimate.mjs';
 
 function positive(name, fallback) {
   const n = Number(process.env[name] ?? fallback);
@@ -35,8 +36,10 @@ export async function main() {
     maxJobs: positive('PLANNER_MAX_JOBS', 100), retentionMs: positive('PLANNER_RETENTION_MS', 86400000)
   });
   const simplify = createSimplifier({ command, ...claudeOptions });
+  const estimate = createEstimator({ command, ...claudeOptions });
   const server = createHttpServer({ jobs, validateInput, validateSimplifyInput, simplify,
     simplifyTimeoutMs: positive('PLANNER_SIMPLIFY_TIMEOUT_MS', 60000),
+    validateEstimateInput, estimate, estimateTimeoutMs: positive('PLANNER_ESTIMATE_TIMEOUT_MS', 120000),
     openapiPath: fileURLToPath(new URL('./openapi.json', import.meta.url)) });
   server.listen(positive('PLANNER_PORT', 4501), host, () => console.log(`Planner HTTP service listening on ${host}:${server.address().port}`));
   let stopping = false;

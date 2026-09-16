@@ -1,3 +1,5 @@
+import { caseCountRange } from './contract.mjs';
+
 // Service adaptation of .claude/agents/playwright-test-planner.md.
 // The interactive file-based workflow remains unchanged.
 export const SYSTEM_PROMPT = `You are the test planner for a requirement-driven Playwright test framework.
@@ -31,6 +33,10 @@ Workflow:
    Write name, precondition and every step/expect entry in Simplified Chinese, regardless of
    the language of this prompt or the requirement text; keep request, case_id and priority as given
    (e.g. TC-LOGIN-001, P0/P1/P2/P3).
+   If caseCountRange is supplied, the number of cases MUST be within [caseCountRange.min, caseCountRange.max]
+   (a person confirmed this budget; the result is rejected otherwise). Plan to that budget from the start:
+   cover every acceptance criterion first, merge checks that share setup and flow into one case, and drop
+   the lowest-value variants rather than exceed the maximum. Do not pad with trivial cases to reach the minimum.
    Merge prior exploration notes with new observed facts in explorationNotes. Return blocked/unverified areas in limitations.
    An inaccessible browser or missing authentication must not be disguised as completed exploration.
 
@@ -46,6 +52,7 @@ export function buildPrompt(input) {
   return JSON.stringify({
     requirements: input.requirements,
     target: { baseUrl: input.target.baseUrl, authenticationProvided: Boolean(input.target.storageState || input.target.extraHTTPHeaders) },
-    context: input.context ?? {}
+    context: input.context ?? {},
+    ...(input.caseCount !== undefined ? { caseCountRange: caseCountRange(input.caseCount) } : {})
   });
 }

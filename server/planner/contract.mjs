@@ -14,11 +14,10 @@ function keys(value, allowed, name) {
   check(Object.keys(value).every(key => allowed.includes(key)), `${name} contains unsupported fields`);
 }
 
-export function validateInput(input) {
-  keys(input, ['requirements', 'target', 'context'], 'request');
-  check(Array.isArray(input.requirements) && input.requirements.length > 0 && input.requirements.length <= 50, 'requirements must contain 1–50 documents');
+export function validateRequirements(requirements) {
+  check(Array.isArray(requirements) && requirements.length > 0 && requirements.length <= 50, 'requirements must contain 1–50 documents');
   const ids = new Set();
-  for (const req of input.requirements) {
+  for (const req of requirements) {
     keys(req, ['id', 'title', 'content'], 'requirement');
     string(req.id, 'requirement.id', 128);
     check(req.id !== '-' && !ids.has(req.id), 'requirement IDs must be unique and cannot be "-"');
@@ -26,6 +25,24 @@ export function validateInput(input) {
     string(req.title, 'requirement.title', 500);
     string(req.content, 'requirement.content');
   }
+}
+
+// caseCount is the caller-confirmed "建议覆盖用例数量" (normally prefilled from /v1/planner/estimate and
+// adjusted by a person). The planner must then return between caseCount-5 and caseCount cases.
+export const MAX_CASES = 500;
+export const CASE_COUNT_SLACK = 5;
+export function caseCountRange(caseCount) {
+  return { min: Math.max(1, caseCount - CASE_COUNT_SLACK), max: caseCount };
+}
+export function validateCaseCount(value, name = 'caseCount') {
+  check(Number.isSafeInteger(value) && value >= 1 && value <= MAX_CASES, `${name} must be an integer between 1 and ${MAX_CASES}`);
+  return value;
+}
+
+export function validateInput(input) {
+  keys(input, ['requirements', 'target', 'context', 'caseCount'], 'request');
+  validateRequirements(input.requirements);
+  if (input.caseCount !== undefined) validateCaseCount(input.caseCount);
   keys(input.target, ['baseUrl', 'storageState', 'extraHTTPHeaders'], 'target');
   const url = new URL(string(input.target.baseUrl, 'target.baseUrl', 4096));
   check(['http:', 'https:'].includes(url.protocol), 'target.baseUrl must be HTTP(S)');
@@ -71,7 +88,7 @@ export const OUTPUT_SCHEMA = {
   type: 'object', additionalProperties: false,
   required: ['cases', 'explorationNotes', 'limitations'],
   properties: {
-    cases: { type: 'array', minItems: 1, maxItems: 500, items: {
+    cases: { type: 'array', minItems: 1, maxItems: MAX_CASES, items: {
       type: 'object', additionalProperties: false, required: MODEL_CASE_FIELDS,
       properties: Object.fromEntries(MODEL_CASE_FIELDS.map(field => [field,
         field === 'priority' ? { type: 'string', enum: ['P0', 'P1', 'P2', 'P3'] }
@@ -82,13 +99,27 @@ export const OUTPUT_SCHEMA = {
     limitations: { type: 'array', items: { type: 'string' } }
   }
 };
+// Per-job schema: a confirmed caseCount narrows the cases array so the runtime rejects an out-of-range
+// draft while the model can still fix it, instead of failing the job after the expensive exploration.
+export function outputSchema(input) {
+  if (input?.caseCount === undefined) return OUTPUT_SCHEMA;
+  const { min, max } = caseCountRange(input.caseCount);
+  const schema = structuredClone(OUTPUT_SCHEMA);
+  Object.assign(schema.properties.cases, { minItems: min, maxItems: max });
+  return schema;
+}
 const numberedLines = list => list.map((line, index) => `${index + 1}. ${line}`).join('\n');
 
 const cell = value => value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\|/g, '&#124;').replace(/\r\n|\r|\n/g, '<br>');
 export function formatResult(output, input) {
   check(Buffer.byteLength(JSON.stringify(output) ?? '') <= 2 * 1024 * 1024, 'planner structured output exceeds 2 MiB');
   keys(output, ['cases', 'explorationNotes', 'limitations'], 'planner output');
-  check(Array.isArray(output.cases) && output.cases.length > 0 && output.cases.length <= 500, 'planner must return 1–500 cases');
+  check(Array.isArray(output.cases) && output.cases.length > 0 && output.cases.length <= MAX_CASES, `planner must return 1–${MAX_CASES} cases`);
+  if (input.caseCount !== undefined) {
+    const { min, max } = caseCountRange(input.caseCount);
+    check(output.cases.length >= min && output.cases.length <= max,
+      `planner must return ${min}–${max} cases for caseCount ${input.caseCount}, got ${output.cases.length}`);
+  }
   const ids = new Set(), requirements = new Set(input.requirements.map(r => r.id));
   const cases = output.cases.map(item => {
     keys(item, MODEL_CASE_FIELDS, 'case');
