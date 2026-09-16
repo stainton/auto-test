@@ -18,6 +18,7 @@ test('returns exact case fields and escaped Markdown in original model order', (
   custom.cases[0].name = '拒绝 | <script> &';
   const result = formatResult(custom, input);
   assert.deepEqual(Object.keys(result.cases[0]), CASE_FIELDS);
+  assert.equal(result.cases[0].description, '', 'description is reserved for human reviewers');
   assert.equal(result.reviewStatus, 'draft');
   assert.ok(result.casesMarkdown.startsWith(`| ${CASE_FIELDS.join(' | ')} |`));
   assert.match(result.casesMarkdown, /拒绝 &#124; &lt;script&gt; &amp;/);
@@ -30,7 +31,7 @@ test('returns exact case fields and escaped Markdown in original model order', (
 });
 
 test('rejects untraceable, duplicate and malformed generated cases', () => {
-  for (const patch of [{ request: 'REQ-OTHER' }, { priority: 'P4' }, { steps: [] }, { steps: [{ step: '', expect: '显示表单' }] }, { steps: 'click login' }, { steps: [{ step: '打开登录页', expect: '' }] }, { name: '' }, { extra: 'field' }]) {
+  for (const patch of [{ request: 'REQ-OTHER' }, { priority: 'P4' }, { steps: [] }, { steps: [{ step: '', expect: '显示表单' }] }, { steps: 'click login' }, { steps: [{ step: '打开登录页', expect: '' }] }, { name: '' }, { extra: 'field' }, { description: '模型不应填写' }]) {
     const custom = structuredClone(output); Object.assign(custom.cases[0], patch);
     assert.throws(() => formatResult(custom, input));
   }

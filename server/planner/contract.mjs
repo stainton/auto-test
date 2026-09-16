@@ -1,4 +1,8 @@
 export const CASE_FIELDS = ['request', 'name', 'case_id', 'priority', 'precondition', 'description', 'steps', 'expects'];
+// Fields kept in the wire format (test-model.md column order) but reserved for people: the model is never
+// asked for them and they are always emitted empty. description is the case summary a reviewer writes
+// after reading the case during review, so a model-written guess would only be noise to overwrite.
+export const HUMAN_CASE_FIELDS = ['description'];
 const object = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 function check(condition, message) { if (!condition) throw new Error(message); }
 function string(value, name, max = 200000) {
@@ -62,7 +66,7 @@ export function validateInput(input) {
 const STEP_LIST = { type: 'array', minItems: 1, maxItems: 50, items: {
   type: 'object', additionalProperties: false, required: ['step', 'expect'],
   properties: { step: { type: 'string', minLength: 1 }, expect: { type: 'string', minLength: 1 } } } };
-const MODEL_CASE_FIELDS = CASE_FIELDS.filter(field => field !== 'expects');
+const MODEL_CASE_FIELDS = CASE_FIELDS.filter(field => field !== 'expects' && !HUMAN_CASE_FIELDS.includes(field));
 export const OUTPUT_SCHEMA = {
   type: 'object', additionalProperties: false,
   required: ['cases', 'explorationNotes', 'limitations'],
@@ -104,6 +108,7 @@ export function formatResult(output, input) {
     return Object.fromEntries(CASE_FIELDS.map(field => [field,
       field === 'steps' ? numberedLines(item.steps.map(s => s.step))
       : field === 'expects' ? numberedLines(item.steps.map(s => s.expect))
+      : HUMAN_CASE_FIELDS.includes(field) ? ''
       : item[field]]));
   });
   check(typeof output.explorationNotes === 'string', 'explorationNotes must be a string');
@@ -114,6 +119,6 @@ export function formatResult(output, input) {
     ...cases.map(item => `| ${CASE_FIELDS.map(field => cell(item[field])).join(' | ')} |`)
   ].join('\n');
   const planMarkdown = ['# Test Plan (draft)', ...cases.map((c, i) =>
-    `\n## ${i + 1}. ${c.name}\n\nRequirement: ${c.request}\n\nCase ID: ${c.case_id}\n\nPriority: ${c.priority}\n\n### Objective\n${c.description}\n\n### Preconditions\n${c.precondition}\n\n### Steps\n${c.steps}\n\n### Expected results\n${c.expects}`)].join('\n');
+    `\n## ${i + 1}. ${c.name}\n\nRequirement: ${c.request}\n\nCase ID: ${c.case_id}\n\nPriority: ${c.priority}\n\n### Preconditions\n${c.precondition}\n\n### Steps\n${c.steps}\n\n### Expected results\n${c.expects}`)].join('\n');
   return { reviewStatus: 'draft', cases, casesMarkdown, planMarkdown, explorationNotes: output.explorationNotes, limitations: output.limitations };
 }

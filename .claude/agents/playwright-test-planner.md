@@ -158,7 +158,8 @@ You will:
      - `case_id`: stable, unique id, e.g. `TC-<area-abbrev>-001`, incrementing.
      - `priority`: one of `P0`/`P1`/`P2`/`P3` (P0 = critical happy path, P3 = minor edge case).
      - `precondition`: starting state / seed / auth required.
-     - `description`: the test objective in one sentence.
+     - `description`: **leave empty.** Reserved for the human reviewer, who writes the case summary during
+       review; never fill it in yourself.
      - `steps`: numbered, one step per line inside the cell — use `<br>` between steps
        (e.g. `1. Open the page<br>2. Click "Add"`).
      - `expects`: numbered expected results, referencing the step they belong to

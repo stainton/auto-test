@@ -809,7 +809,8 @@
           },
           "description": {
             "type": "string",
-            "minLength": 1
+            "const": "",
+            "description": "Reserved for the human reviewer's case summary; the planner never fills it, so it is always empty"
           },
           "steps": {
             "type": "string",
@@ -820,7 +821,7 @@
             "minLength": 1
           }
         },
-        "description": "Exact eight fields from test-model.md. request references a supplied requirement; case_id is unique within a result. steps and expects use numbered lines separated by newline characters; expected-result numbers refer to step numbers."
+        "description": "Exact eight fields from test-model.md (description is always empty, reserved for human reviewers). request references a supplied requirement; case_id is unique within a result. steps and expects use numbered lines separated by newline characters; expected-result numbers refer to step numbers."
       },
       "PlannerResult": {
         "type": "object",

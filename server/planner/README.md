@@ -67,7 +67,7 @@ curl http://localhost:4501/v1/planner/jobs/JOB_ID/result
 
 `target.storageState` 可以直接传 Playwright 导出的 cookies/origins 对象（不接受本地文件路径），`target.extraHTTPHeaders` 可以携带目标系统的请求头。登录仍需交互时，将指引与专用测试账号放入 context。当前不接收自定义 seed 源码、本地附件路径或自定义 MCP 命令；需要上传附件的场景会注明缺少输入。
 
-返回结果中的 cases 每条严格包含 `test-model.md` 的八个字段：
+返回结果中的 cases 每条严格包含 `test-model.md` 的八个字段，其中 `description` 是留给评审人工填写的总结，AI 不填写，恒为空字符串：
 
 ```json
 {
@@ -76,7 +76,7 @@ curl http://localhost:4501/v1/planner/jobs/JOB_ID/result
   "case_id": "TC-LOGIN-001",
   "priority": "P1",
   "precondition": "已存在专用测试账号，当前未登录",
-  "description": "验证错误密码被拒绝",
+  "description": "",
   "steps": "1. 打开登录页面\n2. 输入账号和错误密码并提交",
   "expects": "1. 显示登录表单\n2. 显示错误提示且仍在登录页面"
 }

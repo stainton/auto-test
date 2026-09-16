@@ -5,7 +5,7 @@ export const input = {
 };
 export const output = {
   cases: [{ request: 'REQ-001', name: '拒绝错误密码', case_id: 'TC-LOGIN-001', priority: 'P1',
-    precondition: '存在测试账号', description: '验证错误密码被拒绝',
+    precondition: '存在测试账号',
     steps: [{ step: '打开登录页', expect: '显示表单' }, { step: '输入错误密码并提交', expect: '显示错误提示' }] }],
   explorationNotes: 'Existing login form\nObserved error message', limitations: []
 };
