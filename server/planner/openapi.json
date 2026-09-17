@@ -693,6 +693,11 @@
                   "description": "Complete requirement/acceptance criteria, normally Markdown",
                   "minLength": 1,
                   "maxLength": 200000
+                },
+                "code": {
+                  "type": "string",
+                  "pattern": "^[A-Z][A-Z0-9]{1,11}$",
+                  "description": "Confirmed requirement code (uppercase ASCII, no \"-\"), the second segment of case IDs. Defaults to the requirement id with non-alphanumerics removed."
                 }
               }
             }
@@ -882,7 +887,8 @@
           },
           "case_id": {
             "type": "string",
-            "minLength": 1
+            "pattern": "^TC-[A-Z][A-Z0-9]{1,11}-[A-Z][A-Z0-9]{1,11}-(FUNC|REL|PERF|SEC|COMPAT|UX)-[0-9]{3,}$",
+            "description": "Assigned by the server, not the model: TC-<requirement code>-<module code>-<category>-<NNN>. Category is FUNC 功能 / REL 可靠性 / PERF 性能 / SEC 安全 / COMPAT 兼容性 / UX 易用性; NNN counts up from 001 per prefix within one result."
           },
           "priority": {
             "type": "string",
@@ -911,7 +917,7 @@
             "minLength": 1
           }
         },
-        "description": "Exact eight fields from test-model.md (description is always empty, reserved for human reviewers). request references a supplied requirement; case_id is unique within a result. steps and expects use numbered lines separated by newline characters; expected-result numbers refer to step numbers."
+        "description": "Exact eight fields from test-model.md (description is always empty, reserved for human reviewers). request references a supplied requirement; case_id is unique within a result and encodes requirement/module/category (see case_id). steps and expects use numbered lines separated by newline characters; expected-result numbers refer to step numbers."
       },
       "PlannerResult": {
         "type": "object",
@@ -1181,6 +1187,11 @@
                   "description": "Complete requirement/acceptance criteria, normally Markdown",
                   "minLength": 1,
                   "maxLength": 200000
+                },
+                "code": {
+                  "type": "string",
+                  "pattern": "^[A-Z][A-Z0-9]{1,11}$",
+                  "description": "Confirmed requirement code (uppercase ASCII, no \"-\"), the second segment of case IDs. Defaults to the requirement id with non-alphanumerics removed."
                 }
               }
             }
@@ -1203,7 +1214,8 @@
         "additionalProperties": false,
         "required": [
           "suggestedCaseCount",
-          "rationale"
+          "rationale",
+          "requirementCodes"
         ],
         "properties": {
           "suggestedCaseCount": {
@@ -1216,6 +1228,26 @@
             "minLength": 1,
             "maxLength": 600,
             "description": "2–4 short sentences in Simplified Chinese explaining the number"
+          },
+          "requirementCodes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "requirement",
+                "code"
+              ],
+              "properties": {
+                "requirement": {
+                  "type": "string"
+                },
+                "code": {
+                  "type": "string",
+                  "description": "Suggested requirement code for case IDs (the supplied code when one was given); empty when the suggestion was invalid"
+                }
+              }
+            }
           }
         }
       },

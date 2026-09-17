@@ -1,7 +1,7 @@
 import { runClaude } from '../runtime/claude.mjs';
-import { MAX_CASES, validateRequirements } from './contract.mjs';
+import { MAX_CASES, CODE_PATTERN, validateRequirements } from './contract.mjs';
 
-// Estimates the "建议覆盖用例数量" for a requirement before the full planning job runs. It is a cheap,
+// Estimates the "建议覆盖用例数量" (and suggests each requirement's code for case IDs) before the full planning job runs. It is a cheap,
 // text-only judgement (no browser, no tools) whose number a person reviews and adjusts; the confirmed
 // value is then passed to the planner job as caseCount.
 
@@ -12,7 +12,7 @@ export function validateEstimateInput(input) {
   check(object(input), 'request must be an object');
   check(Object.keys(input).every(key => ['requirements', 'context'].includes(key)), 'request contains unsupported fields');
   validateRequirements(input.requirements);
-  const out = { requirements: input.requirements.map(({ id, title, content }) => ({ id, title, content })) };
+  const out = { requirements: input.requirements.map(({ id, title, content, code }) => ({ id, title, content, ...(code ? { code } : {}) })) };
   if (input.context !== undefined) {
     check(object(input.context) && Object.keys(input.context).every(key => key === 'instructions'), 'context only accepts instructions');
     if (input.context.instructions !== undefined) {
@@ -31,10 +31,13 @@ export const MANUAL_BUDGET_DAYS = 2;
 
 export const ESTIMATE_OUTPUT_SCHEMA = {
   type: 'object', additionalProperties: false,
-  required: ['suggestedCaseCount', 'rationale'],
+  required: ['suggestedCaseCount', 'rationale', 'requirementCodes'],
   properties: {
     suggestedCaseCount: { type: 'integer', minimum: 1, maximum: MAX_CASES },
-    rationale: { type: 'string', minLength: 1, maxLength: 600 }
+    rationale: { type: 'string', minLength: 1, maxLength: 600 },
+    requirementCodes: { type: 'array', minItems: 1, maxItems: 50, items: {
+      type: 'object', additionalProperties: false, required: ['requirement', 'code'],
+      properties: { requirement: { type: 'string', minLength: 1 }, code: { type: 'string', pattern: CODE_PATTERN } } } }
   }
 };
 
@@ -56,6 +59,10 @@ The number must also fit these delivery constraints:
 
 Return:
 - suggestedCaseCount: an integer between 1 and ${MAX_CASES}.
+- requirementCodes: one entry per supplied requirement, {requirement: its exact id, code}. code is a short
+  uppercase ASCII abbreviation of what the requirement is about (2–12 letters/digits, no "-"), e.g. LOGIN,
+  ORDER, TASKLIST; it becomes the second segment of case IDs like TC-LOGIN-AUTH-FUNC-001. If a requirement
+  already carries a code, return that code unchanged.
 - rationale: 2–4 short sentences in Simplified Chinese: the main coverage areas the number accounts for, which
   parts are likely manual (authentication etc.), and why the number fits the manual budget.
 
@@ -74,6 +81,12 @@ export function createEstimator({ runtime = runClaude, command, model, settingsP
     });
     check(Number.isSafeInteger(output.suggestedCaseCount) && output.suggestedCaseCount >= 1 && output.suggestedCaseCount <= MAX_CASES,
       'estimate returned an invalid suggestedCaseCount');
-    return { suggestedCaseCount: output.suggestedCaseCount, rationale: output.rationale };
+    // A code the caller already confirmed wins; an invalid or missing suggestion comes back empty for a person to fill.
+    const codeRe = new RegExp(CODE_PATTERN);
+    const requirementCodes = input.requirements.map(r => {
+      const suggested = r.code ?? output.requirementCodes?.find(x => x.requirement === r.id)?.code;
+      return { requirement: r.id, code: typeof suggested === 'string' && codeRe.test(suggested) ? suggested : '' };
+    });
+    return { suggestedCaseCount: output.suggestedCaseCount, rationale: output.rationale, requirementCodes };
   };
 }

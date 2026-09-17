@@ -155,7 +155,10 @@ You will:
      - `request`: the Requirement id from the `docs/` file this case traces to (e.g. `REQ-001`); use `-` only
        if the case traces to no documented requirement.
      - `name`: the scenario title (must match the scenario title used in the test plan).
-     - `case_id`: stable, unique id, e.g. `TC-<area-abbrev>-001`, incrementing.
+     - `case_id`: `TC-<REQUIREMENT>-<MODULE>-<CATEGORY>-<NNN>`, e.g. `TC-LOGIN-AUTH-FUNC-001`. REQUIREMENT and
+       MODULE are short uppercase ASCII abbreviations (letters/digits, no `-`) of the requirement and of the
+       functional module; CATEGORY is one of `FUNC` (功能), `REL` (可靠性), `PERF` (性能), `SEC` (安全),
+       `COMPAT` (兼容性), `UX` (易用性); NNN counts up from 001 per prefix.
      - `priority`: one of `P0`/`P1`/`P2`/`P3` (P0 = critical happy path, P3 = minor edge case).
      - `precondition`: starting state / seed / auth required.
      - `description`: **leave empty.** Reserved for the human reviewer, who writes the case summary during

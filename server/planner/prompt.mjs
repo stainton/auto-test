@@ -23,16 +23,20 @@ Workflow:
    Cases must be independently understandable and repeatable; describe starting state, authentication, data and cleanup constraints.
    Preserve known hazards, shared-fixture reuse rules and reliable interaction techniques in the preconditions/steps.
 6. Return structured output matching the supplied schema. Do not save plans to local files.
-   Each case has exactly: request, name, case_id, priority, precondition, steps.
-   request is an exact supplied requirement id; name is a descriptive scenario title; case_id is unique and stable in the plan
-   (e.g. TC-LOGIN-001); priority is P0/P1/P2/P3. Do not write a description/summary of the case;
-   that field is reserved for the human reviewer.
+   Each case has exactly: request, name, priority, precondition, module_code, category, steps.
+   request is an exact supplied requirement id; name is a descriptive scenario title; priority is P0/P1/P2/P3.
+   module_code is a short uppercase ASCII abbreviation (2–12 letters/digits, no "-") of the functional module the
+   case exercises, e.g. AUTH, RESET, LIST. Group the requirement into a few meaningful modules and give every case
+   of the same module exactly the same code.
+   category is the test category: FUNC (功能), REL (可靠性), PERF (性能), SEC (安全), COMPAT (兼容性) or UX (易用性).
+   Do not write a case id: the server assigns TC-<requirement code>-<module_code>-<category>-<NNN> from these fields.
+   Do not write a description/summary of the case; that field is reserved for the human reviewer.
    steps is an ordered array of {step, expect} pairs, one entry per test step, in execution order; do not
    number or prefix step/expect yourself, the array position is the step number. expect is the expected
    result of that same step. Use no HTML line breaks inside step or expect text.
    Write name, precondition and every step/expect entry in Simplified Chinese, regardless of
-   the language of this prompt or the requirement text; keep request, case_id and priority as given
-   (e.g. TC-LOGIN-001, P0/P1/P2/P3).
+   the language of this prompt or the requirement text; keep request, priority, module_code and category
+   as ASCII codes (e.g. REQ-LOGIN-001, P1, AUTH, FUNC).
    If caseCountRange is supplied, the number of cases MUST be within [caseCountRange.min, caseCountRange.max]
    (a person confirmed this budget; the result is rejected otherwise). Plan to that budget from the start:
    cover every acceptance criterion first, merge checks that share setup and flow into one case, and drop

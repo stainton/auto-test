@@ -3,6 +3,22 @@ export const CASE_FIELDS = ['request', 'name', 'case_id', 'priority', 'precondit
 // asked for them and they are always emitted empty. description is the case summary a reviewer writes
 // after reading the case during review, so a model-written guess would only be noise to overwrite.
 export const HUMAN_CASE_FIELDS = ['description'];
+
+// case_id is assigned by formatResult, never written by the model:
+//   TC-<requirement code>-<module code>-<category>-<NNN>, NNN counting up per prefix from 001.
+// Codes are uppercase ASCII with no "-" so the ID splits back into its parts (CaseHub builds the review
+// folders REQ / REQ-MOD / REQ-MOD-CAT from it and continues the numbering on import).
+export const CODE_PATTERN = '^[A-Z][A-Z0-9]{1,11}$';
+const CODE_RE = new RegExp(CODE_PATTERN);
+export const TEST_CATEGORIES = { FUNC: '功能', REL: '可靠性', PERF: '性能', SEC: '安全', COMPAT: '兼容性', UX: '易用性' };
+export const CASE_ID_RE = /^TC-([A-Z][A-Z0-9]{1,11})-([A-Z][A-Z0-9]{1,11})-(FUNC|REL|PERF|SEC|COMPAT|UX)-(\d{3,})$/;
+// Fallback when a caller doesn't confirm a requirement code: derive one from the requirement id.
+export function requirementCode(req) {
+  if (req.code) return req.code;
+  let code = req.id.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 12);
+  if (!/^[A-Z]/.test(code)) code = `R${code}`.slice(0, 12);
+  return code.length >= 2 ? code : `${code}X`;
+}
 const object = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 function check(condition, message) { if (!condition) throw new Error(message); }
 function string(value, name, max = 200000) {
@@ -18,7 +34,8 @@ export function validateRequirements(requirements) {
   check(Array.isArray(requirements) && requirements.length > 0 && requirements.length <= 50, 'requirements must contain 1–50 documents');
   const ids = new Set();
   for (const req of requirements) {
-    keys(req, ['id', 'title', 'content'], 'requirement');
+    keys(req, ['id', 'title', 'content', 'code'], 'requirement');
+    if (req.code !== undefined) check(typeof req.code === 'string' && CODE_RE.test(req.code), `requirement.code must match ${CODE_PATTERN}`);
     string(req.id, 'requirement.id', 128);
     check(req.id !== '-' && !ids.has(req.id), 'requirement IDs must be unique and cannot be "-"');
     ids.add(req.id);
@@ -83,7 +100,8 @@ export function validateInput(input) {
 const STEP_LIST = { type: 'array', minItems: 1, maxItems: 50, items: {
   type: 'object', additionalProperties: false, required: ['step', 'expect'],
   properties: { step: { type: 'string', minLength: 1 }, expect: { type: 'string', minLength: 1 } } } };
-const MODEL_CASE_FIELDS = CASE_FIELDS.filter(field => field !== 'expects' && !HUMAN_CASE_FIELDS.includes(field));
+const MODEL_CASE_FIELDS = [...CASE_FIELDS.filter(field => !['expects', 'case_id'].includes(field) && !HUMAN_CASE_FIELDS.includes(field)),
+  'module_code', 'category'];
 export const OUTPUT_SCHEMA = {
   type: 'object', additionalProperties: false,
   required: ['cases', 'explorationNotes', 'limitations'],
@@ -93,6 +111,8 @@ export const OUTPUT_SCHEMA = {
       properties: Object.fromEntries(MODEL_CASE_FIELDS.map(field => [field,
         field === 'priority' ? { type: 'string', enum: ['P0', 'P1', 'P2', 'P3'] }
         : field === 'steps' ? STEP_LIST
+        : field === 'module_code' ? { type: 'string', pattern: CODE_PATTERN }
+        : field === 'category' ? { type: 'string', enum: Object.keys(TEST_CATEGORIES) }
         : { type: 'string', minLength: 1 }]))
     } },
     explorationNotes: { type: 'string' },
@@ -120,7 +140,7 @@ export function formatResult(output, input) {
     check(output.cases.length >= min && output.cases.length <= max,
       `planner must return ${min}–${max} cases for caseCount ${input.caseCount}, got ${output.cases.length}`);
   }
-  const ids = new Set(), requirements = new Set(input.requirements.map(r => r.id));
+  const requirements = new Map(input.requirements.map(r => [r.id, requirementCode(r)])), sequence = new Map();
   const cases = output.cases.map(item => {
     keys(item, MODEL_CASE_FIELDS, 'case');
     for (const field of MODEL_CASE_FIELDS) {
@@ -134,9 +154,14 @@ export function formatResult(output, input) {
       }
     }
     check(requirements.has(item.request), 'case.request must reference a supplied requirement');
-    check(!ids.has(item.case_id), 'duplicate case_id'); ids.add(item.case_id);
     check(['P0', 'P1', 'P2', 'P3'].includes(item.priority), 'invalid priority');
+    check(CODE_RE.test(item.module_code), `case.module_code must match ${CODE_PATTERN}`);
+    check(Object.hasOwn(TEST_CATEGORIES, item.category), 'invalid case.category');
+    const prefix = `TC-${requirements.get(item.request)}-${item.module_code}-${item.category}`;
+    const n = (sequence.get(prefix) ?? 0) + 1; sequence.set(prefix, n);
+    const caseId = `${prefix}-${String(n).padStart(3, '0')}`;
     return Object.fromEntries(CASE_FIELDS.map(field => [field,
+      field === 'case_id' ? caseId :
       field === 'steps' ? numberedLines(item.steps.map(s => s.step))
       : field === 'expects' ? numberedLines(item.steps.map(s => s.expect))
       : HUMAN_CASE_FIELDS.includes(field) ? ''
