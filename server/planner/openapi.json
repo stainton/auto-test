@@ -957,10 +957,33 @@
           },
           "limitations": {
             "type": "array",
+            "maxItems": 20,
             "items": {
-              "type": "string"
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "risk",
+                "summary"
+              ],
+              "properties": {
+                "risk": {
+                  "type": "string",
+                  "enum": [
+                    "high",
+                    "medium",
+                    "low"
+                  ],
+                  "description": "high: a core acceptance criterion, main flow, data integrity or security behaviour is unverified; medium: secondary flow, boundary or error handling; low: cosmetic, rare edge or covered indirectly"
+                },
+                "summary": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 40,
+                  "description": "One plain-language Simplified Chinese clause for a non-technical reviewer: what is unverified and, briefly, why"
+                }
+              }
             },
-            "description": "Blocked or unverified areas; success means a valid draft exists, not that every behavior was verified"
+            "description": "Blocked or unverified areas ordered from high to low risk (equal risks keep model order); success means a valid draft exists, not that every behavior was verified"
           }
         },
         "description": "The raw model structured output is limited to 2 MiB before deterministic Markdown formatting."

@@ -102,6 +102,14 @@ const STEP_LIST = { type: 'array', minItems: 1, maxItems: 50, items: {
   properties: { step: { type: 'string', minLength: 1 }, expect: { type: 'string', minLength: 1 } } } };
 const MODEL_CASE_FIELDS = [...CASE_FIELDS.filter(field => !['expects', 'case_id'].includes(field) && !HUMAN_CASE_FIELDS.includes(field)),
   'module_code', 'category'];
+// limitations are read by a non-technical reviewer right after the draft is imported, so the model writes
+// each as a short plain-language summary with a risk level (hard caps below, not prose limits the model can
+// drift past), and formatResult orders them from highest to lowest risk.
+export const LIMITATION_MAX_CHARS = 40;
+export const LIMITATION_RISKS = ['high', 'medium', 'low'];
+const LIMITATION = { type: 'object', additionalProperties: false, required: ['risk', 'summary'],
+  properties: { risk: { type: 'string', enum: LIMITATION_RISKS },
+    summary: { type: 'string', minLength: 1, maxLength: LIMITATION_MAX_CHARS } } };
 export const OUTPUT_SCHEMA = {
   type: 'object', additionalProperties: false,
   required: ['cases', 'explorationNotes', 'limitations'],
@@ -116,7 +124,7 @@ export const OUTPUT_SCHEMA = {
         : { type: 'string', minLength: 1 }]))
     } },
     explorationNotes: { type: 'string' },
-    limitations: { type: 'array', items: { type: 'string' } }
+    limitations: { type: 'array', maxItems: 20, items: LIMITATION }
   }
 };
 // Per-job schema: a confirmed caseCount narrows the cases array so the runtime rejects an out-of-range
@@ -168,7 +176,12 @@ export function formatResult(output, input) {
       : item[field]]));
   });
   check(typeof output.explorationNotes === 'string', 'explorationNotes must be a string');
-  check(Array.isArray(output.limitations) && output.limitations.every(v => typeof v === 'string'), 'limitations must be a string array');
+  check(Array.isArray(output.limitations) && output.limitations.every(v => object(v) && Object.keys(v).every(k => ['risk', 'summary'].includes(k)) &&
+    LIMITATION_RISKS.includes(v.risk) && typeof v.summary === 'string' && v.summary.trim().length > 0 && [...v.summary].length <= LIMITATION_MAX_CHARS),
+    `limitations must be {risk: high|medium|low, summary (max ${LIMITATION_MAX_CHARS} characters)} entries`);
+  // Array.prototype.sort is stable, so equal-risk entries keep the model's order.
+  const limitations = output.limitations.map(({ risk, summary }) => ({ risk, summary: summary.trim() }))
+    .sort((a, b) => LIMITATION_RISKS.indexOf(a.risk) - LIMITATION_RISKS.indexOf(b.risk));
   const casesMarkdown = [
     `| ${CASE_FIELDS.join(' | ')} |`,
     `| ${CASE_FIELDS.map(() => '---').join(' | ')} |`,
@@ -176,5 +189,5 @@ export function formatResult(output, input) {
   ].join('\n');
   const planMarkdown = ['# Test Plan (draft)', ...cases.map((c, i) =>
     `\n## ${i + 1}. ${c.name}\n\nRequirement: ${c.request}\n\nCase ID: ${c.case_id}\n\nPriority: ${c.priority}\n\n### Preconditions\n${c.precondition}\n\n### Steps\n${c.steps}\n\n### Expected results\n${c.expects}`)].join('\n');
-  return { reviewStatus: 'draft', cases, casesMarkdown, planMarkdown, explorationNotes: output.explorationNotes, limitations: output.limitations };
+  return { reviewStatus: 'draft', cases, casesMarkdown, planMarkdown, explorationNotes: output.explorationNotes, limitations };
 }

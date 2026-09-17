@@ -61,6 +61,20 @@ test('caseCount bounds the planner to [caseCount-5, caseCount] cases', () => {
   assert.equal(formatResult(many(1), { ...input, caseCount: 1 }).cases.length, 1);
 });
 
+test('limitations are short risk-tagged summaries ordered from high to low risk', () => {
+  const lim = (risk, summary) => ({ risk, summary });
+  const result = formatResult({ ...output, limitations: [lim('low', '未验证深色模式显示'), lim('high', '未验证短信验证码登录：缺少测试手机号'),
+    lim('medium', '未验证密码长度边界'), lim('high', ' 未验证单点登录跳转 ')] }, input);
+  assert.deepEqual(result.limitations, [lim('high', '未验证短信验证码登录：缺少测试手机号'), lim('high', '未验证单点登录跳转'),
+    lim('medium', '未验证密码长度边界'), lim('low', '未验证深色模式显示')]);
+  for (const limitations of [['plain string'], [lim('critical', 'x')], [lim('high', '')], [lim('high', '长'.repeat(41))], [{ ...lim('low', 'x'), extra: 1 }]])
+    assert.throws(() => formatResult({ ...output, limitations }, input));
+  assert.equal(formatResult({ ...output, limitations: [lim('low', '长'.repeat(40))] }, input).limitations.length, 1);
+  const item = OUTPUT_SCHEMA.properties.limitations.items;
+  assert.equal(item.properties.summary.maxLength, 40);
+  assert.deepEqual(item.properties.risk.enum, ['high', 'medium', 'low']);
+});
+
 test('case_id is assigned as TC-<requirement code>-<module>-<category>-NNN, counting per prefix', () => {
   assert.equal(requirementCode({ id: 'REQ-001' }), 'REQ001');
   assert.equal(requirementCode({ id: '42' }), 'R42');

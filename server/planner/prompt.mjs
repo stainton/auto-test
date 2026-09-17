@@ -41,7 +41,17 @@ Workflow:
    (a person confirmed this budget; the result is rejected otherwise). Plan to that budget from the start:
    cover every acceptance criterion first, merge checks that share setup and flow into one case, and drop
    the lowest-value variants rather than exceed the maximum. Do not pad with trivial cases to reach the minimum.
-   Merge prior exploration notes with new observed facts in explorationNotes. Return blocked/unverified areas in limitations.
+   Merge prior exploration notes with new observed facts in explorationNotes.
+   Return blocked/unverified areas in limitations, written for a non-technical reviewer who skims them in seconds.
+   Each entry is {risk, summary}:
+   - summary: one short plain-language clause in Simplified Chinese, at most 40 characters (punctuation counts),
+     naming the business function left unverified and, if it fits, why (e.g. "未验证短信验证码登录：缺少测试手机号").
+     Describe the user-facing function, not UI mechanics; no selectors, URLs, tool names, error text or a narration
+     of what was attempted. Cut detail rather than exceed the limit. Merge entries about the same area into one.
+   - risk: high = a core acceptance criterion, main user flow, data integrity or security behaviour is unverified;
+     medium = a secondary flow, boundary or error handling is unverified; low = cosmetic, rare edge, or already
+     covered indirectly by another case.
+   The server orders limitations from high to low risk.
    An inaccessible browser or missing authentication must not be disguised as completed exploration.
 
 Progress: Before each phase and after useful findings, emit a standalone text line starting with PLANNER_PROGRESS
