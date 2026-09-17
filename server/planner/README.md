@@ -86,7 +86,7 @@ curl http://localhost:4501/v1/planner/jobs/JOB_ID/result
 
 请求可带可选的 `caseCount`（1–500 的整数，通常先调用 `/v1/planner/estimate` 预填、人工确认后传入）：此时 planner 必须输出 `[max(1, caseCount-5), caseCount]` 条用例，超出范围的草稿校验失败。
 
-`case_id` 由服务端生成，不由模型填写：`TC-<需求缩写>-<功能模块缩写>-<测试类别>-<NNN>`。需求缩写取请求里 requirement 的 `code`（大写字母/数字，2–12 位，不含 `-`；未提供时由 requirement id 去掉非字母数字得到），模块缩写与测试类别（FUNC 功能 / REL 可靠性 / PERF 性能 / SEC 安全 / COMPAT 兼容性 / UX 易用性）由 planner 给出，NNN 在同一结果内按前缀从 001 递增。`/v1/planner/estimate` 会同时返回每个需求的建议缩写 `requirementCodes`，供人确认后作为 `code` 传入。
+结果另有 `modules`（`[{requirement, code, name}]`，每个功能模块的中文名称，可用于给模块文件夹命名）。`case_id` 由服务端生成，不由模型填写：`TC-<需求缩写>-<功能模块缩写>-<测试类别>-<NNN>`。需求缩写取请求里 requirement 的 `code`（大写字母/数字，2–12 位，不含 `-`；未提供时由 requirement id 去掉非字母数字得到），模块缩写与测试类别（FUNC 功能 / REL 可靠性 / PERF 性能 / SEC 安全 / COMPAT 兼容性 / UX 易用性）由 planner 给出，NNN 在同一结果内按前缀从 001 递增。`/v1/planner/estimate` 会同时返回每个需求的建议缩写 `requirementCodes`，供人确认后作为 `code` 传入。
 
 结果还包含 `reviewStatus: draft`、`casesMarkdown`、`planMarkdown`、合并后的 `explorationNotes` 和 `limitations`（未验证/受限范围，每条为 `{risk: high|medium|low, summary}`，summary 是给非技术评审人看的一句中文、不超过 40 字，按风险从高到低排序）。单次模型结构化结果限制 2 MiB。JSON 的步骤使用换行，Markdown 表格使用 `<br>`，列顺序保持不变。服务不自动批准草稿，不生成执行脚本。成功状态表示产出了合规草稿，查看 limitations 判断尚未验证的范围。
 

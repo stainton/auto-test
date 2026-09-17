@@ -83,7 +83,9 @@ test('case_id is assigned as TC-<requirement code>-<module>-<category>-NNN, coun
     assert.throws(() => validateInput({ ...input, requirements: [{ ...input.requirements[0], code }] }));
   const withCode = { ...input, requirements: [{ ...input.requirements[0], code: 'LOGIN' }] };
   const c = patch => ({ ...structuredClone(output.cases[0]), ...patch });
-  const result = formatResult({ ...output, cases: [c({}), c({ category: 'SEC' }), c({}), c({ module_code: 'RESET' }), c({ category: 'SEC' })] }, withCode);
+  const result = formatResult({ ...output, cases: [c({}), c({ category: 'SEC' }), c({ module_name: '别的名字' }), c({ module_code: 'RESET', module_name: ' 找回密码 ' }), c({ category: 'SEC' })] }, withCode);
+  assert.deepEqual(result.modules, [{ requirement: 'REQ-001', code: 'AUTH', name: '登录认证' }, { requirement: 'REQ-001', code: 'RESET', name: '找回密码' }]);
+  for (const module_name of ['', '长'.repeat(21)]) assert.throws(() => formatResult({ ...output, cases: [c({ module_name })] }, withCode));
   assert.deepEqual(result.cases.map(x => x.case_id),
     ['TC-LOGIN-AUTH-FUNC-001', 'TC-LOGIN-AUTH-SEC-001', 'TC-LOGIN-AUTH-FUNC-002', 'TC-LOGIN-RESET-FUNC-001', 'TC-LOGIN-AUTH-SEC-002']);
   for (const x of result.cases) assert.match(x.case_id, CASE_ID_RE);

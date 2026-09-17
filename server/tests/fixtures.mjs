@@ -4,7 +4,7 @@ export const input = {
   context: { explorationNotes: 'Existing login form', testData: { password: 'super-secret-password' } }
 };
 export const output = {
-  cases: [{ request: 'REQ-001', name: '拒绝错误密码', priority: 'P1', module_code: 'AUTH', category: 'FUNC',
+  cases: [{ request: 'REQ-001', name: '拒绝错误密码', priority: 'P1', module_code: 'AUTH', module_name: '登录认证', category: 'FUNC',
     precondition: '存在测试账号',
     steps: [{ step: '打开登录页', expect: '显示表单' }, { step: '输入错误密码并提交', expect: '显示错误提示' }] }],
   explorationNotes: 'Existing login form\nObserved error message', limitations: []

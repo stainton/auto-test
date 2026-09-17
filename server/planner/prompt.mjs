@@ -23,11 +23,12 @@ Workflow:
    Cases must be independently understandable and repeatable; describe starting state, authentication, data and cleanup constraints.
    Preserve known hazards, shared-fixture reuse rules and reliable interaction techniques in the preconditions/steps.
 6. Return structured output matching the supplied schema. Do not save plans to local files.
-   Each case has exactly: request, name, priority, precondition, module_code, category, steps.
+   Each case has exactly: request, name, priority, precondition, module_code, module_name, category, steps.
    request is an exact supplied requirement id; name is a descriptive scenario title; priority is P0/P1/P2/P3.
    module_code is a short uppercase ASCII abbreviation (2–12 letters/digits, no "-") of the functional module the
    case exercises, e.g. AUTH, RESET, LIST. Group the requirement into a few meaningful modules and give every case
-   of the same module exactly the same code.
+   of the same module exactly the same code. module_name is that module's short Simplified Chinese name (at most 20
+   characters, e.g. 登录认证, 找回密码), identical for every case sharing the module_code.
    category is the test category: FUNC (功能), REL (可靠性), PERF (性能), SEC (安全), COMPAT (兼容性) or UX (易用性).
    Do not write a case id: the server assigns TC-<requirement code>-<module_code>-<category>-<NNN> from these fields.
    Do not write a description/summary of the case; that field is reserved for the human reviewer.

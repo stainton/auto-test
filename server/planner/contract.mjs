@@ -101,7 +101,8 @@ const STEP_LIST = { type: 'array', minItems: 1, maxItems: 50, items: {
   type: 'object', additionalProperties: false, required: ['step', 'expect'],
   properties: { step: { type: 'string', minLength: 1 }, expect: { type: 'string', minLength: 1 } } } };
 const MODEL_CASE_FIELDS = [...CASE_FIELDS.filter(field => !['expects', 'case_id'].includes(field) && !HUMAN_CASE_FIELDS.includes(field)),
-  'module_code', 'category'];
+  'module_code', 'module_name', 'category'];
+export const MODULE_NAME_MAX_CHARS = 20;
 // limitations are read by a non-technical reviewer right after the draft is imported, so the model writes
 // each as a short plain-language summary with a risk level (hard caps below, not prose limits the model can
 // drift past), and formatResult orders them from highest to lowest risk.
@@ -120,6 +121,7 @@ export const OUTPUT_SCHEMA = {
         field === 'priority' ? { type: 'string', enum: ['P0', 'P1', 'P2', 'P3'] }
         : field === 'steps' ? STEP_LIST
         : field === 'module_code' ? { type: 'string', pattern: CODE_PATTERN }
+        : field === 'module_name' ? { type: 'string', minLength: 1, maxLength: MODULE_NAME_MAX_CHARS }
         : field === 'category' ? { type: 'string', enum: Object.keys(TEST_CATEGORIES) }
         : { type: 'string', minLength: 1 }]))
     } },
@@ -149,6 +151,9 @@ export function formatResult(output, input) {
       `planner must return ${min}–${max} cases for caseCount ${input.caseCount}, got ${output.cases.length}`);
   }
   const requirements = new Map(input.requirements.map(r => [r.id, requirementCode(r)])), sequence = new Map();
+  // Chinese module names travel beside the cases (not as a case field, test-model.md keeps its eight columns) so a
+  // caller can label module folders; the first name given for a requirement's module code wins.
+  const modules = new Map();
   const cases = output.cases.map(item => {
     keys(item, MODEL_CASE_FIELDS, 'case');
     for (const field of MODEL_CASE_FIELDS) {
@@ -165,6 +170,9 @@ export function formatResult(output, input) {
     check(['P0', 'P1', 'P2', 'P3'].includes(item.priority), 'invalid priority');
     check(CODE_RE.test(item.module_code), `case.module_code must match ${CODE_PATTERN}`);
     check(Object.hasOwn(TEST_CATEGORIES, item.category), 'invalid case.category');
+    check([...item.module_name.trim()].length <= MODULE_NAME_MAX_CHARS, `case.module_name must be at most ${MODULE_NAME_MAX_CHARS} characters`);
+    const moduleKey = `${item.request}\u0000${item.module_code}`;
+    if (!modules.has(moduleKey)) modules.set(moduleKey, { requirement: item.request, code: item.module_code, name: item.module_name.trim() });
     const prefix = `TC-${requirements.get(item.request)}-${item.module_code}-${item.category}`;
     const n = (sequence.get(prefix) ?? 0) + 1; sequence.set(prefix, n);
     const caseId = `${prefix}-${String(n).padStart(3, '0')}`;
@@ -189,5 +197,5 @@ export function formatResult(output, input) {
   ].join('\n');
   const planMarkdown = ['# Test Plan (draft)', ...cases.map((c, i) =>
     `\n## ${i + 1}. ${c.name}\n\nRequirement: ${c.request}\n\nCase ID: ${c.case_id}\n\nPriority: ${c.priority}\n\n### Preconditions\n${c.precondition}\n\n### Steps\n${c.steps}\n\n### Expected results\n${c.expects}`)].join('\n');
-  return { reviewStatus: 'draft', cases, casesMarkdown, planMarkdown, explorationNotes: output.explorationNotes, limitations };
+  return { reviewStatus: 'draft', cases, casesMarkdown, planMarkdown, modules: [...modules.values()], explorationNotes: output.explorationNotes, limitations };
 }

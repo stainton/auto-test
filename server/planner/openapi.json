@@ -927,6 +927,7 @@
           "cases",
           "casesMarkdown",
           "planMarkdown",
+          "modules",
           "explorationNotes",
           "limitations"
         ],
@@ -950,6 +951,36 @@
           "planMarkdown": {
             "type": "string",
             "description": "Draft plan derived from the same cases; human review is required"
+          },
+          "modules": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "requirement",
+                "code",
+                "name"
+              ],
+              "properties": {
+                "requirement": {
+                  "type": "string",
+                  "description": "Requirement id the module belongs to"
+                },
+                "code": {
+                  "type": "string",
+                  "pattern": "^[A-Z][A-Z0-9]{1,11}$",
+                  "description": "Module code, the third segment of case_id"
+                },
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 20,
+                  "description": "Short Simplified Chinese module name, e.g. for labelling folders"
+                }
+              }
+            },
+            "description": "Functional modules used by the cases, in first-use order (first name given per requirement/module code wins)"
           },
           "explorationNotes": {
             "type": "string",
