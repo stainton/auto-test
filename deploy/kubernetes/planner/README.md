@@ -18,4 +18,6 @@ OpenAPI 文档在 `server/planner/openapi.json`，运行时可直接请求 `GET 
 
 保留单副本和 Recreate 更新策略，避免多个进程同时写任务文件。默认需要 StorageClass 提供 5Gi RWO PVC，用于保存任务状态、进度和结果；没有默认存储类时在 PVC 中填写 storageClassName。重启后未完成任务标记失败，调用方重新提交；已完成结果在保留期内仍可读取。任务默认保留 24 小时，最多保留 100 个，可调整环境变量。
 
+被中断的任务会在容器的 `/tmp` 下保留自己的工作目录（浏览器配置 + Claude 会话），供调用方"继续"，任务过期清理时一起删除，占用的是 ephemeral-storage 而不是 PVC。Pod 重建后 `/tmp` 是空的，此时任务状态里虽然仍标着 `continuable`，继续请求会得到 409 `NOT_CONTINUABLE`，改为重新提交即可。
+
 清单保留浏览器资源预算、共享内存和健康检查；容器文件系统可写，不设置额外的容器安全策略。Pod 需要能够访问模型 API 和被测系统。

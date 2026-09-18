@@ -57,6 +57,41 @@ test('a per-job timeout from the caller replaces the server default', async t =>
   assert.equal(jobs.get(job.id).timeoutMs, 20); // the limit actually used is visible on the job
 });
 
+test('an interrupted job is continuable once, then releases its session when pruned', async t => {
+  const discarded = [];
+  const session = { sessionId: 'session-1', workspace: '/tmp/planner-abc' };
+  const jobs = await make(t, async (_input, { checkpoint }) => { checkpoint(session); throw new Error('Planner runtime failed'); },
+    { discard: state => discarded.push(state) });
+  const job = jobs.submit(input);
+  await eventually(() => jobs.get(job.id).status === 'failed');
+  // The caller only learns that continuing is on offer; the session's location stays on the server.
+  const summary = jobs.summary(jobs.get(job.id));
+  assert.equal(summary.continuable, true);
+  assert.equal(summary.continuation, undefined);
+  assert.deepEqual(jobs.claimContinuation(job.id), session);
+  assert.equal(jobs.summary(jobs.get(job.id)).continuable, undefined);
+  assert.ok(jobs.get(job.id).continuedAt);
+  assert.throws(() => jobs.claimContinuation(job.id), /cannot be continued/);
+  const record = jobs.get(job.id);
+  record.finishedAt = new Date(Date.now() - 86400001).toISOString();
+  record.continuation = session; // a continuation nobody claimed ages out together with the job
+  jobs.prune();
+  assert.deepEqual(discarded, [session]);
+});
+
+test('a succeeded or cancelled job offers no continuation', async t => {
+  const jobs = await make(t, async (_input, { signal, checkpoint }) => {
+    checkpoint({ sessionId: 'session-2', workspace: '/tmp/planner-def' });
+    if (signal.aborted) throw signal.reason;
+    checkpoint(null);
+    return formatResult(output, input);
+  });
+  const done = jobs.submit(input);
+  await eventually(() => jobs.get(done.id).status === 'succeeded');
+  assert.equal(jobs.summary(jobs.get(done.id)).continuable, undefined);
+  assert.throws(() => jobs.claimContinuation(done.id), /cannot be continued/);
+});
+
 test('persists completed output and bounds progress without saving request credentials', async t => {
   const jobs = await make(t, async (_input, { emit }) => {
     for (let i = 0; i < 8; i++) emit({ stage: 'exploring', message: `Action ${i}` });

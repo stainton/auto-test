@@ -4,7 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { Jobs } from '../shared/jobs.mjs';
+import { Jobs, ServiceError } from '../shared/jobs.mjs';
 import { createHttpServer } from '../shared/http.mjs';
 import { validateInput, formatResult } from '../planner/contract.mjs';
 import { input, output, eventually } from './fixtures.mjs';
@@ -81,4 +81,22 @@ test('oversized body gets a structured 413', async t => {
   const response = await submit(input);
   assert.equal(response.status, 413);
   assert.equal((await response.json()).error.code, 'BODY_TOO_LARGE');
+});
+
+// The planner resolves continueFrom while validating (only the job store knows whether the interrupted
+// session is still there), so a rejection there must keep its own status instead of becoming a 400.
+test('a request rejected by the input resolver keeps its status code', async t => {
+  const { submit } = await setup(t, async () => formatResult(output, input), {
+    validateInput: payload => {
+      const value = validateInput(payload);
+      if (value.continueFrom) throw new ServiceError(409, 'NOT_CONTINUABLE', 'This planner task cannot be continued; start a new one');
+      return value;
+    }
+  });
+  const conflict = await submit({ ...input, continueFrom: '4f2a6b1c-8e3d-4a5b-9c7d-1e2f3a4b5c6d' });
+  assert.equal(conflict.status, 409);
+  assert.equal((await conflict.json()).error.code, 'NOT_CONTINUABLE');
+  const bad = await submit({ ...input, requirements: [] });
+  assert.equal(bad.status, 400);
+  assert.equal((await bad.json()).error.code, 'INVALID_REQUEST');
 });

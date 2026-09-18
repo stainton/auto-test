@@ -48,8 +48,10 @@ export function createHttpServer({ jobs, validateInput, openapiPath, maxBodyByte
       if (req.method === 'POST' && url.pathname === jobsPath) {
         const payload = await body(req, maxBodyBytes);
         let input;
+        // validateInput may also resolve references the request makes to earlier jobs (continueFrom),
+        // whose own status codes must survive instead of being flattened into a 400.
         try { input = validateInput(payload); }
-        catch (error) { throw new ServiceError(400, 'INVALID_REQUEST', error.message); }
+        catch (error) { throw error instanceof ServiceError ? error : new ServiceError(400, 'INVALID_REQUEST', error.message); }
         const job = jobs.submit(input);
         res.setHeader('Location', `${jobsPath}/${job.id}`);
         return json(res, 202, job);

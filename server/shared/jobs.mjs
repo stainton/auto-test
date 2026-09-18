@@ -16,6 +16,9 @@ export class ServiceError extends Error {
 export class Jobs extends EventEmitter {
   constructor({ worker, dataDir, concurrency = 1, timeoutMs = 900000, maxJobs = 100,
     retentionMs = 86400000, maxEvents = 500, kind = 'planner', label = 'Planner',
+    // A worker may checkpoint the state that lets an interrupted job be continued later (the planner
+    // keeps its Claude session); discard releases whatever that state holds once the job is gone.
+    discard = () => {},
     // timeoutFor lets a workflow honour a per-job limit chosen by the caller (the planner
     // exposes it in the request, so a person can give a large exploration more time than the
     // server default). It returns undefined to keep timeoutMs; the workflow, not this class,
@@ -26,7 +29,7 @@ export class Jobs extends EventEmitter {
     super();
     this.setMaxListeners(0);
     Object.assign(this, { worker, dataDir, concurrency, timeoutMs, maxJobs, retentionMs, maxEvents,
-      kind, label, started, completion, timeoutFor });
+      kind, label, started, completion, timeoutFor, discard });
     this.jobs = new Map(); this.inputs = new Map(); this.running = new Map(); this.closing = false;
     mkdirSync(dataDir, { recursive: true, mode: 0o700 });
     for (const file of readdirSync(dataDir).filter(f => /^[0-9a-f-]{36}\.json$/.test(f))) {
@@ -35,7 +38,9 @@ export class Jobs extends EventEmitter {
       this.jobs.set(job.id, job);
       if (!TERMINAL.has(job.status)) {
         job.status = 'failed'; job.finishedAt = now();
-        job.error = { code: 'SERVER_RESTARTED', message: 'The server restarted before completion; resubmit the request' };
+        job.error = { code: 'SERVER_RESTARTED', message: job.continuation
+          ? 'The server restarted before completion; continue the task or start it again'
+          : 'The server restarted before completion; resubmit the request' };
         this.event(job, { stage: 'failed', message: job.error.message });
       }
     }
@@ -57,6 +62,7 @@ export class Jobs extends EventEmitter {
   prune() {
     for (const [id, job] of this.jobs) {
       if (TERMINAL.has(job.status) && Date.now() - Date.parse(job.finishedAt) > this.retentionMs) {
+        if (job.continuation) this.discard(job.continuation);
         unlinkSync(path.join(this.dataDir, `${id}.json`)); this.jobs.delete(id);
       }
     }
@@ -68,8 +74,20 @@ export class Jobs extends EventEmitter {
     return job;
   }
   summary(job) {
-    const { events, result, ...summary } = job;
-    return structuredClone(summary);
+    // continuation holds server-side paths and identifiers; callers only learn whether a continue is on offer.
+    const { events, result, continuation, ...summary } = job;
+    return { ...structuredClone(summary), ...(continuation && job.status === 'failed' ? { continuable: true } : {}) };
+  }
+  // Hands a failed job's checkpoint to the run that continues it, and takes it off that job: one
+  // interrupted run is continued once, so two jobs never drive the same session.
+  claimContinuation(id) {
+    const job = this.get(id);
+    if (!job.continuation || job.status !== 'failed')
+      throw new ServiceError(409, 'NOT_CONTINUABLE', `This ${this.kind} task cannot be continued; start a new one`);
+    const state = structuredClone(job.continuation);
+    delete job.continuation; job.continuedAt = now();
+    this.persist(job);
+    return state;
   }
   submit(input) {
     this.prune();
@@ -106,7 +124,9 @@ export class Jobs extends EventEmitter {
       job.timeoutMs = timeoutMs;
       this.event(job, { ...this.started });
       const result = await this.worker(input, { signal: controller.signal,
-        emit: progress => { if (!controller.signal.aborted) this.event(job, progress); } });
+        emit: progress => { if (!controller.signal.aborted) this.event(job, progress); },
+        // Recorded even after an abort: a task killed by its time limit is exactly the one worth continuing.
+        checkpoint: state => { if (state) job.continuation = state; else delete job.continuation; this.persist(job); } });
       controller.signal.throwIfAborted();
       job.result = result; job.status = 'succeeded'; job.finishedAt = now();
       this.event(job, { stage: 'completed', ...this.completion(result) });

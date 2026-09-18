@@ -1,10 +1,11 @@
 import path from 'node:path';
+import { existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { access } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { execFileSync } from 'node:child_process';
-import { Jobs } from '../shared/jobs.mjs';
+import { Jobs, ServiceError } from '../shared/jobs.mjs';
 import { createHttpServer } from '../shared/http.mjs';
 import { validateInput, MAX_TIMEOUT_MS } from './contract.mjs';
 import { resolveClaudeOptions } from '../runtime/settings.mjs';
@@ -36,11 +37,25 @@ export async function main() {
     // A request may raise or lower its own limit; the deployment keeps the last word through
     // PLANNER_MAX_TIMEOUT_MS, so one caller cannot occupy the single browser slot indefinitely.
     timeoutFor: input => input.timeoutMs && Math.min(input.timeoutMs, positive('PLANNER_MAX_TIMEOUT_MS', MAX_TIMEOUT_MS)),
-    maxJobs: positive('PLANNER_MAX_JOBS', 100), retentionMs: positive('PLANNER_RETENTION_MS', 86400000)
+    maxJobs: positive('PLANNER_MAX_JOBS', 100), retentionMs: positive('PLANNER_RETENTION_MS', 86400000),
+    // Nothing continues a job once it has aged out of the store, so its session goes with it.
+    discard: state => { if (state?.workspace) rmSync(state.workspace, { recursive: true, force: true }); }
   });
+  // A request may continue an interrupted task instead of re-exploring from scratch: it repeats the whole
+  // request and names that task, and the run reopens its session. The claim happens here, not in the
+  // contract, because only the job store knows whether that session is still there to continue.
+  const validatePlannerInput = payload => {
+    const input = validateInput(payload);
+    if (input.continueFrom === undefined) return input;
+    const resume = jobs.claimContinuation(input.continueFrom);
+    if (!existsSync(resume.workspace)) throw new ServiceError(409, 'NOT_CONTINUABLE',
+      'The interrupted session is no longer on this server; start a new design task');
+    delete input.continueFrom;
+    return { ...input, resume };
+  };
   const simplify = createSimplifier({ command, ...claudeOptions });
   const estimate = createEstimator({ command, ...claudeOptions });
-  const server = createHttpServer({ jobs, validateInput, validateSimplifyInput, simplify,
+  const server = createHttpServer({ jobs, validateInput: validatePlannerInput, validateSimplifyInput, simplify,
     simplifyTimeoutMs: positive('PLANNER_SIMPLIFY_TIMEOUT_MS', 60000),
     validateEstimateInput, estimate, estimateTimeoutMs: positive('PLANNER_ESTIMATE_TIMEOUT_MS', 120000),
     openapiPath: fileURLToPath(new URL('./openapi.json', import.meta.url)) });

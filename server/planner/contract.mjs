@@ -60,11 +60,21 @@ export function validateTimeoutMs(value, name = 'timeoutMs') {
   return value;
 }
 
+// continueFrom names an interrupted job of this service whose session is still around (its summary says
+// continuable). The request repeats every other field, so nothing about the task is read from that job:
+// it only decides whether this run starts fresh or reopens that conversation.
+export const JOB_ID_RE = /^[0-9a-f-]{36}$/;
+export function validateContinueFrom(value, name = 'continueFrom') {
+  check(typeof value === 'string' && JOB_ID_RE.test(value), `${name} must be a job id`);
+  return value;
+}
+
 export function validateInput(input) {
-  keys(input, ['requirements', 'target', 'context', 'caseCount', 'timeoutMs'], 'request');
+  keys(input, ['requirements', 'target', 'context', 'caseCount', 'timeoutMs', 'continueFrom'], 'request');
   validateRequirements(input.requirements);
   if (input.caseCount !== undefined) validateCaseCount(input.caseCount);
   if (input.timeoutMs !== undefined) validateTimeoutMs(input.timeoutMs);
+  if (input.continueFrom !== undefined) validateContinueFrom(input.continueFrom);
   validateTarget(input.target);
   if (input.context !== undefined) {
     keys(input.context, ['explorationNotes', 'knownIssues', 'instructions', 'testData'], 'context');

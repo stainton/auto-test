@@ -20,6 +20,10 @@ test('accepts a caller-chosen task timeout only within the documented range', ()
     assert.equal(validateInput({ ...input, timeoutMs }).timeoutMs, timeoutMs);
   for (const timeoutMs of [MIN_TIMEOUT_MS - 1, MAX_TIMEOUT_MS + 1, 0, -1000, 1800000.5, '1800000', null])
     assert.throws(() => validateInput({ ...input, timeoutMs }));
+  const continueFrom = '4f2a6b1c-8e3d-4a5b-9c7d-1e2f3a4b5c6d';
+  assert.equal(validateInput({ ...input, continueFrom }).continueFrom, continueFrom);
+  for (const invalid of ['', 'not-a-job', 123, null, `${continueFrom}x`])
+    assert.throws(() => validateInput({ ...input, continueFrom: invalid }));
 });
 
 test('returns exact case fields and escaped Markdown in original model order', () => {

@@ -29,7 +29,7 @@ node server/planner/main.mjs
 | GET | `/v1/planner/jobs/{jobId}/result` | 获取已成功完成的草稿 |
 | DELETE | `/v1/planner/jobs/{jobId}` | 取消任务，不删除已有结果 |
 | POST | `/v1/planner/simplify` | 同步接口（非任务队列）：把已设计用例的前置条件/步骤/预期结果改写成非技术人员可读的精简版，不调用浏览器/工具，保留原有步骤数与含义，只去掉选择器、testid、属性值等自动化实现细节 |
-| POST | `/v1/planner/estimate` | 同步接口（非任务队列）：只根据需求文本（不调用浏览器/工具）评估"建议覆盖用例数量"，考虑约 30% 需求因鉴权等原因无法自动化、手工测试至多单人 2 天。结果供人确认/修改后作为任务的 `caseCount` 提交 |
+| POST | `/v1/planner/estimate` | 同步接口（非任务队列）：只根据需求文本（不调用浏览器/工具）评估"建议覆盖用例数量"，考虑约 30% 需求因鉴权等原因无法自动化、手工测试至多单人 2 天。结果供人确认/修改后作为任务的 `caseCount` 提交；`rationale` 是一句不超过 40 字的中文说明（覆盖了哪些业务范围），不是推理过程 |
 | GET | `/healthz`、`/readyz` | 无鉴权健康检查 |
 
 所有接口直接调用，无需 Token。已开放 CORS，浏览器可直接跨端口提交任务、查询结果，并使用原生 EventSource 订阅进度。CaseHub 也可通过自己的代理调用；只需要服务 URL。
@@ -87,6 +87,10 @@ curl http://localhost:4501/v1/planner/jobs/JOB_ID/result
 
 请求可带可选的 `timeoutMs`：整个设计任务的时限（毫秒，1 分钟–4 小时），由发起任务的人在界面上选择——探索耗时取决于被测系统和用例预算，固定的服务端默认值对大需求经常不够。不传时使用 `PLANNER_TIMEOUT_MS`；服务端再按 `PLANNER_MAX_TIMEOUT_MS` 封顶，单个调用方不会长期占住唯一的浏览器槽位。超时任务以 `JOB_TIMEOUT` 失败，实际生效的时限会写在任务状态的 `timeoutMs` 上。
 
+请求可带可选的 `continueFrom`：某个失败任务的 ID（状态里带 `continuable: true`，通常是 `JOB_TIMEOUT`）。此时新任务不会从零开始探索，而是用 `claude --resume` 接着那次会话继续——浏览器是新的（继续的第一件事仍是 `planner_setup_page`），但模型此前探索到的内容还在。请求其余字段仍须完整提供并按提交值生效，因此继续时可以调大 `timeoutMs` 或更正测试账号。一次中断只能被继续一次（继续本身若再失败，新任务同样可继续）；该任务未失败、已被继续或会话已清理时返回 409 `NOT_CONTINUABLE`。
+
+`context.instructions` 是发起人填写的约束，planner 按硬性限制执行：可以限定覆盖范围、禁止某些操作（例如"不要等待后台任务运行完成"）、规定等待上限、说明登录方式。被约束挡住的验证不会绕道进行，而是作为 limitations 返回。`/v1/planner/estimate` 读取同一段文字，被排除的范围不计入建议用例数。
+
 请求可带可选的 `caseCount`（1–500 的整数，通常先调用 `/v1/planner/estimate` 预填、人工确认后传入）：此时 planner 必须输出 `[max(1, caseCount-5), caseCount]` 条用例，超出范围的草稿校验失败。
 
 结果另有 `modules`（`[{requirement, code, name}]`，每个功能模块的中文名称，可用于给模块文件夹命名）。`case_id` 由服务端生成，不由模型填写：`TC-<需求缩写>-<功能模块缩写>-<测试类别>-<NNN>`。需求缩写取请求里 requirement 的 `code`（大写字母/数字，2–12 位，不含 `-`；未提供时由 requirement id 去掉非字母数字得到），模块缩写与测试类别（FUNC 功能 / REL 可靠性 / PERF 性能 / SEC 安全 / COMPAT 兼容性 / UX 易用性）由 planner 给出，NNN 在同一结果内按前缀从 001 递增。`/v1/planner/estimate` 会同时返回每个需求的建议缩写 `requirementCodes`，供人确认后作为 `code` 传入。
@@ -97,9 +101,9 @@ curl http://localhost:4501/v1/planner/jobs/JOB_ID/result
 
 状态为 queued → running → succeeded / failed / cancelled。阶段和工具开始/完成事件来自运行过程，不使用虚构百分比。SSE 首先发送 snapshot，然后回放游标之后的 progress；使用 `Last-Event-ID` 或 `?after=N` 重连。最多保留最近 500 条，较旧记录丢失时先发送 reset。snapshot 表示当前任务状态，回放的旧 progress 用于过程记录，不应覆盖较新的状态。每 15 秒有心跳；终态关闭连接。抽屉关闭不影响任务，重新打开按 ID 查看即可。
 
-取消后阶段先变为 cancelling，等待 Agent/MCP/浏览器进程终止再进入 cancelled。整任务默认 15 分钟超时，可由请求的 `timeoutMs` 覆盖。重启后未完成任务标记 SERVER_RESTARTED，由调用方重新提交。当前没有幂等提交或自动续跑；重复 POST 会创建新任务。
+取消后阶段先变为 cancelling，等待 Agent/MCP/浏览器进程终止再进入 cancelled。整任务默认 15 分钟超时，可由请求的 `timeoutMs` 覆盖。重启后未完成任务标记 SERVER_RESTARTED；如果它的会话还在（进程被强杀而非正常关闭），状态里会带 `continuable: true`，可以继续，否则重新提交。当前没有幂等提交或自动续跑；重复 POST 会创建新任务。
 
-任务文件保存状态、进度和结果，不保存请求正文、storageState、headers 或队列输入。浏览器配置临时写入每任务独立目录，任务退出后清理，不从仓库 docs/specs 读取。调用方可按需归档结果。结果默认保留 24 小时；超期在下一次访问/提交/启动时清理，返回 404。最多保留 100 个任务，满时新请求返回 503。
+任务文件保存状态、进度和结果，不保存请求正文、storageState、headers 或队列输入。浏览器配置临时写入每任务独立目录，任务退出后清理，不从仓库 docs/specs 读取。中断的任务是例外：它的工作目录会保留，里面除了浏览器配置只有 Claude 会话（`CLAUDE_CONFIG_DIR` 指向该目录），供 `continueFrom` 继续；成功、被取消或任务过期清理时一并删除，`continuable` 只对外表示"能否继续"，不暴露会话位置。调用方可按需归档结果。结果默认保留 24 小时；超期在下一次访问/提交/启动时清理，返回 404。最多保留 100 个任务，满时新请求返回 503。
 
 ## 配置
 
@@ -126,6 +130,6 @@ curl http://localhost:4501/v1/planner/jobs/JOB_ID/result
 node --test server/tests/*.check.mjs
 ```
 
-服务测试使用 `.check.mjs` 命名，避免被根目录 Playwright 默认 testMatch 扫描。测试使用受控 Agent 替身验证真实 HTTP、任务生命周期、进度重放、输出契约及运行时进程终止，不消耗模型额度。另外可运行 `node server/tests/runtime-smoke.mjs`，使用真实 Claude CLI、Playwright MCP 和 Chromium，加上本机模型替身和测试页面验证启动链路；不调用付费模型。可用 `PLANNER_SMOKE_RUNTIME_DIR` 指定另一个装有运行依赖的目录，`PLANNER_CLAUDE_COMMAND` 指定 CLI。真实模型生成质量验证仍需要有效的模型 API Key 和实际被测系统。
+服务测试使用 `.check.mjs` 命名，避免被根目录 Playwright 默认 testMatch 扫描。测试使用受控 Agent 替身验证真实 HTTP、任务生命周期、进度重放、输出契约及运行时进程终止，不消耗模型额度。另外可运行 `node server/tests/runtime-smoke.mjs`，使用真实 Claude CLI、Playwright MCP 和 Chromium，加上本机模型替身和测试页面验证启动链路；不调用付费模型。`node server/tests/continue-smoke.mjs` 用同样的替身验证"继续"：先让第一次运行在探索中途被杀掉，再用保留下来的会话继续，断言第二次运行确实带着上一次的对话历史并在成功后清理工作目录。可用 `PLANNER_SMOKE_RUNTIME_DIR` 指定另一个装有运行依赖的目录，`PLANNER_CLAUDE_COMMAND` 指定 CLI。真实模型生成质量验证仍需要有效的模型 API Key 和实际被测系统。
 
 运行机制参考：[Claude 非交互模式](https://code.claude.com/docs/en/headless)、[Playwright Test Agents](https://playwright.dev/docs/test-agents)。

@@ -1,10 +1,11 @@
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { runClaude } from '../runtime/claude.mjs';
 import { outputSchema, formatResult } from './contract.mjs';
-import { SYSTEM_PROMPT, buildPrompt } from './prompt.mjs';
+import { SYSTEM_PROMPT, buildPrompt, buildContinuationPrompt } from './prompt.mjs';
 
 const require = createRequire(import.meta.url);
 // Keep generator/test execution out of the planner workflow using native CLI configuration.
@@ -12,13 +13,22 @@ export const EXCLUDED_TOOLS = ['generator_setup_page', 'generator_read_log', 'ge
   'test_list', 'test_run', 'test_debug', 'planner_save_plan', 'planner_submit_plan'];
 const STAGES = new Set(['reading_requirements', 'preparing', 'exploring', 'designing', 'finalizing']);
 
+// Exploration is the expensive part of a run, so an interrupted one (usually its time limit) is continuable
+// instead of only repeatable: the workspace holds the Claude session (CLAUDE_CONFIG_DIR below), checkpoint()
+// hands its location to the job store, and a later request that carries continueFrom arrives here as
+// input.resume and reopens the same conversation. Nothing but that session lives in the workspace, and it is
+// removed as soon as the run ends in a way nobody can continue (success, cancellation).
 export function createPlannerWorker({ runtime = runClaude, command, model, settingsPath, playwrightPackage,
   temporaryRoot = tmpdir() } = {}) {
-  return async function planner(input, { signal, emit }) {
+  return async function planner(input, { signal, emit, checkpoint = () => {} }) {
     signal.throwIfAborted();
-    const workspace = await mkdtemp(path.join(temporaryRoot, 'planner-'));
+    const resumed = Boolean(input.resume);
+    const workspace = input.resume?.workspace ?? await mkdtemp(path.join(temporaryRoot, 'planner-'));
+    const sessionId = input.resume?.sessionId ?? randomUUID();
+    checkpoint({ sessionId, workspace });
+    let keepWorkspace = false;
     try {
-      emit({ stage: 'preparing', message: 'Preparing an isolated browser session' });
+      emit({ stage: 'preparing', message: resumed ? 'Reopening the interrupted session in a new browser' : 'Preparing an isolated browser session' });
       const packagePath = playwrightPackage ?? require.resolve('@playwright/test/package.json');
       const testEntry = path.join(path.dirname(packagePath), 'index.js');
       const cli = path.join(path.dirname(packagePath), 'cli.js');
@@ -36,10 +46,14 @@ export function createPlannerWorker({ runtime = runClaude, command, model, setti
         args: [cli, 'run-test-mcp-server', '--headless', '--config', configPath] } } };
       const calls = new Map();
       let setupSucceeded = false;
-      const output = await runtime({ cwd: workspace, prompt: buildPrompt(input), systemPrompt: SYSTEM_PROMPT,
+      const output = await runtime({ cwd: workspace, prompt: resumed ? buildContinuationPrompt(input) : buildPrompt(input),
+        systemPrompt: SYSTEM_PROMPT,
         schema: outputSchema(input), mcpConfig, allowedTools: ['mcp__playwright-test__*'],
         disallowedTools: EXCLUDED_TOOLS.map(t => `mcp__playwright-test__${t}`),
         signal, command, model, settingsPath,
+        // The conversation is persisted inside the workspace so a continuation can resume it and nothing
+        // outlives the directory this worker deletes.
+        sessionId, resume: resumed, env: { CLAUDE_CONFIG_DIR: path.join(workspace, 'claude-config') },
         onMessage(message) {
           if (message.type === 'system' && message.subtype === 'init') {
             const server = message.mcp_servers?.find(s => s.name === 'playwright-test');
@@ -73,11 +87,20 @@ export function createPlannerWorker({ runtime = runClaude, command, model, setti
         }
       });
       signal.throwIfAborted();
-      if (!setupSucceeded) throw new Error('Planner did not successfully initialize the target browser');
+      // A continued run may finish from what it already explored, so only a fresh run must have opened the browser.
+      if (!setupSucceeded && !resumed) throw new Error('Planner did not successfully initialize the target browser');
       emit({ stage: 'finalizing', message: 'Validating test cases and formatting the draft' });
-      return formatResult(output, input);
+      const result = formatResult(output, input);
+      checkpoint(null);
+      return result;
+    } catch (error) {
+      // Cancelling means the person is done with this task; anything else (a time limit, a runtime or
+      // contract failure) leaves a session worth continuing.
+      keepWorkspace = signal.reason?.code !== 'JOB_CANCELLED';
+      if (!keepWorkspace) checkpoint(null);
+      throw error;
     } finally {
-      await rm(workspace, { recursive: true, force: true });
+      if (!keepWorkspace) await rm(workspace, { recursive: true, force: true });
     }
   };
 }

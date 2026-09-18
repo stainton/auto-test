@@ -27,6 +27,10 @@ test('uses caller input, isolated config, direct MCP tools, progress and strict 
     assert.deepEqual(options.allowedTools, ['mcp__playwright-test__*']);
     assert.ok(options.disallowedTools.includes('mcp__playwright-test__generator_write_test'));
     assert.ok(options.mcpConfig.mcpServers['playwright-test'].args.includes('run-test-mcp-server'));
+    // A fresh run opens its own session, kept inside the workspace so nothing outlives it.
+    assert.match(options.sessionId, /^[0-9a-f-]{36}$/);
+    assert.equal(options.resume, false);
+    assert.equal(options.env.CLAUDE_CONFIG_DIR, path.join(options.cwd, 'claude-config'));
     assert.ok(!options.mcpConfig.mcpServers['playwright-test'].args.some(arg => arg.includes('mcp-filter')));
     const config = await readFile(path.join(options.cwd, 'playwright.config.cjs'), 'utf8');
     assert.match(config, /example.test\/login/);
@@ -43,8 +47,55 @@ test('uses caller input, isolated config, direct MCP tools, progress and strict 
   assert.deepEqual(await readdir(temporaryRoot), []);
 });
 
-test('rejects fabricated completion without successful browser setup and cleans failed workspaces', async t => {
+test('rejects fabricated completion without successful browser setup and keeps the session for a continuation', async t => {
   const { worker, temporaryRoot } = await setup(t, async () => output);
-  await assert.rejects(worker(input, { signal: new AbortController().signal, emit() {} }), /initialize/);
+  let checkpoint;
+  await assert.rejects(worker(input, { signal: new AbortController().signal, emit() {}, checkpoint: state => { checkpoint = state; } }), /initialize/);
+  assert.deepEqual(await readdir(temporaryRoot), [path.basename(checkpoint.workspace)]);
+  assert.match(checkpoint.sessionId, /^[0-9a-f-]{36}$/);
+});
+
+test('a cancelled run keeps nothing to continue', async t => {
+  const controller = new AbortController();
+  const { worker, temporaryRoot } = await setup(t, async options => {
+    browserSetup(options);
+    controller.abort(Object.assign(new Error('Planner task cancelled'), { code: 'JOB_CANCELLED' }));
+    return output;
+  });
+  const checkpoints = [];
+  await assert.rejects(worker(input, { signal: controller.signal, emit() {}, checkpoint: state => checkpoints.push(state) }));
+  assert.equal(checkpoints.at(-1), null);
   assert.deepEqual(await readdir(temporaryRoot), []);
+});
+
+test('a successful run leaves no session or workspace behind', async t => {
+  const { worker, temporaryRoot } = await setup(t, async options => { browserSetup(options); return output; });
+  const checkpoints = [];
+  await worker(input, { signal: new AbortController().signal, emit() {}, checkpoint: state => checkpoints.push(state) });
+  assert.equal(checkpoints.at(-1), null);
+  assert.deepEqual(await readdir(temporaryRoot), []);
+});
+
+test('continues an interrupted run in its own session instead of exploring again', async t => {
+  // First run: interrupted before it returned anything, so its session stays for a continuation.
+  const { worker, temporaryRoot } = await setup(t, async () => { throw new Error('Planner task exceeded its time limit'); });
+  let checkpoint;
+  await assert.rejects(worker(input, { signal: new AbortController().signal, emit() {}, checkpoint: state => { checkpoint = state; } }), /time limit/);
+
+  let resumedOptions;
+  const continuation = createPlannerWorker({ temporaryRoot, playwrightPackage: '/runtime/node_modules/@playwright/test/package.json',
+    runtime: async options => { resumedOptions = options; return output; } });
+  const events = [];
+  // No planner_setup_page in this run: a continuation may finish from what the first run already explored.
+  const result = await continuation({ ...input, resume: checkpoint },
+    { signal: new AbortController().signal, emit: event => events.push(event), checkpoint() {} });
+  assert.equal(result.cases.length, 1);
+  assert.equal(resumedOptions.resume, true);
+  assert.equal(resumedOptions.sessionId, checkpoint.sessionId);
+  assert.equal(resumedOptions.cwd, checkpoint.workspace);
+  assert.equal(resumedOptions.env.CLAUDE_CONFIG_DIR, path.join(checkpoint.workspace, 'claude-config'));
+  assert.match(resumedOptions.prompt, /Continue that attempt/);
+  assert.match(resumedOptions.prompt, /"REQ-001"/); // the request itself is repeated unchanged
+  assert.ok(events.some(e => /Reopening the interrupted session/.test(e.message)));
+  assert.deepEqual(await readdir(temporaryRoot), []); // the continuation succeeded, so the session is gone
 });

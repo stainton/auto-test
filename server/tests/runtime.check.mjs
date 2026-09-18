@@ -38,6 +38,25 @@ process.stdin.on('end', () => {
   assert.equal(invocation.args[invocation.args.indexOf('--tools') + 1], '');
 });
 
+test('a session id persists the conversation and resume reopens it', async t => {
+  const script = `
+const fs = require('node:fs');
+process.stdin.on('data', () => {});
+process.stdin.on('end', () => {
+  fs.writeFileSync('invocation.json', JSON.stringify({args: process.argv.slice(2), configDir: process.env.CLAUDE_CONFIG_DIR}));
+  process.stdout.write(JSON.stringify({type:'result', subtype:'success', is_error:false, structured_output: ${JSON.stringify(output)}}) + '\\n');
+});`;
+  const sessionId = '4f2a6b1c-8e3d-4a5b-9c7d-1e2f3a4b5c6d';
+  for (const [resume, flag] of [[false, '--session-id'], [true, '--resume']]) {
+    const options = await setup(t, script);
+    await runClaude({ ...options, sessionId, resume, env: { CLAUDE_CONFIG_DIR: path.join(options.cwd, 'claude-config') } });
+    const invocation = JSON.parse(await readFile(path.join(options.cwd, 'invocation.json')));
+    assert.equal(invocation.args[invocation.args.indexOf(flag) + 1], sessionId);
+    assert.ok(!invocation.args.includes('--no-session-persistence')); // nothing to resume otherwise
+    assert.equal(invocation.configDir, path.join(options.cwd, 'claude-config'));
+  }
+});
+
 test('cancellation terminates the subprocess and rejects instead of returning late output', async t => {
   const options = await setup(t, `require('node:fs').writeFileSync('pid', String(process.pid)); process.stdin.resume(); setInterval(() => {}, 100);`);
   const controller = new AbortController(); options.signal = controller.signal;

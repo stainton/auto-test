@@ -3,7 +3,7 @@
   "info": {
     "title": "Auto Test Planner HTTP API",
     "version": "1.0.0",
-    "description": "Asynchronous requirement-driven browser test planning. All business input is supplied in the request. Results are drafts for human review. Generator and healer are not part of this API. Jobs persist status, events and results; unfinished jobs fail after a server restart and must be resubmitted. Request inputs and credentials are not persisted. Default retention is 24 hours. This is an HTTP API, not an MCP endpoint. No service token is required. Cross-origin browser requests are supported."
+    "description": "Asynchronous requirement-driven browser test planning. All business input is supplied in the request. Results are drafts for human review. Generator and healer are not part of this API. Jobs persist status, events and results; unfinished jobs fail after a server restart. A failed task whose exploration session is still on the server is marked continuable and can be continued (continueFrom) instead of started again. Request inputs and credentials are not persisted. Default retention is 24 hours. This is an HTTP API, not an MCP endpoint. No service token is required. Cross-origin browser requests are supported."
   },
   "servers": [
     {
@@ -28,7 +28,7 @@
         ],
         "operationId": "createPlannerJob",
         "summary": "Submit a planner task",
-        "description": "Returns immediately with a queued job. Maximum JSON request size: 2 MiB. No local file paths or MCP commands are accepted. Supply requirements, browser target/authentication and any prior knowledge in this request. No idempotency key is supported: repeated submissions create separate jobs.",
+        "description": "Returns immediately with a queued job. Maximum JSON request size: 2 MiB. No local file paths or MCP commands are accepted. Supply requirements, browser target/authentication and any prior knowledge in this request. No idempotency key is supported: repeated submissions create separate jobs. To continue an interrupted task, repeat the whole request and add continueFrom.",
         "requestBody": {
           "required": true,
           "content": {
@@ -48,7 +48,7 @@
                   "baseUrl": "https://test.example.com/login"
                 },
                 "context": {
-                  "instructions": "覆盖正常流程和错误密码。账号由调用方在 testData 中提供。",
+                  "instructions": "覆盖正常流程和错误密码。账号由调用方在 testData 中提供。不要等待后台任务运行完成，提交后确认已进入运行中即可。",
                   "testData": {
                     "username": "test-user",
                     "password": "provided-by-caller"
@@ -80,6 +80,16 @@
           },
           "400": {
             "description": "Malformed JSON or invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "continueFrom names a task that cannot be continued (NOT_CONTINUABLE): it did not fail, was already continued, or its session is gone",
             "content": {
               "application/json": {
                 "schema": {
@@ -747,7 +757,7 @@
               },
               "instructions": {
                 "type": "string",
-                "description": "Scope, login instructions and environment prerequisites",
+                "description": "Constraints from the person starting the run, obeyed as hard limits: scope to cover or skip, actions forbidden during exploration (e.g. 不要等待任务运行完成), how long to wait for anything, login instructions and environment prerequisites. What a constraint leaves unverified comes back as a limitation instead of being explored anyway.",
                 "maxLength": 200000
               },
               "testData": {
@@ -768,6 +778,11 @@
             "minimum": 60000,
             "maximum": 14400000,
             "description": "Time limit for the whole planning task, in milliseconds (1 minute to 4 hours). Chosen by the person starting the run, since exploration time depends on the application and the case budget. Omit to use the server default (PLANNER_TIMEOUT_MS, 15 minutes). The service clamps the value to PLANNER_MAX_TIMEOUT_MS. On expiry the task fails with JOB_TIMEOUT."
+          },
+          "continueFrom": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Id of a failed task of this service whose status says continuable (typically one that hit JOB_TIMEOUT). The new task reopens that task's exploration session instead of exploring from scratch: the browser is new, the model's earlier findings are not. Every other field must still be supplied and is applied as given, so the continuation may raise timeoutMs or correct the test data. One interrupted task can be continued once; the continuation itself becomes continuable if it also fails."
           }
         }
       },
@@ -1124,6 +1139,15 @@
           "timeoutMs": {
             "type": "integer",
             "description": "Time limit actually applied to this task, in milliseconds. Present once the task starts running."
+          },
+          "continuable": {
+            "type": "boolean",
+            "description": "Present and true while this failed task can be continued: its exploration session is still on the server. Submit a new task with continueFrom set to this id. Absent once it has been continued, after retention expiry, or for tasks that succeeded or were cancelled."
+          },
+          "continuedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When this task's session was handed to a continuation."
           }
         }
       },
@@ -1306,7 +1330,7 @@
               "instructions": {
                 "type": "string",
                 "maxLength": 200000,
-                "description": "Scope notes that affect how much needs covering"
+                "description": "The same constraints the planner job receives; scope they exclude is not counted into the number"
               }
             }
           }
@@ -1329,8 +1353,8 @@
           "rationale": {
             "type": "string",
             "minLength": 1,
-            "maxLength": 600,
-            "description": "2–4 short sentences in Simplified Chinese explaining the number"
+            "maxLength": 40,
+            "description": "One short clause in Simplified Chinese naming the coverage the number stands for, at most 40 characters — read next to the number, not a paragraph of reasoning"
           },
           "requirementCodes": {
             "type": "array",
@@ -1364,7 +1388,7 @@
         "properties": {
           "code": {
             "type": "string",
-            "description": "Machine-readable error code; task errors include PLANNER_FAILED, JOB_TIMEOUT, JOB_CANCELLED and SERVER_RESTARTED"
+            "description": "Machine-readable error code; task errors include PLANNER_FAILED, JOB_TIMEOUT, JOB_CANCELLED and SERVER_RESTARTED; a rejected continueFrom is NOT_CONTINUABLE"
           },
           "message": {
             "type": "string"
