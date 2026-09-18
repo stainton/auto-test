@@ -44,6 +44,19 @@ test('times out actual worker and rejects late success', async t => {
   assert.equal(jobs.get(job.id).result, undefined);
 });
 
+test('a per-job timeout from the caller replaces the server default', async t => {
+  let aborted = false;
+  const jobs = await make(t, async (_input, { signal }) => {
+    await new Promise(resolve => signal.addEventListener('abort', () => { aborted = true; resolve(); }, { once: true }));
+    return formatResult(output, input);
+  }, { timeoutMs: 600000, timeoutFor: job => job.timeoutMs });
+  const job = jobs.submit({ ...input, timeoutMs: 20 });
+  await eventually(() => jobs.get(job.id).status === 'failed');
+  assert.equal(aborted, true);
+  assert.equal(jobs.get(job.id).error.code, 'JOB_TIMEOUT');
+  assert.equal(jobs.get(job.id).timeoutMs, 20); // the limit actually used is visible on the job
+});
+
 test('persists completed output and bounds progress without saving request credentials', async t => {
   const jobs = await make(t, async (_input, { emit }) => {
     for (let i = 0; i < 8; i++) emit({ stage: 'exploring', message: `Action ${i}` });

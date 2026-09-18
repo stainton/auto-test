@@ -919,6 +919,10 @@
           },
           "error": {
             "$ref": "#/components/schemas/ErrorDetail"
+          },
+          "timeoutMs": {
+            "type": "integer",
+            "description": "Time limit actually applied to this task, in milliseconds. Present once the task starts running."
           }
         }
       },

@@ -6,7 +6,7 @@ import { createRequire } from 'node:module';
 import { execFileSync } from 'node:child_process';
 import { Jobs } from '../shared/jobs.mjs';
 import { createHttpServer } from '../shared/http.mjs';
-import { validateInput } from './contract.mjs';
+import { validateInput, MAX_TIMEOUT_MS } from './contract.mjs';
 import { resolveClaudeOptions } from '../runtime/settings.mjs';
 import { createPlannerWorker } from './worker.mjs';
 import { createSimplifier, validateSimplifyInput } from './simplify.mjs';
@@ -33,6 +33,9 @@ export async function main() {
     worker: createPlannerWorker({ command, ...claudeOptions, playwrightPackage }),
     dataDir: process.env.PLANNER_DATA_DIR ?? path.join(tmpdir(), 'auto-test-planner-jobs'),
     concurrency: positive('PLANNER_CONCURRENCY', 1), timeoutMs: positive('PLANNER_TIMEOUT_MS', 900000),
+    // A request may raise or lower its own limit; the deployment keeps the last word through
+    // PLANNER_MAX_TIMEOUT_MS, so one caller cannot occupy the single browser slot indefinitely.
+    timeoutFor: input => input.timeoutMs && Math.min(input.timeoutMs, positive('PLANNER_MAX_TIMEOUT_MS', MAX_TIMEOUT_MS)),
     maxJobs: positive('PLANNER_MAX_JOBS', 100), retentionMs: positive('PLANNER_RETENTION_MS', 86400000)
   });
   const simplify = createSimplifier({ command, ...claudeOptions });

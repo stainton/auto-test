@@ -16,12 +16,17 @@ export class ServiceError extends Error {
 export class Jobs extends EventEmitter {
   constructor({ worker, dataDir, concurrency = 1, timeoutMs = 900000, maxJobs = 100,
     retentionMs = 86400000, maxEvents = 500, kind = 'planner', label = 'Planner',
+    // timeoutFor lets a workflow honour a per-job limit chosen by the caller (the planner
+    // exposes it in the request, so a person can give a large exploration more time than the
+    // server default). It returns undefined to keep timeoutMs; the workflow, not this class,
+    // decides the acceptable range.
+    timeoutFor = () => undefined,
     started = { stage: 'reading_requirements', message: 'Reading supplied requirements and context' },
     completion = result => ({ message: 'Draft test cases ready for review', casesGenerated: result.cases.length }) }) {
     super();
     this.setMaxListeners(0);
     Object.assign(this, { worker, dataDir, concurrency, timeoutMs, maxJobs, retentionMs, maxEvents,
-      kind, label, started, completion });
+      kind, label, started, completion, timeoutFor });
     this.jobs = new Map(); this.inputs = new Map(); this.running = new Map(); this.closing = false;
     mkdirSync(dataDir, { recursive: true, mode: 0o700 });
     for (const file of readdirSync(dataDir).filter(f => /^[0-9a-f-]{36}\.json$/.test(f))) {
@@ -93,10 +98,12 @@ export class Jobs extends EventEmitter {
     }
   }
   async execute(job, input, controller) {
-    const timer = setTimeout(() => controller.abort(new ServiceError(504, 'JOB_TIMEOUT', `${this.label} task exceeded its time limit`)), this.timeoutMs);
+    const timeoutMs = this.timeoutFor(input) ?? this.timeoutMs;
+    const timer = setTimeout(() => controller.abort(new ServiceError(504, 'JOB_TIMEOUT', `${this.label} task exceeded its time limit of ${Math.round(timeoutMs / 60000)} minutes`)), timeoutMs);
     timer.unref();
     try {
       job.status = 'running'; job.startedAt = now();
+      job.timeoutMs = timeoutMs;
       this.event(job, { ...this.started });
       const result = await this.worker(input, { signal: controller.signal,
         emit: progress => { if (!controller.signal.aborted) this.event(job, progress); } });

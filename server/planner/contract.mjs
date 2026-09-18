@@ -49,10 +49,22 @@ export function validateCaseCount(value, name = 'caseCount') {
   return value;
 }
 
+// timeoutMs is the caller-chosen limit for the whole planning task. Exploration time depends on
+// the application and on how many cases were budgeted, so the person starting the run picks it in
+// the UI; the server clamps it to this range and falls back to PLANNER_TIMEOUT_MS when omitted.
+export const MIN_TIMEOUT_MS = 60000;      // a minute: below this nothing but startup fits
+export const MAX_TIMEOUT_MS = 14400000;   // four hours: a ceiling a runaway request cannot exceed
+export function validateTimeoutMs(value, name = 'timeoutMs') {
+  check(Number.isSafeInteger(value) && value >= MIN_TIMEOUT_MS && value <= MAX_TIMEOUT_MS,
+    `${name} must be an integer between ${MIN_TIMEOUT_MS} and ${MAX_TIMEOUT_MS} milliseconds`);
+  return value;
+}
+
 export function validateInput(input) {
-  keys(input, ['requirements', 'target', 'context', 'caseCount'], 'request');
+  keys(input, ['requirements', 'target', 'context', 'caseCount', 'timeoutMs'], 'request');
   validateRequirements(input.requirements);
   if (input.caseCount !== undefined) validateCaseCount(input.caseCount);
+  if (input.timeoutMs !== undefined) validateTimeoutMs(input.timeoutMs);
   validateTarget(input.target);
   if (input.context !== undefined) {
     keys(input.context, ['explorationNotes', 'knownIssues', 'instructions', 'testData'], 'context');

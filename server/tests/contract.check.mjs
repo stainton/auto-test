@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { CASE_FIELDS, OUTPUT_SCHEMA, CASE_ID_RE, validateInput, formatResult, outputSchema, requirementCode } from '../planner/contract.mjs';
+import { CASE_FIELDS, OUTPUT_SCHEMA, CASE_ID_RE, validateInput, formatResult, outputSchema, requirementCode,
+  MIN_TIMEOUT_MS, MAX_TIMEOUT_MS } from '../planner/contract.mjs';
 import { buildPrompt } from '../planner/prompt.mjs';
 import { input, output } from './fixtures.mjs';
 
@@ -12,6 +13,13 @@ test('rejects missing documents, local file paths, duplicate requirement IDs and
     { ...input, target: { baseUrl: 'file:///etc/passwd' } },
     { ...input, target: { ...input.target, storageState: '/local/auth.json' } },
     { ...input, mcpConfig: { command: 'arbitrary-command' } } ]) assert.throws(() => validateInput(invalid));
+});
+
+test('accepts a caller-chosen task timeout only within the documented range', () => {
+  for (const timeoutMs of [MIN_TIMEOUT_MS, 1800000, MAX_TIMEOUT_MS])
+    assert.equal(validateInput({ ...input, timeoutMs }).timeoutMs, timeoutMs);
+  for (const timeoutMs of [MIN_TIMEOUT_MS - 1, MAX_TIMEOUT_MS + 1, 0, -1000, 1800000.5, '1800000', null])
+    assert.throws(() => validateInput({ ...input, timeoutMs }));
 });
 
 test('returns exact case fields and escaped Markdown in original model order', () => {

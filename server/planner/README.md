@@ -49,6 +49,7 @@ node server/planner/main.mjs
   "target": {
     "baseUrl": "https://test.example.com/login"
   },
+  "timeoutMs": 1800000,
   "context": {
     "instructions": "覆盖正常登录和错误密码。使用提供的专用测试账号。",
     "testData": { "username": "test-user", "password": "caller-supplied-password" },
@@ -84,6 +85,8 @@ curl http://localhost:4501/v1/planner/jobs/JOB_ID/result
 }
 ```
 
+请求可带可选的 `timeoutMs`：整个设计任务的时限（毫秒，1 分钟–4 小时），由发起任务的人在界面上选择——探索耗时取决于被测系统和用例预算，固定的服务端默认值对大需求经常不够。不传时使用 `PLANNER_TIMEOUT_MS`；服务端再按 `PLANNER_MAX_TIMEOUT_MS` 封顶，单个调用方不会长期占住唯一的浏览器槽位。超时任务以 `JOB_TIMEOUT` 失败，实际生效的时限会写在任务状态的 `timeoutMs` 上。
+
 请求可带可选的 `caseCount`（1–500 的整数，通常先调用 `/v1/planner/estimate` 预填、人工确认后传入）：此时 planner 必须输出 `[max(1, caseCount-5), caseCount]` 条用例，超出范围的草稿校验失败。
 
 结果另有 `modules`（`[{requirement, code, name}]`，每个功能模块的中文名称，可用于给模块文件夹命名）。`case_id` 由服务端生成，不由模型填写：`TC-<需求缩写>-<功能模块缩写>-<测试类别>-<NNN>`。需求缩写取请求里 requirement 的 `code`（大写字母/数字，2–12 位，不含 `-`；未提供时由 requirement id 去掉非字母数字得到），模块缩写与测试类别（FUNC 功能 / REL 可靠性 / PERF 性能 / SEC 安全 / COMPAT 兼容性 / UX 易用性）由 planner 给出，NNN 在同一结果内按前缀从 001 递增。`/v1/planner/estimate` 会同时返回每个需求的建议缩写 `requirementCodes`，供人确认后作为 `code` 传入。
@@ -94,7 +97,7 @@ curl http://localhost:4501/v1/planner/jobs/JOB_ID/result
 
 状态为 queued → running → succeeded / failed / cancelled。阶段和工具开始/完成事件来自运行过程，不使用虚构百分比。SSE 首先发送 snapshot，然后回放游标之后的 progress；使用 `Last-Event-ID` 或 `?after=N` 重连。最多保留最近 500 条，较旧记录丢失时先发送 reset。snapshot 表示当前任务状态，回放的旧 progress 用于过程记录，不应覆盖较新的状态。每 15 秒有心跳；终态关闭连接。抽屉关闭不影响任务，重新打开按 ID 查看即可。
 
-取消后阶段先变为 cancelling，等待 Agent/MCP/浏览器进程终止再进入 cancelled。整任务默认 15 分钟超时。重启后未完成任务标记 SERVER_RESTARTED，由调用方重新提交。当前没有幂等提交或自动续跑；重复 POST 会创建新任务。
+取消后阶段先变为 cancelling，等待 Agent/MCP/浏览器进程终止再进入 cancelled。整任务默认 15 分钟超时，可由请求的 `timeoutMs` 覆盖。重启后未完成任务标记 SERVER_RESTARTED，由调用方重新提交。当前没有幂等提交或自动续跑；重复 POST 会创建新任务。
 
 任务文件保存状态、进度和结果，不保存请求正文、storageState、headers 或队列输入。浏览器配置临时写入每任务独立目录，任务退出后清理，不从仓库 docs/specs 读取。调用方可按需归档结果。结果默认保留 24 小时；超期在下一次访问/提交/启动时清理，返回 404。最多保留 100 个任务，满时新请求返回 503。
 
@@ -110,7 +113,8 @@ curl http://localhost:4501/v1/planner/jobs/JOB_ID/result
 | PLANNER_CLAUDE_COMMAND | claude | 受信任的运行时可执行文件，不接受请求指定 |
 | PLANNER_DATA_DIR | 系统临时目录/auto-test-planner-jobs | 任务状态与结果目录；镜像为 /var/lib/planner |
 | PLANNER_CONCURRENCY | 1 | 同时运行的浏览器任务数 |
-| PLANNER_TIMEOUT_MS | 900000 | 单个执行任务的最长时间，不含排队 |
+| PLANNER_TIMEOUT_MS | 900000 | 单个执行任务的默认最长时间，不含排队；请求里的 `timeoutMs` 优先 |
+| PLANNER_MAX_TIMEOUT_MS | 14400000 | 请求 `timeoutMs` 的上限，超出按此封顶 |
 | PLANNER_MAX_JOBS | 100 | 包括终态任务在内的保留数量上限 |
 | PLANNER_RETENTION_MS | 86400000 | 终态任务保留时间 |
 | PLANNER_SIMPLIFY_TIMEOUT_MS | 60000 | `/v1/planner/simplify` 单次改写的最长等待时间 |
