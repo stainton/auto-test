@@ -1,0 +1,10 @@
+{
+  "name": "auto-test-generator-runtime",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Isolated runtime dependencies for the generator service image",
+  "dependencies": {
+    "@anthropic-ai/claude-code": "2.1.236",
+    "@playwright/test": "1.62.1"
+  }
+}

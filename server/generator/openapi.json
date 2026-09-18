@@ -1,0 +1,1053 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Auto Test Generator HTTP API",
+    "version": "1.0.0",
+    "description": "Asynchronous Playwright script generation from reviewed test cases. One spec file per case, in submission order. All business input is supplied in the request; the service reads no repository files and keeps no approval state — human review happens in the caller. Jobs persist status, events and results; unfinished jobs fail after a server restart and must be resubmitted. Request inputs and credentials are not persisted. Default retention is 24 hours. This is an HTTP API, not an MCP endpoint. No service token is required. Cross-origin browser requests are supported."
+  },
+  "servers": [
+    {
+      "url": "http://localhost:4502",
+      "description": "Local or port-forwarded service"
+    }
+  ],
+  "security": [],
+  "tags": [
+    {
+      "name": "Generator"
+    },
+    {
+      "name": "Operations"
+    }
+  ],
+  "paths": {
+    "/v1/generator/jobs": {
+      "post": {
+        "tags": [
+          "Generator"
+        ],
+        "operationId": "createGeneratorJob",
+        "summary": "Submit a script generation task",
+        "description": "Returns immediately with a queued job. Maximum JSON request size: 2 MiB. Submit 1–50 reviewed test cases; one Playwright spec is generated per case, in submission order. No local file paths or MCP commands are accepted: the browser target, authentication and any prior knowledge come from this request. Human review of the cases happens in the caller before submission. No idempotency key is supported: repeated submissions create separate jobs.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GeneratorInput"
+              },
+              "example": {
+                "cases": [
+                  {
+                    "id": "TC-LOGIN-AUTH-FUNC-001",
+                    "title": "错误密码登录失败",
+                    "priority": "P1",
+                    "requirement": "REQ-LOGIN-001",
+                    "precondition": "已存在专用测试账号，当前未登录",
+                    "steps": "1. 打开登录页面\n2. 输入账号和错误密码并提交",
+                    "expects": "1. 显示登录表单\n2. 显示错误提示且仍在登录页面"
+                  }
+                ],
+                "requirements": [
+                  {
+                    "id": "REQ-LOGIN-001",
+                    "title": "用户登录",
+                    "content": "错误密码显示提示且保留登录页面。"
+                  }
+                ],
+                "target": {
+                  "baseUrl": "https://test.example.com/login"
+                },
+                "context": {
+                  "instructions": "使用提供的专用测试账号，不要注册新账号。",
+                  "testData": {
+                    "username": "test-user",
+                    "password": "provided-by-caller"
+                  },
+                  "explorationNotes": "",
+                  "knownIssues": ""
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Task accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Job"
+                }
+              }
+            },
+            "headers": {
+              "Location": {
+                "description": "Relative URL for job status",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed JSON or invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Request exceeds 2 MiB",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Content-Type is not application/json",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal service error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Server shutting down or retained job capacity reached",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/generator/jobs/{jobId}": {
+      "parameters": [
+        {
+          "name": "jobId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "get": {
+        "tags": [
+          "Generator"
+        ],
+        "operationId": "getGeneratorJob",
+        "summary": "Read task status",
+        "responses": {
+          "200": {
+            "description": "Current task state; fetch output from the result endpoint after success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Job"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown or expired job",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal service error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Generator"
+        ],
+        "operationId": "cancelGeneratorJob",
+        "summary": "Cancel a queued or running task",
+        "description": "Idempotent for terminal jobs. A running task can briefly remain running with stage cancelling until its runtime and browser stop. Does not delete retained results.",
+        "responses": {
+          "202": {
+            "description": "Current state after cancellation request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Job"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown or expired job",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal service error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/generator/jobs/{jobId}/result": {
+      "parameters": [
+        {
+          "name": "jobId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "get": {
+        "tags": [
+          "Generator"
+        ],
+        "operationId": "getGeneratorResult",
+        "summary": "Read the generated scripts",
+        "responses": {
+          "200": {
+            "description": "Validated scripts, one per submitted case",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeneratorResult"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown or expired job",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Job is queued, running, failed or cancelled; inspect job status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal service error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "description": "Available only while the job is succeeded. Every submitted case appears exactly once, in submission order; a case the generator could not honestly automate comes back with status \"blocked\", an empty code and the reason in summary. Results expire with the job (default 24 hours)."
+      }
+    },
+    "/v1/generator/jobs/{jobId}/events": {
+      "parameters": [
+        {
+          "name": "jobId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "get": {
+        "tags": [
+          "Generator"
+        ],
+        "operationId": "streamGeneratorEvents",
+        "summary": "Subscribe to progress using Server-Sent Events",
+        "description": "No authentication is required. Native EventSource or fetch streaming can be used directly, including across origins (CORS enabled). First emits snapshot with the Job schema, then progress events after the cursor. Each progress event carries a monotonically increasing id. Last-Event-ID takes precedence over after. At most 500 recent progress events are retained; a reset event indicates a gap, followed by retained events. Snapshot has current state even if no newer progress exists. Terminal tasks close the stream; do not reconnect after a terminal snapshot/progress. Comments provide 15-second heartbeats. A disconnected drawer does not cancel the job. Slow consumers are disconnected and can resume with their last received id. Replayed events preceding snapshot.lastEventId are historical timeline entries and must not overwrite the current snapshot status.",
+        "parameters": [
+          {
+            "name": "Last-Event-ID",
+            "in": "header",
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d+$"
+            },
+            "description": "Last received progress id (0 for all retained events)"
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            },
+            "description": "Fallback event cursor; cannot exceed job.lastEventId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "SSE stream. Event data: snapshot=Job, progress=ProgressEvent, reset=EventReset.",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                },
+                "example": "event: snapshot\ndata: {\"id\":\"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa\",\"kind\":\"generator\",\"status\":\"running\",\"stage\":\"exploring\",\"createdAt\":\"2026-09-11T00:00:00Z\",\"updatedAt\":\"2026-09-11T00:00:01Z\",\"lastEventId\":3}\n\nid: 4\nevent: progress\ndata: {\"id\":4,\"jobId\":\"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa\",\"status\":\"running\",\"stage\":\"exploring\",\"message\":\"Running browser_snapshot\",\"createdAt\":\"2026-09-11T00:00:02Z\"}\n\n"
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid or future event cursor",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown or expired job",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal service error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-sse-event-schemas": {
+          "snapshot": {
+            "$ref": "#/components/schemas/Job"
+          },
+          "progress": {
+            "$ref": "#/components/schemas/ProgressEvent"
+          },
+          "reset": {
+            "$ref": "#/components/schemas/EventReset"
+          }
+        }
+      }
+    },
+    "/healthz": {
+      "get": {
+        "tags": [
+          "Operations"
+        ],
+        "operationId": "health",
+        "summary": "Process liveness",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Process is alive",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "status"
+                  ],
+                  "properties": {
+                    "status": {
+                      "const": "ok",
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/readyz": {
+      "get": {
+        "tags": [
+          "Operations"
+        ],
+        "operationId": "readiness",
+        "summary": "Service readiness",
+        "description": "CLI and browser prerequisites are checked before listening. This probe does not call the model provider or target site.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Accepting requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "status"
+                  ],
+                  "properties": {
+                    "status": {
+                      "const": "ready",
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Shutting down or unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "status"
+                  ],
+                  "properties": {
+                    "status": {
+                      "const": "unavailable",
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/openapi.json": {
+      "get": {
+        "tags": [
+          "Operations"
+        ],
+        "operationId": "getGeneratorOpenApi",
+        "summary": "Retrieve this OpenAPI document",
+        "responses": {
+          "200": {
+            "description": "OpenAPI 3.1 document",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "GeneratorInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "cases",
+          "target"
+        ],
+        "description": "Reviewed test cases plus the browser target and context needed to automate them.",
+        "properties": {
+          "cases": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 50,
+            "items": {
+              "$ref": "#/components/schemas/GeneratorCase"
+            }
+          },
+          "requirements": {
+            "type": "array",
+            "maxItems": 50,
+            "items": {
+              "$ref": "#/components/schemas/RequirementDoc"
+            },
+            "description": "Optional background. The generator asserts the case, and reads a requirement only to understand the business rule behind it; it never designs new cases."
+          },
+          "target": {
+            "$ref": "#/components/schemas/Target"
+          },
+          "context": {
+            "$ref": "#/components/schemas/GeneratorContext"
+          }
+        }
+      },
+      "GeneratorCase": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "title",
+          "steps"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$",
+            "description": "Stable case ID; the spec is filed as <id>.spec.ts."
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "priority": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "requirement": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "Requirement ID this case belongs to; selects which supplied requirement document is passed as background."
+          },
+          "precondition": {
+            "type": "string",
+            "maxLength": 200000
+          },
+          "steps": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200000,
+            "description": "Numbered steps, one per line, as stored by the caller."
+          },
+          "expects": {
+            "type": "string",
+            "maxLength": 200000,
+            "description": "Expected result per step, one per line; these define what the spec asserts."
+          }
+        }
+      },
+      "RequirementDoc": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "title",
+          "content"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "content": {
+            "type": "string",
+            "maxLength": 200000
+          }
+        }
+      },
+      "Target": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "baseUrl"
+        ],
+        "properties": {
+          "baseUrl": {
+            "type": "string",
+            "format": "uri",
+            "maxLength": 4096,
+            "description": "HTTP(S) URL of the system under test; generated specs use it as the Playwright baseURL."
+          },
+          "storageState": {
+            "$ref": "#/components/schemas/StorageState"
+          },
+          "extraHTTPHeaders": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "GeneratorContext": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "instructions": {
+            "type": "string",
+            "maxLength": 200000
+          },
+          "testData": {
+            "type": "object",
+            "description": "Values the case has to type (accounts, sample data). Supplied by the caller; never invented by the service."
+          },
+          "explorationNotes": {
+            "type": "string",
+            "maxLength": 200000,
+            "description": "What is already known about the application. Reused as fact and returned merged with new observations."
+          },
+          "knownIssues": {
+            "type": "string",
+            "maxLength": 200000,
+            "description": "Human-maintained business hints and historical bugs; read-only input."
+          }
+        }
+      },
+      "GeneratorResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "scripts",
+          "generated",
+          "blocked",
+          "explorationNotes",
+          "limitations"
+        ],
+        "properties": {
+          "scripts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Script"
+            }
+          },
+          "generated": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "blocked": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "explorationNotes": {
+            "type": "string"
+          },
+          "limitations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RiskNote"
+            },
+            "description": "Blocked cases as risk-ranked plain-language notes, highest risk first."
+          }
+        }
+      },
+      "Script": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "caseId",
+          "title",
+          "fileName",
+          "language",
+          "status",
+          "code",
+          "summary",
+          "deviations"
+        ],
+        "properties": {
+          "caseId": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "fileName": {
+            "type": "string"
+          },
+          "language": {
+            "type": "string",
+            "const": "typescript"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "generated",
+              "blocked"
+            ]
+          },
+          "code": {
+            "type": "string",
+            "maxLength": 120000,
+            "description": "Complete spec source. Empty when status is blocked."
+          },
+          "summary": {
+            "type": "string",
+            "maxLength": 40,
+            "description": "What the spec verifies, or why the case is blocked; Simplified Chinese, for a non-technical reader."
+          },
+          "deviations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RiskNote"
+            },
+            "description": "Where the live application contradicts the case; the spec asserts the observed behaviour and marks it with a // deviation: comment."
+          }
+        }
+      },
+      "RiskNote": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "risk",
+          "summary"
+        ],
+        "properties": {
+          "risk": {
+            "type": "string",
+            "enum": [
+              "high",
+              "medium",
+              "low"
+            ]
+          },
+          "summary": {
+            "type": "string",
+            "maxLength": 40
+          }
+        }
+      },
+      "StorageState": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "cookies",
+          "origins"
+        ],
+        "properties": {
+          "cookies": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true,
+              "required": [
+                "name",
+                "value",
+                "domain",
+                "path",
+                "expires",
+                "httpOnly",
+                "secure",
+                "sameSite"
+              ],
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "value": {
+                  "type": "string"
+                },
+                "domain": {
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string"
+                },
+                "expires": {
+                  "type": "number"
+                },
+                "httpOnly": {
+                  "type": "boolean"
+                },
+                "secure": {
+                  "type": "boolean"
+                },
+                "sameSite": {
+                  "type": "string",
+                  "enum": [
+                    "Strict",
+                    "Lax",
+                    "None"
+                  ]
+                }
+              }
+            }
+          },
+          "origins": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true,
+              "required": [
+                "origin",
+                "localStorage"
+              ],
+              "properties": {
+                "origin": {
+                  "type": "string"
+                },
+                "localStorage": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "required": [
+                      "name",
+                      "value"
+                    ],
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      },
+                      "value": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                "indexedDB": {
+                  "type": "array",
+                  "items": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "Job": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "kind",
+          "status",
+          "stage",
+          "createdAt",
+          "updatedAt",
+          "lastEventId"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "type": "string",
+            "const": "generator"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "running",
+              "succeeded",
+              "failed",
+              "cancelled"
+            ]
+          },
+          "stage": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "finishedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "lastEventId": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "error": {
+            "$ref": "#/components/schemas/ErrorDetail"
+          }
+        }
+      },
+      "ProgressEvent": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "jobId",
+          "status",
+          "stage",
+          "message",
+          "createdAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "jobId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "running",
+              "succeeded",
+              "failed",
+              "cancelled"
+            ]
+          },
+          "stage": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "toolStatus": {
+            "type": "string",
+            "enum": [
+              "started",
+              "completed",
+              "failed"
+            ]
+          },
+          "caseId": {
+            "type": "string",
+            "description": "Case the event belongs to."
+          },
+          "caseIndex": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "caseTotal": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "caseStatus": {
+            "type": "string",
+            "enum": [
+              "generated",
+              "blocked"
+            ]
+          },
+          "scriptsGenerated": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "scriptsBlocked": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "EventReset": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "firstAvailableEventId",
+          "message"
+        ],
+        "properties": {
+          "firstAvailableEventId": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "ErrorDetail": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "code",
+          "message"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "Machine-readable error code; task errors include GENERATOR_FAILED, JOB_TIMEOUT, JOB_CANCELLED and SERVER_RESTARTED"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/ErrorDetail"
+          }
+        }
+      }
+    }
+  }
+}

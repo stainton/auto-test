@@ -1,0 +1,11 @@
+**
+!build/
+!build/generator/
+!build/generator/package.json
+!build/generator/package-lock.json
+!build/generator/setting.json
+!build/generator/setting.example.json
+!build/generator/install-settings.mjs
+!server/
+!server/**
+server/tests/

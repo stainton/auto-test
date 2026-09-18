@@ -18,8 +18,10 @@ export async function readClaudeSettings(file) {
   return settings;
 }
 
-export async function resolveClaudeOptions({ env = process.env, defaultSettingsPath } = {}) {
-  let settingsPath = env.PLANNER_CLAUDE_SETTINGS;
+// prefix selects the calling service's environment variables (PLANNER_*, GENERATOR_*); the
+// configuration shape and the CLI's own precedence are identical for every service.
+export async function resolveClaudeOptions({ env = process.env, defaultSettingsPath, prefix = 'PLANNER' } = {}) {
+  let settingsPath = env[`${prefix}_CLAUDE_SETTINGS`];
   if (!settingsPath && defaultSettingsPath) {
     try { await access(defaultSettingsPath); settingsPath = defaultSettingsPath; }
     catch (error) { if (error.code !== 'ENOENT') throw error; }
@@ -28,7 +30,7 @@ export async function resolveClaudeOptions({ env = process.env, defaultSettingsP
   const settings = settingsPath ? await readClaudeSettings(settingsPath) : {};
   // Leave the CLI's settings/model precedence intact unless PLANNER_MODEL explicitly overrides it.
   const configuredModel = settings.model || settings.env?.ANTHROPIC_MODEL || env.ANTHROPIC_MODEL;
-  const model = env.PLANNER_MODEL || (configuredModel ? undefined : 'haiku');
+  const model = env[`${prefix}_MODEL`] || (configuredModel ? undefined : 'haiku');
   // Authentication is resolved by Claude from this explicit file and the process environment.
   // Do not require a separate ANTHROPIC_API_KEY when a token/helper/provider is configured in settings.
   return { settingsPath, model };

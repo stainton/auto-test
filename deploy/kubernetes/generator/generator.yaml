@@ -1,0 +1,97 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: generator-data
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: generator
+spec:
+  # File task storage has one owner. Recreate avoids overlapping writers.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: auto-test-generator
+  template:
+    metadata:
+      labels:
+        app: auto-test-generator
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: generator
+          image: auto-test-generator:local
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 4502
+          env:
+            - name: GENERATOR_CONCURRENCY
+              value: '1'
+            - name: GENERATOR_TIMEOUT_MS
+              value: '3600000'
+            - name: GENERATOR_CASE_TIMEOUT_MS
+              value: '600000'
+            - name: GENERATOR_MAX_JOBS
+              value: '100'
+            - name: GENERATOR_RETENTION_MS
+              value: '86400000'
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+          startupProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            failureThreshold: 30
+            periodSeconds: 2
+          resources:
+            requests:
+              cpu: '1'
+              memory: 1Gi
+              ephemeral-storage: 1Gi
+            limits:
+              cpu: '2'
+              memory: 3Gi
+              ephemeral-storage: 4Gi
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/generator
+            - name: shared-memory
+              mountPath: /dev/shm
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: generator-data
+        - name: shared-memory
+          emptyDir:
+            medium: Memory
+            sizeLimit: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: generator
+spec:
+  selector:
+    app: auto-test-generator
+  ports:
+    - name: http
+      port: 4502
+      targetPort: http
+  type: ClusterIP

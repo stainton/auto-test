@@ -18,15 +18,19 @@ async function body(req, maxBytes) {
   try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); }
   catch { throw new ServiceError(400, 'INVALID_JSON', 'Request body must contain valid JSON'); }
 }
+// basePath is the workflow's route prefix (/v1/planner, /v1/generator); everything below is shared.
 export function createHttpServer({ jobs, validateInput, openapiPath, maxBodyBytes = 2 * 1024 * 1024,
+  basePath = '/v1/planner',
   validateSimplifyInput, simplify, simplifyTimeoutMs = 60000,
   validateEstimateInput, estimate, estimateTimeoutMs = 120000 }) {
   const spec = readFileSync(openapiPath, 'utf8');
   const streams = new Set();
+  const jobsPath = `${basePath}/jobs`;
+  const jobRoute = new RegExp(`^${jobsPath.replace(/[/]/g, '\\/')}\\/([0-9a-f-]{36})(?:\\/(result|events))?$`);
   // Synchronous (non-job) model calls: validate, run with a hard timeout, map runtime failures to 502.
   const syncRoutes = new Map([
-    ['/v1/planner/simplify', { run: simplify, validate: validateSimplifyInput, timeoutMs: simplifyTimeoutMs, code: 'SIMPLIFY_FAILED', label: 'Simplify' }],
-    ['/v1/planner/estimate', { run: estimate, validate: validateEstimateInput, timeoutMs: estimateTimeoutMs, code: 'ESTIMATE_FAILED', label: 'Estimate' }]
+    [`${basePath}/simplify`, { run: simplify, validate: validateSimplifyInput, timeoutMs: simplifyTimeoutMs, code: 'SIMPLIFY_FAILED', label: 'Simplify' }],
+    [`${basePath}/estimate`, { run: estimate, validate: validateEstimateInput, timeoutMs: estimateTimeoutMs, code: 'ESTIMATE_FAILED', label: 'Estimate' }]
   ]);
   const server = http.createServer(async (req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -41,13 +45,13 @@ export function createHttpServer({ jobs, validateInput, openapiPath, maxBodyByte
       if (req.method === 'GET' && url.pathname === '/openapi.json') {
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' }); return res.end(spec);
       }
-      if (req.method === 'POST' && url.pathname === '/v1/planner/jobs') {
+      if (req.method === 'POST' && url.pathname === jobsPath) {
         const payload = await body(req, maxBodyBytes);
         let input;
         try { input = validateInput(payload); }
         catch (error) { throw new ServiceError(400, 'INVALID_REQUEST', error.message); }
         const job = jobs.submit(input);
-        res.setHeader('Location', `/v1/planner/jobs/${job.id}`);
+        res.setHeader('Location', `${jobsPath}/${job.id}`);
         return json(res, 202, job);
       }
       const sync = req.method === 'POST' && syncRoutes.get(url.pathname);
@@ -64,7 +68,7 @@ export function createHttpServer({ jobs, validateInput, openapiPath, maxBodyByte
         finally { clearTimeout(timer); }
         return json(res, 200, output);
       }
-      const match = /^\/v1\/planner\/jobs\/([0-9a-f-]{36})(?:\/(result|events))?$/.exec(url.pathname);
+      const match = jobRoute.exec(url.pathname);
       if (!match) throw new ServiceError(404, 'NOT_FOUND', 'Route not found');
       const [, id, resource] = match;
       const job = jobs.get(id);

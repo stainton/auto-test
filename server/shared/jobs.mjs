@@ -11,17 +11,22 @@ export class ServiceError extends Error {
 
 // Reusable task lifecycle. Each workflow injects an async worker(input, {signal, emit}).
 // A single process owns each data directory; inputs/credentials are never persisted here.
+// kind/label/started/completion carry the workflow's own wording (planner designs cases,
+// generator writes scripts) so the lifecycle itself stays workflow-agnostic.
 export class Jobs extends EventEmitter {
   constructor({ worker, dataDir, concurrency = 1, timeoutMs = 900000, maxJobs = 100,
-    retentionMs = 86400000, maxEvents = 500 }) {
+    retentionMs = 86400000, maxEvents = 500, kind = 'planner', label = 'Planner',
+    started = { stage: 'reading_requirements', message: 'Reading supplied requirements and context' },
+    completion = result => ({ message: 'Draft test cases ready for review', casesGenerated: result.cases.length }) }) {
     super();
     this.setMaxListeners(0);
-    Object.assign(this, { worker, dataDir, concurrency, timeoutMs, maxJobs, retentionMs, maxEvents });
+    Object.assign(this, { worker, dataDir, concurrency, timeoutMs, maxJobs, retentionMs, maxEvents,
+      kind, label, started, completion });
     this.jobs = new Map(); this.inputs = new Map(); this.running = new Map(); this.closing = false;
     mkdirSync(dataDir, { recursive: true, mode: 0o700 });
     for (const file of readdirSync(dataDir).filter(f => /^[0-9a-f-]{36}\.json$/.test(f))) {
       const job = JSON.parse(readFileSync(path.join(dataDir, file), 'utf8'));
-      if (`${job.id}.json` !== file || !Array.isArray(job.events)) throw new Error('Invalid persisted planner job');
+      if (`${job.id}.json` !== file || !Array.isArray(job.events)) throw new Error(`Invalid persisted ${kind} job`);
       this.jobs.set(job.id, job);
       if (!TERMINAL.has(job.status)) {
         job.status = 'failed'; job.finishedAt = now();
@@ -63,10 +68,10 @@ export class Jobs extends EventEmitter {
   }
   submit(input) {
     this.prune();
-    if (this.closing) throw new ServiceError(503, 'SHUTTING_DOWN', 'Planner is shutting down');
-    if (this.jobs.size >= this.maxJobs) throw new ServiceError(503, 'CAPACITY_EXCEEDED', 'Planner job capacity reached; retry after retention expiry or increase PLANNER_MAX_JOBS');
-    const job = { id: randomUUID(), kind: 'planner', status: 'queued', stage: 'queued', createdAt: now(), updatedAt: now(), lastEventId: 0, events: [] };
-    this.event(job, { stage: 'queued', message: 'Planner task accepted' });
+    if (this.closing) throw new ServiceError(503, 'SHUTTING_DOWN', `${this.label} is shutting down`);
+    if (this.jobs.size >= this.maxJobs) throw new ServiceError(503, 'CAPACITY_EXCEEDED', `${this.label} job capacity reached; retry after retention expiry or raise the job limit`);
+    const job = { id: randomUUID(), kind: this.kind, status: 'queued', stage: 'queued', createdAt: now(), updatedAt: now(), lastEventId: 0, events: [] };
+    this.event(job, { stage: 'queued', message: `${this.label} task accepted` });
     this.jobs.set(job.id, job); this.inputs.set(job.id, input);
     setImmediate(() => this.pump());
     return this.summary(job);
@@ -88,22 +93,22 @@ export class Jobs extends EventEmitter {
     }
   }
   async execute(job, input, controller) {
-    const timer = setTimeout(() => controller.abort(new ServiceError(504, 'JOB_TIMEOUT', 'Planner task exceeded its time limit')), this.timeoutMs);
+    const timer = setTimeout(() => controller.abort(new ServiceError(504, 'JOB_TIMEOUT', `${this.label} task exceeded its time limit`)), this.timeoutMs);
     timer.unref();
     try {
       job.status = 'running'; job.startedAt = now();
-      this.event(job, { stage: 'reading_requirements', message: 'Reading supplied requirements and context' });
+      this.event(job, { ...this.started });
       const result = await this.worker(input, { signal: controller.signal,
         emit: progress => { if (!controller.signal.aborted) this.event(job, progress); } });
       controller.signal.throwIfAborted();
       job.result = result; job.status = 'succeeded'; job.finishedAt = now();
-      this.event(job, { stage: 'completed', message: 'Draft test cases ready for review', casesGenerated: result.cases.length });
+      this.event(job, { stage: 'completed', ...this.completion(result) });
     } catch (error) {
       const reason = controller.signal.aborted ? controller.signal.reason : error;
       job.status = reason?.code === 'JOB_CANCELLED' ? 'cancelled' : 'failed';
       job.finishedAt = now(); delete job.result;
-      job.error = { code: reason?.code === 'JOB_TIMEOUT' ? 'JOB_TIMEOUT' : job.status === 'cancelled' ? 'JOB_CANCELLED' : 'PLANNER_FAILED',
-        message: job.status === 'cancelled' ? 'Planner task cancelled' : reason?.message || 'Planner execution failed' };
+      job.error = { code: reason?.code === 'JOB_TIMEOUT' ? 'JOB_TIMEOUT' : job.status === 'cancelled' ? 'JOB_CANCELLED' : `${this.kind.toUpperCase()}_FAILED`,
+        message: job.status === 'cancelled' ? `${this.label} task cancelled` : reason?.message || `${this.label} execution failed` };
       this.event(job, { stage: job.status, message: job.error.message });
     } finally { clearTimeout(timer); }
   }
@@ -112,11 +117,11 @@ export class Jobs extends EventEmitter {
     if (TERMINAL.has(job.status)) return this.summary(job);
     const entry = this.running.get(id);
     if (entry) {
-      entry.controller.abort(new ServiceError(409, 'JOB_CANCELLED', 'Planner task cancelled'));
-      this.event(job, { stage: 'cancelling', message: 'Stopping planner and browser processes' });
+      entry.controller.abort(new ServiceError(409, 'JOB_CANCELLED', `${this.label} task cancelled`));
+      this.event(job, { stage: 'cancelling', message: `Stopping ${this.kind} and browser processes` });
     } else {
       this.inputs.delete(id); job.status = 'cancelled'; job.finishedAt = now();
-      job.error = { code: 'JOB_CANCELLED', message: 'Planner task cancelled' };
+      job.error = { code: 'JOB_CANCELLED', message: `${this.label} task cancelled` };
       this.event(job, { stage: 'cancelled', message: job.error.message });
     }
     return this.summary(job);

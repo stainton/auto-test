@@ -28,3 +28,17 @@ Execute `npm run review` to open the review site (http://localhost:4400; set `RE
 - **Requirements** — create / edit requirement docs in `docs/`.
 - **Plan drafts** — review and edit the planner's output in `specs/`.
 - **Approved** — click *Approve* to move a plan (+ its `.cases.md`) into `specs/approved/`, releasing it to the generator.
+
+## HTTP services
+
+The same three roles are also available as standalone HTTP services under `server/`, for callers that
+drive the workflow from their own UI instead of this repository's files (CaseHub does):
+
+| Service | Port | Purpose |
+| --- | --- | --- |
+| [planner](server/planner/README.md) | 4501 | requirements in, reviewed-ready test case drafts out |
+| [generator](server/generator/README.md) | 4502 | reviewed test cases in, one Playwright spec per case out |
+
+They are separate processes with separate configuration, images and manifests, and either can run
+alone. They do not touch `docs/`, `specs/`, `.claude/agents/` or the file-based flow above — the human
+review gate is `specs/approved/` here, and the calling application there. See [server/README.md](server/README.md).

@@ -1,3 +1,7 @@
+import { object, check, string, keys, validateTarget, LIMITATION_MAX_CHARS, RISK_LEVELS, riskEntry, riskList } from '../shared/contract.mjs';
+
+export { LIMITATION_MAX_CHARS, RISK_LEVELS };
+
 export const CASE_FIELDS = ['request', 'name', 'case_id', 'priority', 'precondition', 'description', 'steps', 'expects'];
 // Fields kept in the wire format (test-model.md column order) but reserved for people: the model is never
 // asked for them and they are always emitted empty. description is the case summary a reviewer writes
@@ -19,17 +23,6 @@ export function requirementCode(req) {
   if (!/^[A-Z]/.test(code)) code = `R${code}`.slice(0, 12);
   return code.length >= 2 ? code : `${code}X`;
 }
-const object = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
-function check(condition, message) { if (!condition) throw new Error(message); }
-function string(value, name, max = 200000) {
-  check(typeof value === 'string' && value.trim().length > 0 && value.length <= max, `${name} must be a nonempty string (max ${max} characters)`);
-  return value;
-}
-function keys(value, allowed, name) {
-  check(object(value), `${name} must be an object`);
-  check(Object.keys(value).every(key => allowed.includes(key)), `${name} contains unsupported fields`);
-}
-
 export function validateRequirements(requirements) {
   check(Array.isArray(requirements) && requirements.length > 0 && requirements.length <= 50, 'requirements must contain 1–50 documents');
   const ids = new Set();
@@ -60,26 +53,7 @@ export function validateInput(input) {
   keys(input, ['requirements', 'target', 'context', 'caseCount'], 'request');
   validateRequirements(input.requirements);
   if (input.caseCount !== undefined) validateCaseCount(input.caseCount);
-  keys(input.target, ['baseUrl', 'storageState', 'extraHTTPHeaders'], 'target');
-  const url = new URL(string(input.target.baseUrl, 'target.baseUrl', 4096));
-  check(['http:', 'https:'].includes(url.protocol), 'target.baseUrl must be HTTP(S)');
-  if (input.target.storageState !== undefined) {
-    const state = input.target.storageState;
-    keys(state, ['cookies', 'origins'], 'target.storageState');
-    check(Array.isArray(state.cookies) && Array.isArray(state.origins), 'storageState requires cookies and origins arrays; file paths are not accepted');
-    for (const cookie of state.cookies) {
-      check(object(cookie) && ['name', 'value', 'domain', 'path'].every(k => typeof cookie[k] === 'string') &&
-        Number.isFinite(cookie.expires) && typeof cookie.httpOnly === 'boolean' && typeof cookie.secure === 'boolean' &&
-        ['Strict', 'Lax', 'None'].includes(cookie.sameSite), 'invalid storageState cookie');
-    }
-    for (const origin of state.origins) {
-      check(object(origin) && typeof origin.origin === 'string' && Array.isArray(origin.localStorage), 'invalid storageState origin');
-      for (const entry of origin.localStorage) check(object(entry) && typeof entry.name === 'string' && typeof entry.value === 'string', 'invalid localStorage entry');
-    }
-  }
-  if (input.target.extraHTTPHeaders !== undefined) {
-    check(object(input.target.extraHTTPHeaders) && Object.values(input.target.extraHTTPHeaders).every(v => typeof v === 'string'), 'extraHTTPHeaders must contain string values');
-  }
+  validateTarget(input.target);
   if (input.context !== undefined) {
     keys(input.context, ['explorationNotes', 'knownIssues', 'instructions', 'testData'], 'context');
     for (const key of ['explorationNotes', 'knownIssues', 'instructions']) {
@@ -107,11 +81,6 @@ export const MODULE_NAME_MAX_CHARS = 20;
 // by a non-technical reviewer right after the draft is imported, so the model writes each as short
 // plain-language text with a risk level (hard caps below, not prose limits the model can drift past), and
 // formatResult orders both from highest to lowest risk.
-export const LIMITATION_MAX_CHARS = 40;
-export const RISK_LEVELS = ['high', 'medium', 'low'];
-const riskEntry = (...fields) => ({ type: 'object', additionalProperties: false, required: ['risk', ...fields],
-  properties: { risk: { type: 'string', enum: RISK_LEVELS },
-    ...Object.fromEntries(fields.map(f => [f, { type: 'string', minLength: 1, maxLength: LIMITATION_MAX_CHARS }])) } });
 const LIMITATION = riskEntry('summary');
 // An issue names the scenario it showed up in and what the app actually did, so a reviewer can reproduce it
 // without reading the exploration notes.
@@ -145,16 +114,6 @@ export function outputSchema(input) {
   return schema;
 }
 const numberedLines = list => list.map((line, index) => `${index + 1}. ${line}`).join('\n');
-
-// Validates and normalises one {risk, ...text fields} array, ordered high to low risk.
-// Array.prototype.sort is stable, so equal-risk entries keep the model's order.
-function riskList(value, fields, name) {
-  check(Array.isArray(value) && value.every(v => object(v) && Object.keys(v).every(k => ['risk', ...fields].includes(k)) &&
-    RISK_LEVELS.includes(v.risk) && fields.every(f => typeof v[f] === 'string' && v[f].trim().length > 0 && [...v[f]].length <= LIMITATION_MAX_CHARS)),
-    `${name} must be {risk: high|medium|low, ${fields.join(', ')} (max ${LIMITATION_MAX_CHARS} characters each)} entries`);
-  return value.map(v => ({ risk: v.risk, ...Object.fromEntries(fields.map(f => [f, v[f].trim()])) }))
-    .sort((a, b) => RISK_LEVELS.indexOf(a.risk) - RISK_LEVELS.indexOf(b.risk));
-}
 
 const cell = value => value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\|/g, '&#124;').replace(/\r\n|\r|\n/g, '<br>');
 export function formatResult(output, input) {
