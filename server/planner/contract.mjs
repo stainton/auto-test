@@ -103,17 +103,22 @@ const STEP_LIST = { type: 'array', minItems: 1, maxItems: 50, items: {
 const MODEL_CASE_FIELDS = [...CASE_FIELDS.filter(field => !['expects', 'case_id'].includes(field) && !HUMAN_CASE_FIELDS.includes(field)),
   'module_code', 'module_name', 'category'];
 export const MODULE_NAME_MAX_CHARS = 20;
-// limitations are read by a non-technical reviewer right after the draft is imported, so the model writes
-// each as a short plain-language summary with a risk level (hard caps below, not prose limits the model can
-// drift past), and formatResult orders them from highest to lowest risk.
+// limitations (what stayed unverified) and issues (defects actually observed while exploring) are both read
+// by a non-technical reviewer right after the draft is imported, so the model writes each as short
+// plain-language text with a risk level (hard caps below, not prose limits the model can drift past), and
+// formatResult orders both from highest to lowest risk.
 export const LIMITATION_MAX_CHARS = 40;
-export const LIMITATION_RISKS = ['high', 'medium', 'low'];
-const LIMITATION = { type: 'object', additionalProperties: false, required: ['risk', 'summary'],
-  properties: { risk: { type: 'string', enum: LIMITATION_RISKS },
-    summary: { type: 'string', minLength: 1, maxLength: LIMITATION_MAX_CHARS } } };
+export const RISK_LEVELS = ['high', 'medium', 'low'];
+const riskEntry = (...fields) => ({ type: 'object', additionalProperties: false, required: ['risk', ...fields],
+  properties: { risk: { type: 'string', enum: RISK_LEVELS },
+    ...Object.fromEntries(fields.map(f => [f, { type: 'string', minLength: 1, maxLength: LIMITATION_MAX_CHARS }])) } });
+const LIMITATION = riskEntry('summary');
+// An issue names the scenario it showed up in and what the app actually did, so a reviewer can reproduce it
+// without reading the exploration notes.
+const ISSUE = riskEntry('scenario', 'symptom');
 export const OUTPUT_SCHEMA = {
   type: 'object', additionalProperties: false,
-  required: ['cases', 'explorationNotes', 'limitations'],
+  required: ['cases', 'explorationNotes', 'limitations', 'issues'],
   properties: {
     cases: { type: 'array', minItems: 1, maxItems: MAX_CASES, items: {
       type: 'object', additionalProperties: false, required: MODEL_CASE_FIELDS,
@@ -126,7 +131,8 @@ export const OUTPUT_SCHEMA = {
         : { type: 'string', minLength: 1 }]))
     } },
     explorationNotes: { type: 'string' },
-    limitations: { type: 'array', maxItems: 20, items: LIMITATION }
+    limitations: { type: 'array', maxItems: 20, items: LIMITATION },
+    issues: { type: 'array', maxItems: 20, items: ISSUE }
   }
 };
 // Per-job schema: a confirmed caseCount narrows the cases array so the runtime rejects an out-of-range
@@ -140,10 +146,20 @@ export function outputSchema(input) {
 }
 const numberedLines = list => list.map((line, index) => `${index + 1}. ${line}`).join('\n');
 
+// Validates and normalises one {risk, ...text fields} array, ordered high to low risk.
+// Array.prototype.sort is stable, so equal-risk entries keep the model's order.
+function riskList(value, fields, name) {
+  check(Array.isArray(value) && value.every(v => object(v) && Object.keys(v).every(k => ['risk', ...fields].includes(k)) &&
+    RISK_LEVELS.includes(v.risk) && fields.every(f => typeof v[f] === 'string' && v[f].trim().length > 0 && [...v[f]].length <= LIMITATION_MAX_CHARS)),
+    `${name} must be {risk: high|medium|low, ${fields.join(', ')} (max ${LIMITATION_MAX_CHARS} characters each)} entries`);
+  return value.map(v => ({ risk: v.risk, ...Object.fromEntries(fields.map(f => [f, v[f].trim()])) }))
+    .sort((a, b) => RISK_LEVELS.indexOf(a.risk) - RISK_LEVELS.indexOf(b.risk));
+}
+
 const cell = value => value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\|/g, '&#124;').replace(/\r\n|\r|\n/g, '<br>');
 export function formatResult(output, input) {
   check(Buffer.byteLength(JSON.stringify(output) ?? '') <= 2 * 1024 * 1024, 'planner structured output exceeds 2 MiB');
-  keys(output, ['cases', 'explorationNotes', 'limitations'], 'planner output');
+  keys(output, ['cases', 'explorationNotes', 'limitations', 'issues'], 'planner output');
   check(Array.isArray(output.cases) && output.cases.length > 0 && output.cases.length <= MAX_CASES, `planner must return 1–${MAX_CASES} cases`);
   if (input.caseCount !== undefined) {
     const { min, max } = caseCountRange(input.caseCount);
@@ -184,12 +200,8 @@ export function formatResult(output, input) {
       : item[field]]));
   });
   check(typeof output.explorationNotes === 'string', 'explorationNotes must be a string');
-  check(Array.isArray(output.limitations) && output.limitations.every(v => object(v) && Object.keys(v).every(k => ['risk', 'summary'].includes(k)) &&
-    LIMITATION_RISKS.includes(v.risk) && typeof v.summary === 'string' && v.summary.trim().length > 0 && [...v.summary].length <= LIMITATION_MAX_CHARS),
-    `limitations must be {risk: high|medium|low, summary (max ${LIMITATION_MAX_CHARS} characters)} entries`);
-  // Array.prototype.sort is stable, so equal-risk entries keep the model's order.
-  const limitations = output.limitations.map(({ risk, summary }) => ({ risk, summary: summary.trim() }))
-    .sort((a, b) => LIMITATION_RISKS.indexOf(a.risk) - LIMITATION_RISKS.indexOf(b.risk));
+  const limitations = riskList(output.limitations, ['summary'], 'limitations');
+  const issues = riskList(output.issues, ['scenario', 'symptom'], 'issues');
   const casesMarkdown = [
     `| ${CASE_FIELDS.join(' | ')} |`,
     `| ${CASE_FIELDS.map(() => '---').join(' | ')} |`,
@@ -197,5 +209,5 @@ export function formatResult(output, input) {
   ].join('\n');
   const planMarkdown = ['# Test Plan (draft)', ...cases.map((c, i) =>
     `\n## ${i + 1}. ${c.name}\n\nRequirement: ${c.request}\n\nCase ID: ${c.case_id}\n\nPriority: ${c.priority}\n\n### Preconditions\n${c.precondition}\n\n### Steps\n${c.steps}\n\n### Expected results\n${c.expects}`)].join('\n');
-  return { reviewStatus: 'draft', cases, casesMarkdown, planMarkdown, modules: [...modules.values()], explorationNotes: output.explorationNotes, limitations };
+  return { reviewStatus: 'draft', cases, casesMarkdown, planMarkdown, modules: [...modules.values()], explorationNotes: output.explorationNotes, limitations, issues };
 }

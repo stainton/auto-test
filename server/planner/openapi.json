@@ -929,7 +929,8 @@
           "planMarkdown",
           "modules",
           "explorationNotes",
-          "limitations"
+          "limitations",
+          "issues"
         ],
         "properties": {
           "reviewStatus": {
@@ -1015,6 +1016,43 @@
               }
             },
             "description": "Blocked or unverified areas ordered from high to low risk (equal risks keep model order); success means a valid draft exists, not that every behavior was verified"
+          },
+          "issues": {
+            "type": "array",
+            "maxItems": 20,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "risk",
+                "scenario",
+                "symptom"
+              ],
+              "properties": {
+                "risk": {
+                  "type": "string",
+                  "enum": [
+                    "high",
+                    "medium",
+                    "low"
+                  ],
+                  "description": "high: a core acceptance criterion, main flow, data integrity or security behaviour is broken; medium: secondary flow, boundary or error handling; low: cosmetic or rare edge"
+                },
+                "scenario": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 40,
+                  "description": "The business scenario the problem appeared in, in Simplified Chinese"
+                },
+                "symptom": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 40,
+                  "description": "What the app actually did in that scenario, in Simplified Chinese"
+                }
+              }
+            },
+            "description": "Defects actually observed during exploration (empty when nothing misbehaved), ordered from high to low risk (equal risks keep model order); cases still assert the required correct behaviour"
           }
         },
         "description": "The raw model structured output is limited to 2 MiB before deterministic Markdown formatting."

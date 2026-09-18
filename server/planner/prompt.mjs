@@ -14,6 +14,7 @@ Workflow:
 3. Read context.knownIssues as read-only input. Extract the underlying risk and apply it only when relevant to these requirements.
    Business rules define correct behavior. Do not change expected behavior simply because the live app contains a bug.
    Fixed bugs are regression risks; open bugs are limitations; wontfix notes describe accepted behavior.
+   A defect you observe yourself during exploration goes into issues.
 4. Call planner_setup_page once, passing seedFile "seed.spec.ts". The server has prepared the requested URL and storage state.
    If login still requires interaction, use only credentials/instructions provided in context. Report missing prerequisites.
    Explore breadth-first; prefer accessibility snapshots. Do not take screenshots unless necessary.
@@ -53,6 +54,21 @@ Workflow:
      medium = a secondary flow, boundary or error handling is unverified; low = cosmetic, rare edge, or already
      covered indirectly by another case.
    The server orders limitations from high to low risk.
+   Return real defects you actually observed while exploring in issues: the app did something that
+   contradicts the requirement, an acceptance criterion or its own visible rules. Only what you saw
+   happen — an area you could not reach or verify is a limitation, not an issue; never guess, infer a
+   defect from code or docs, or repeat a fixed bug from context.knownIssues that did not reproduce.
+   Leave issues empty when nothing misbehaved. Each entry is {risk, scenario, symptom}:
+   - scenario: the business scenario the problem appeared in, in Simplified Chinese, at most 40
+     characters, e.g. "使用正确密码登录".
+   - symptom: what the app actually did there, in Simplified Chinese, at most 40 characters, phrased so a
+     reviewer can recognise it, e.g. "停留在登录页且无任何提示". Describe the observed behaviour, not
+     selectors, URLs, tool names or a narration of your attempts. Merge repeats of the same defect.
+   - risk: high = a core acceptance criterion, main user flow, data integrity or security behaviour is
+     broken; medium = a secondary flow, boundary or error handling is wrong; low = cosmetic or rare edge.
+   Keep cases asserting the required correct behaviour even where an issue shows the app violates it:
+   the defect belongs in issues, never in a weakened expect.
+   The server orders issues from high to low risk.
    An inaccessible browser or missing authentication must not be disguised as completed exploration.
 
 Progress: Before each phase and after useful findings, emit a standalone text line starting with PLANNER_PROGRESS

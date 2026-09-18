@@ -75,6 +75,23 @@ test('limitations are short risk-tagged summaries ordered from high to low risk'
   assert.deepEqual(item.properties.risk.enum, ['high', 'medium', 'low']);
 });
 
+test('issues record observed defects as scenario/symptom pairs ordered from high to low risk', () => {
+  const iss = (risk, scenario, symptom) => ({ risk, scenario, symptom });
+  const result = formatResult({ ...output, issues: [iss('low', '空列表页展示', '提示文案错别字'),
+    iss('high', '使用正确密码登录', '停留在登录页且无任何提示'), iss('medium', '连续三次输错密码', '未按要求锁定账号')] }, input);
+  assert.deepEqual(result.issues, [iss('high', '使用正确密码登录', '停留在登录页且无任何提示'),
+    iss('medium', '连续三次输错密码', '未按要求锁定账号'), iss('low', '空列表页展示', '提示文案错别字')]);
+  assert.deepEqual(formatResult({ ...output, issues: [iss('high', ' 登录 ', ' 报错 ')] }, input).issues, [iss('high', '登录', '报错')]);
+  for (const issues of [['plain string'], [iss('critical', 'a', 'b')], [iss('high', '', 'b')], [iss('high', 'a', '')],
+    [iss('high', '长'.repeat(41), 'b')], [{ risk: 'high', scenario: 'a' }], [{ ...iss('low', 'a', 'b'), extra: 1 }]])
+    assert.throws(() => formatResult({ ...output, issues }, input));
+  assert.throws(() => formatResult({ ...output, issues: undefined }, input));
+  const item = OUTPUT_SCHEMA.properties.issues.items;
+  assert.deepEqual(item.required, ['risk', 'scenario', 'symptom']);
+  assert.equal(item.properties.symptom.maxLength, 40);
+  assert.ok(OUTPUT_SCHEMA.required.includes('issues'));
+});
+
 test('case_id is assigned as TC-<requirement code>-<module>-<category>-NNN, counting per prefix', () => {
   assert.equal(requirementCode({ id: 'REQ-001' }), 'REQ001');
   assert.equal(requirementCode({ id: '42' }), 'R42');
