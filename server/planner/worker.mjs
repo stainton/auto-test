@@ -18,7 +18,7 @@ const STAGES = new Set(['reading_requirements', 'preparing', 'exploring', 'desig
 // hands its location to the job store, and a later request that carries continueFrom arrives here as
 // input.resume and reopens the same conversation. Nothing but that session lives in the workspace, and it is
 // removed as soon as the run ends in a way nobody can continue (success, cancellation).
-export function createPlannerWorker({ runtime = runClaude, command, model, settingsPath, playwrightPackage,
+export function createPlannerWorker({ runtime = runClaude, command, model, settingsPath, playwrightPackage, assetCache,
   temporaryRoot = tmpdir() } = {}) {
   return async function planner(input, { signal, emit, checkpoint = () => {} }) {
     signal.throwIfAborted();
@@ -44,9 +44,16 @@ export function createPlannerWorker({ runtime = runClaude, command, model, setti
         `const { test } = require(${JSON.stringify(testEntry)});\ntest('planner seed', async ({ page }) => { await page.goto(${JSON.stringify(input.target.baseUrl)}, { waitUntil: 'domcontentloaded', timeout: 30000 }); });\n`, { mode: 0o600 });
       const mcpConfig = { mcpServers: { 'playwright-test': { type: 'stdio', command: process.execPath,
         args: [cli, 'run-test-mcp-server', '--headless', '--config', configPath] } } };
+      // Files the person attached: copied from the cache into this task's workspace (the directory the
+      // browser tools may read) so the model gets a plain local path and never has to fetch anything.
+      const assets = input.context?.assets ?? [];
+      if (assets.length && !assetCache) throw new Error('This planner has no asset cache configured');
+      const staged = [];
+      for (const asset of assets) staged.push({ ...asset, path: await assetCache.stage(asset, path.join(workspace, 'assets')) });
+      const promptInput = assets.length ? { ...input, context: { ...input.context, assets: staged } } : input;
       const calls = new Map();
       let setupSucceeded = false;
-      const output = await runtime({ cwd: workspace, prompt: resumed ? buildContinuationPrompt(input) : buildPrompt(input),
+      const output = await runtime({ cwd: workspace, prompt: resumed ? buildContinuationPrompt(promptInput) : buildPrompt(promptInput),
         systemPrompt: SYSTEM_PROMPT,
         schema: outputSchema(input), mcpConfig, allowedTools: ['mcp__playwright-test__*'],
         disallowedTools: EXCLUDED_TOOLS.map(t => `mcp__playwright-test__${t}`),

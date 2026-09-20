@@ -11,6 +11,7 @@ import { createHttpServer } from '../shared/http.mjs';
 import { validateInput, MAX_TIMEOUT_MS } from './contract.mjs';
 import { resolveClaudeOptions, createReloadingRuntime, createSettingsApplier, settingsPathFor } from '../runtime/settings.mjs';
 import { createPlannerWorker } from './worker.mjs';
+import { AssetCache } from '../shared/assets.mjs';
 import { createSimplifier, validateSimplifyInput } from './simplify.mjs';
 import { createEstimator, validateEstimateInput } from './estimate.mjs';
 
@@ -29,6 +30,9 @@ export async function main() {
   // rewrites the settings file, and the reloading runtime picks it up on the next CLI invocation.
   const applySettings = createSettingsApplier(settingsPathFor(settingsOptions));
   const runtime = createReloadingRuntime(runClaude, settingsOptions);
+  // Files CaseHub pushes for tasks (see shared/assets.mjs); kept apart from job data so pruning one never touches the other.
+  const assetCache = new AssetCache({ dir: process.env.PLANNER_ASSET_DIR ?? path.join(tmpdir(), 'auto-test-planner-assets'),
+    maxBytes: positive('PLANNER_ASSET_CACHE_MB', 2048) * 1024 * 1024 });
   const command = process.env.PLANNER_CLAUDE_COMMAND ?? 'claude';
   execFileSync(command, ['--version'], { timeout: 10000, stdio: 'ignore' });
   const require = createRequire(import.meta.url);
@@ -37,7 +41,7 @@ export async function main() {
   const { chromium } = require('playwright');
   await access(chromium.executablePath());
   const jobs = new Jobs({
-    worker: createPlannerWorker({ command, runtime, playwrightPackage }),
+    worker: createPlannerWorker({ command, runtime, playwrightPackage, assetCache }),
     dataDir: process.env.PLANNER_DATA_DIR ?? path.join(tmpdir(), 'auto-test-planner-jobs'),
     concurrency: positive('PLANNER_CONCURRENCY', 1), timeoutMs: positive('PLANNER_TIMEOUT_MS', 900000),
     // A request may raise or lower its own limit; the deployment keeps the last word through
@@ -50,8 +54,12 @@ export async function main() {
   // A request may continue an interrupted task instead of re-exploring from scratch: it repeats the whole
   // request and names that task, and the run reopens its session. The claim happens here, not in the
   // contract, because only the job store knows whether that session is still there to continue.
-  const validatePlannerInput = payload => {
+  const validatePlannerInput = async payload => {
     const input = validateInput(payload);
+    // A task may only name files this service already holds: CaseHub pushes them first, so a miss means the
+    // push was skipped or the file was pruned, and the caller must upload it again.
+    for (const asset of input.context?.assets ?? [])
+      if (!await assetCache.has(asset.sha256)) throw new ServiceError(409, 'ASSET_NOT_CACHED', `Asset ${asset.name} has not been uploaded to this service`);
     if (input.continueFrom === undefined) return input;
     const resume = jobs.claimContinuation(input.continueFrom);
     if (!existsSync(resume.workspace)) throw new ServiceError(409, 'NOT_CONTINUABLE',
@@ -61,7 +69,7 @@ export async function main() {
   };
   const simplify = createSimplifier({ command, runtime });
   const estimate = createEstimator({ command, runtime });
-  const server = createHttpServer({ jobs, applySettings, validateInput: validatePlannerInput, validateSimplifyInput, simplify,
+  const server = createHttpServer({ jobs, applySettings, assetCache, validateInput: validatePlannerInput, validateSimplifyInput, simplify,
     simplifyTimeoutMs: positive('PLANNER_SIMPLIFY_TIMEOUT_MS', 60000),
     validateEstimateInput, estimate, estimateTimeoutMs: positive('PLANNER_ESTIMATE_TIMEOUT_MS', 120000),
     openapiPath: fileURLToPath(new URL('./openapi.json', import.meta.url)) });

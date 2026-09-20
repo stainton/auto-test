@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -127,4 +127,29 @@ test('the configuration CaseHub sends is applied before the work starts, on jobs
   assert.equal(failed.status, 500);
   assert.equal((await failed.json()).error.code, 'AGENT_SETTINGS_FAILED');
   assert.equal(applied.length, 2);
+});
+
+test('assets pushed by CaseHub are cached by hash, verified, and only then usable by a task', async t => {
+  const { createHash } = await import('node:crypto');
+  const cacheDir = await mkdtemp(path.join(tmpdir(), 'planner-asset-cache-'));
+  t.after(() => rm(cacheDir, { recursive: true, force: true }));
+  const { AssetCache } = await import('../shared/assets.mjs');
+  const assetCache = new AssetCache({ dir: cacheDir });
+  const { request } = await setup(t, async () => formatResult(output, input), { assetCache });
+  const bytes = Buffer.from('not really a png'), sha = createHash('sha256').update(bytes).digest('hex');
+  const put = (name, body, headers = {}) => request(`/v1/planner/assets/${name}`, { method: 'PUT', body, headers: { 'Content-Type': 'application/octet-stream', ...headers } });
+  assert.equal((await request(`/v1/planner/assets/${sha}`, { method: 'HEAD' })).status, 404);
+  assert.equal((await put(sha, bytes)).status, 201);
+  assert.equal((await request(`/v1/planner/assets/${sha}`, { method: 'HEAD' })).status, 200);
+  assert.deepEqual(await readFile(assetCache.path(sha)), bytes);
+  // Wrong bytes for a hash are refused and leave nothing behind.
+  const other = 'b'.repeat(64);
+  const bad = await put(other, bytes);
+  assert.equal(bad.status, 400); assert.equal((await bad.json()).error.code, 'INVALID_ASSET');
+  assert.equal((await request(`/v1/planner/assets/${other}`, { method: 'HEAD' })).status, 404);
+  assert.equal((await put('not-a-hash', bytes)).status, 404);
+  const staged = await assetCache.stage({ id: 'a1', name: '../../etc/示例 图.png', sha256: sha }, path.join(cacheDir, 'ws'));
+  assert.equal(path.dirname(staged), path.join(cacheDir, 'ws'));
+  assert.deepEqual(await readFile(staged), bytes);
+  await assert.rejects(assetCache.stage({ id: 'a2', name: 'x.png', sha256: other }, path.join(cacheDir, 'ws')), /no longer cached/);
 });

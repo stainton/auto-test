@@ -99,3 +99,25 @@ test('continues an interrupted run in its own session instead of exploring again
   assert.ok(events.some(e => /Reopening the interrupted session/.test(e.message)));
   assert.deepEqual(await readdir(temporaryRoot), []); // the continuation succeeded, so the session is gone
 });
+
+test('attached assets are copied into the workspace and the model is given their local paths', async t => {
+  const { createHash } = await import('node:crypto');
+  const { AssetCache } = await import('../shared/assets.mjs');
+  const { Readable } = await import('node:stream');
+  const dir = await mkdtemp(path.join(tmpdir(), 'planner-worker-assets-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const assetCache = new AssetCache({ dir });
+  const bytes = Buffer.from('picture'), sha256 = createHash('sha256').update(bytes).digest('hex');
+  await assetCache.put(sha256, Readable.from([bytes]), bytes.length);
+  const asset = { id: 'a1', name: '头像.png', type: 'image', mimeType: 'image/png', sha256, size: bytes.length };
+  let seen;
+  const worker = createPlannerWorker({ assetCache, runtime: async options => {
+    seen = JSON.parse(options.prompt).context.assets[0];
+    assert.deepEqual(await readFile(seen.path), bytes);
+    assert.ok(seen.path.startsWith(options.cwd));
+    throw new Error('stop after inspecting the prompt');
+  } });
+  await assert.rejects(worker({ ...input, context: { assets: [asset] } }, { signal: new AbortController().signal, emit() {} }), /stop after/);
+  assert.equal(seen.name, '头像.png');
+  await assert.rejects(createPlannerWorker({ runtime: async () => {} })({ ...input, context: { assets: [asset] } }, { signal: new AbortController().signal, emit() {} }), /no asset cache/);
+});

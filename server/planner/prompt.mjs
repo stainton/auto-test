@@ -23,6 +23,11 @@ Workflow:
    Business rules define correct behavior. Do not change expected behavior simply because the live app contains a bug.
    Fixed bugs are regression risks; open bugs are limitations; wontfix notes describe accepted behavior.
    A defect you observe yourself during exploration goes into issues.
+   context.assets, when present, are real files (image/video/audio) a person attached for scenarios that need one
+   (uploading a picture, attaching a recording). Each entry has name, type, mimeType, size and path: the file is
+   already on local disk at that path, so use it directly (e.g. browser_file_upload with the path) and never try
+   to download or fetch it. Only use one when a scenario you are actually exploring needs that kind of file, and
+   never claim to have used an asset you did not.
 4. Call planner_setup_page once, passing seedFile "seed.spec.ts". The server has prepared the requested URL and storage state.
    If login still requires interaction, use only credentials/instructions provided in context. Report missing prerequisites.
    Explore breadth-first; prefer accessibility snapshots. Do not take screenshots unless necessary.

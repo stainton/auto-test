@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { CASE_FIELDS, OUTPUT_SCHEMA, CASE_ID_RE, validateInput, formatResult, outputSchema, requirementCode,
-  MIN_TIMEOUT_MS, MAX_TIMEOUT_MS } from '../planner/contract.mjs';
+  MIN_TIMEOUT_MS, MAX_TIMEOUT_MS, MAX_ASSETS } from '../planner/contract.mjs';
 import { buildPrompt } from '../planner/prompt.mjs';
 import { input, output } from './fixtures.mjs';
 
@@ -24,6 +24,20 @@ test('accepts a caller-chosen task timeout only within the documented range', ()
   assert.equal(validateInput({ ...input, continueFrom }).continueFrom, continueFrom);
   for (const invalid of ['', 'not-a-job', 123, null, `${continueFrom}x`])
     assert.throws(() => validateInput({ ...input, continueFrom: invalid }));
+});
+
+test('context.assets accepts references to pushed files and rejects anything else', () => {
+  const sha256 = 'a'.repeat(64);
+  const asset = { id: 'a1', name: '示例图片', type: 'image', mimeType: 'image/png', sha256, size: 68 };
+  assert.deepEqual(validateInput({ ...input, context: { assets: [asset] } }).context.assets, [asset]);
+  for (const invalid of [
+    { ...asset, type: 'document' }, { ...asset, sha256: 'A'.repeat(64) }, { ...asset, sha256: 'abc' }, { ...asset, size: 0 },
+    { ...asset, size: 1.5 }, { ...asset, url: 'http://elsewhere/x' }, { id: 'a1' }, { ...asset, id: '' }
+  ]) assert.throws(() => validateInput({ ...input, context: { assets: [invalid] } }));
+  assert.throws(() => validateInput({ ...input, context: { assets: 'a1' } }));
+  assert.throws(() => validateInput({ ...input, context: { assets: Array(MAX_ASSETS + 1).fill(asset) } }));
+  assert.equal(validateInput({ ...input, context: { assets: Array(MAX_ASSETS).fill(asset) } }).context.assets.length, MAX_ASSETS);
+  assert.deepEqual(validateInput({ ...input, context: { assets: [] } }).context.assets, []);
 });
 
 test('returns exact case fields and escaped Markdown in original model order', () => {

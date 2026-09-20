@@ -54,7 +54,11 @@ node server/planner/main.mjs
     "instructions": "覆盖正常登录和错误密码。使用提供的专用测试账号。",
     "testData": { "username": "test-user", "password": "caller-supplied-password" },
     "explorationNotes": "",
-    "knownIssues": ""
+    "knownIssues": "",
+    "assets": [
+      { "id": "a1b2c3", "name": "上传测试图.png", "type": "image", "mimeType": "image/png",
+        "sha256": "<文件的 SHA-256 小写十六进制>", "size": 68 }
+    ]
   }
 }
 ```
@@ -68,7 +72,9 @@ curl -N http://localhost:4501/v1/planner/jobs/JOB_ID/events
 curl http://localhost:4501/v1/planner/jobs/JOB_ID/result
 ```
 
-`target.storageState` 可以直接传 Playwright 导出的 cookies/origins 对象（不接受本地文件路径），`target.extraHTTPHeaders` 可以携带目标系统的请求头。登录仍需交互时，将指引与专用测试账号放入 context。当前不接收自定义 seed 源码、本地附件路径或自定义 MCP 命令；需要上传附件的场景会注明缺少输入。
+`target.storageState` 可以直接传 Playwright 导出的 cookies/origins 对象（不接受本地文件路径），`target.extraHTTPHeaders` 可以携带目标系统的请求头。登录仍需交互时，将指引与专用测试账号放入 context。当前不接收自定义 seed 源码或自定义 MCP 命令。
+
+`context.assets`（最多 20 条）是场景需要真实文件时用的：每条 `{id, name, type, mimeType, sha256, size}`，只引用文件，不含字节。文件由调用方（CaseHub）先推送：`HEAD /v1/planner/assets/{sha256}` 询问是否已缓存，`PUT` 同一路径上传原始字节（需要 Content-Length，上限 200 MiB，服务校验大小与 SHA-256 后才保留，重复上传无副作用）。任务引用了未上传的文件返回 409 `ASSET_NOT_CACHED`。任务开始时服务把文件复制进任务工作目录，并把本地路径 `path` 交给模型，模型直接用（如 `browser_file_upload`），不下载任何东西；服务也从不主动访问调用方，因此不需要调用方的地址、凭据或数据库权限。缓存目录 `PLANNER_ASSET_DIR`（默认系统临时目录下），总量超过 `PLANNER_ASSET_CACHE_MB`（默认 2048）时先淘汰最久未使用的文件。
 
 返回结果中的 cases 每条严格包含 `test-model.md` 的八个字段，其中 `description` 是留给评审人工填写的总结，AI 不填写，恒为空字符串：
 
@@ -121,6 +127,8 @@ curl http://localhost:4501/v1/planner/jobs/JOB_ID/result
 | PLANNER_MAX_TIMEOUT_MS | 14400000 | 请求 `timeoutMs` 的上限，超出按此封顶 |
 | PLANNER_MAX_JOBS | 100 | 包括终态任务在内的保留数量上限 |
 | PLANNER_RETENTION_MS | 86400000 | 终态任务保留时间 |
+| PLANNER_ASSET_DIR | 系统临时目录/auto-test-planner-assets | CaseHub 推送的资产缓存目录（按 SHA-256 命名） |
+| PLANNER_ASSET_CACHE_MB | 2048 | 资产缓存总量上限，超出先淘汰最久未使用的文件 |
 | PLANNER_SIMPLIFY_TIMEOUT_MS | 60000 | `/v1/planner/simplify` 单次改写的最长等待时间 |
 | PLANNER_ESTIMATE_TIMEOUT_MS | 120000 | `/v1/planner/estimate` 单次评估的最长等待时间 |
 

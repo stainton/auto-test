@@ -2,6 +2,7 @@ import http from 'node:http';
 import { readFileSync } from 'node:fs';
 import { ServiceError, TERMINAL } from './jobs.mjs';
 import { takeAgentSettings } from './contract.mjs';
+import { SHA256_RE, MAX_ASSET_BYTES } from './assets.mjs';
 
 function json(res, status, value) {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
@@ -21,7 +22,7 @@ async function body(req, maxBytes) {
 }
 // basePath is the workflow's route prefix (/v1/planner, /v1/generator); everything below is shared.
 export function createHttpServer({ jobs, validateInput, openapiPath, maxBodyBytes = 2 * 1024 * 1024,
-  basePath = '/v1/planner', applySettings,
+  basePath = '/v1/planner', applySettings, assetCache,
   validateSimplifyInput, simplify, simplifyTimeoutMs = 60000,
   validateEstimateInput, estimate, estimateTimeoutMs = 120000 }) {
   const spec = readFileSync(openapiPath, 'utf8');
@@ -50,7 +51,7 @@ export function createHttpServer({ jobs, validateInput, openapiPath, maxBodyByte
   ]);
   const server = http.createServer(async (req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, POST, PUT, DELETE, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Last-Event-ID');
     res.setHeader('Access-Control-Expose-Headers', 'Location');
     if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
@@ -61,13 +62,28 @@ export function createHttpServer({ jobs, validateInput, openapiPath, maxBodyByte
       if (req.method === 'GET' && url.pathname === '/openapi.json') {
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' }); return res.end(spec);
       }
+      // Assets CaseHub pushes ahead of a task: HEAD asks whether a file is already cached, PUT stores it.
+      const assetMatch = assetCache && url.pathname.startsWith(`${basePath}/assets/`) ? url.pathname.slice(`${basePath}/assets/`.length) : undefined;
+      if (assetMatch !== undefined) {
+        if (!SHA256_RE.test(assetMatch)) throw new ServiceError(404, 'NOT_FOUND', 'Route not found');
+        if (req.method === 'HEAD' || req.method === 'GET') {
+          res.writeHead(await assetCache.has(assetMatch) ? 200 : 404, { 'Cache-Control': 'no-store' }); return res.end();
+        }
+        if (req.method !== 'PUT') throw new ServiceError(405, 'METHOD_NOT_ALLOWED', 'Method not allowed');
+        const size = Number(req.headers['content-length']);
+        if (!Number.isSafeInteger(size) || size < 1) throw new ServiceError(411, 'LENGTH_REQUIRED', 'Content-Length is required');
+        if (size > MAX_ASSET_BYTES) throw new ServiceError(413, 'BODY_TOO_LARGE', 'Asset is too large');
+        try { await assetCache.put(assetMatch, req, size); }
+        catch (error) { throw new ServiceError(400, 'INVALID_ASSET', error.message); }
+        return json(res, 201, { sha256: assetMatch, size });
+      }
       if (req.method === 'POST' && url.pathname === jobsPath) {
         const payload = await body(req, maxBodyBytes);
         const settings = settingsFor(payload);
         let input;
         // validateInput may also resolve references the request makes to earlier jobs (continueFrom),
         // whose own status codes must survive instead of being flattened into a 400.
-        try { input = validateInput(payload); }
+        try { input = await validateInput(payload); }
         catch (error) { throw error instanceof ServiceError ? error : new ServiceError(400, 'INVALID_REQUEST', error.message); }
         await apply(settings);
         const job = jobs.submit(input);
@@ -133,7 +149,7 @@ export function createHttpServer({ jobs, validateInput, openapiPath, maxBodyByte
         message: error.message || 'Internal server error' } });
     }
   });
-  server.requestTimeout = 30000; server.headersTimeout = 15000;
+  server.requestTimeout = assetCache ? 600000 : 30000; // an asset upload can be large server.headersTimeout = 15000;
   server.closeStreams = () => { for (const res of streams) res.end(); };
   return server;
 }

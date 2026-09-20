@@ -658,6 +658,70 @@
           }
         }
       }
+    },
+    "/v1/planner/assets/{sha256}": {
+      "head": {
+        "summary": "Is this file already cached?",
+        "parameters": [
+          {
+            "name": "sha256",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Cached"
+          },
+          "404": {
+            "description": "Not cached"
+          }
+        }
+      },
+      "put": {
+        "summary": "Cache a file for later tasks",
+        "description": "Raw bytes with Content-Length (max 200 MiB). The service verifies size and SHA-256 before keeping anything; pushing a cached file again is harmless. Oldest-used files are pruned past PLANNER_ASSET_CACHE_MB.",
+        "parameters": [
+          {
+            "name": "sha256",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Stored"
+          },
+          "400": {
+            "description": "Size or hash mismatch (INVALID_ASSET)"
+          },
+          "411": {
+            "description": "Content-Length required"
+          },
+          "413": {
+            "description": "Too large"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -764,6 +828,57 @@
                 "type": "object",
                 "additionalProperties": true,
                 "description": "Caller-supplied account/test data sent to the model when needed for planning/login."
+              },
+              "assets": {
+                "type": "array",
+                "maxItems": 20,
+                "description": "Files a person attached to this task. Each must already have been uploaded with PUT /v1/planner/assets/{sha256} (otherwise 409 ASSET_NOT_CACHED). The planner copies them into the task workspace and gives the model their local paths; nothing is downloaded and the service never contacts the caller.",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "id",
+                    "name",
+                    "type",
+                    "mimeType",
+                    "sha256",
+                    "size"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    },
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "image",
+                        "video",
+                        "audio"
+                      ]
+                    },
+                    "mimeType": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    },
+                    "sha256": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{64}$"
+                    },
+                    "size": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 209715200
+                    }
+                  }
+                }
               }
             }
           },

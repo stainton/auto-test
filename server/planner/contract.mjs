@@ -1,3 +1,4 @@
+import { SHA256_RE, MAX_ASSET_BYTES } from '../shared/assets.mjs';
 import { object, check, string, keys, validateTarget, LIMITATION_MAX_CHARS, RISK_LEVELS, riskEntry, riskList } from '../shared/contract.mjs';
 
 export { LIMITATION_MAX_CHARS, RISK_LEVELS };
@@ -69,6 +70,25 @@ export function validateContinueFrom(value, name = 'continueFrom') {
   return value;
 }
 
+// context.assets are files CaseHub already pushed to this service (PUT /v1/planner/assets/<sha256>): the
+// task only references them, by hash. The service copies each into the task's workspace and tells the
+// model where (planner/worker.mjs), so the model never downloads anything and this service never
+// contacts CaseHub.
+export const MAX_ASSETS = 20;
+export const ASSET_TYPES = ['image', 'video', 'audio'];
+export function validateAssets(assets) {
+  check(Array.isArray(assets) && assets.length <= MAX_ASSETS, `context.assets must contain at most ${MAX_ASSETS} entries`);
+  for (const asset of assets) {
+    keys(asset, ['id', 'name', 'type', 'mimeType', 'sha256', 'size'], 'context.assets entry');
+    string(asset.id, 'context.assets.id', 200);
+    string(asset.name, 'context.assets.name', 200);
+    check(ASSET_TYPES.includes(asset.type), `context.assets.type must be one of ${ASSET_TYPES.join(', ')}`);
+    string(asset.mimeType, 'context.assets.mimeType', 200);
+    check(typeof asset.sha256 === 'string' && SHA256_RE.test(asset.sha256), 'context.assets.sha256 must be a lowercase hex SHA-256');
+    check(Number.isSafeInteger(asset.size) && asset.size > 0 && asset.size <= MAX_ASSET_BYTES, 'context.assets.size must be a positive integer within the asset limit');
+  }
+  return assets;
+}
 export function validateInput(input) {
   keys(input, ['requirements', 'target', 'context', 'caseCount', 'timeoutMs', 'continueFrom'], 'request');
   validateRequirements(input.requirements);
@@ -77,11 +97,12 @@ export function validateInput(input) {
   if (input.continueFrom !== undefined) validateContinueFrom(input.continueFrom);
   validateTarget(input.target);
   if (input.context !== undefined) {
-    keys(input.context, ['explorationNotes', 'knownIssues', 'instructions', 'testData'], 'context');
+    keys(input.context, ['explorationNotes', 'knownIssues', 'instructions', 'testData', 'assets'], 'context');
     for (const key of ['explorationNotes', 'knownIssues', 'instructions']) {
       if (input.context[key] !== undefined) check(typeof input.context[key] === 'string' && input.context[key].length <= 200000, `context.${key} must be a string (max 200000 characters)`);
     }
     if (input.context.testData !== undefined) check(object(input.context.testData), 'context.testData must be an object');
+    if (input.context.assets !== undefined) validateAssets(input.context.assets);
   }
   return structuredClone(input);
 }
