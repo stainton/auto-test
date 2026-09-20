@@ -1,6 +1,7 @@
 import http from 'node:http';
 import { readFileSync } from 'node:fs';
 import { ServiceError, TERMINAL } from './jobs.mjs';
+import { takeAgentSettings } from './contract.mjs';
 
 function json(res, status, value) {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
@@ -20,10 +21,25 @@ async function body(req, maxBytes) {
 }
 // basePath is the workflow's route prefix (/v1/planner, /v1/generator); everything below is shared.
 export function createHttpServer({ jobs, validateInput, openapiPath, maxBodyBytes = 2 * 1024 * 1024,
-  basePath = '/v1/planner',
+  basePath = '/v1/planner', applySettings,
   validateSimplifyInput, simplify, simplifyTimeoutMs = 60000,
   validateEstimateInput, estimate, estimateTimeoutMs = 120000 }) {
   const spec = readFileSync(openapiPath, 'utf8');
+  // Every request may carry the agent configuration CaseHub holds for this service. It is applied once
+  // the request is known to be valid and before the work starts, so the run uses the configuration
+  // CaseHub sent rather than whatever this container happened to keep from an earlier one.
+  const settingsFor = payload => {
+    try { return takeAgentSettings(payload); }
+    catch (error) { throw new ServiceError(400, 'INVALID_REQUEST', error.message); }
+  };
+  const apply = async settings => {
+    if (!settings || !applySettings) return;
+    try { await applySettings(settings); }
+    catch (error) {
+      if (error.invalidSettings) throw new ServiceError(400, 'INVALID_AGENT_SETTINGS', error.message);
+      throw new ServiceError(500, 'AGENT_SETTINGS_FAILED', `Cannot apply the agent configuration: ${error.message}`);
+    }
+  };
   const streams = new Set();
   const jobsPath = `${basePath}/jobs`;
   const jobRoute = new RegExp(`^${jobsPath.replace(/[/]/g, '\\/')}\\/([0-9a-f-]{36})(?:\\/(result|events))?$`);
@@ -47,11 +63,13 @@ export function createHttpServer({ jobs, validateInput, openapiPath, maxBodyByte
       }
       if (req.method === 'POST' && url.pathname === jobsPath) {
         const payload = await body(req, maxBodyBytes);
+        const settings = settingsFor(payload);
         let input;
         // validateInput may also resolve references the request makes to earlier jobs (continueFrom),
         // whose own status codes must survive instead of being flattened into a 400.
         try { input = validateInput(payload); }
         catch (error) { throw error instanceof ServiceError ? error : new ServiceError(400, 'INVALID_REQUEST', error.message); }
+        await apply(settings);
         const job = jobs.submit(input);
         res.setHeader('Location', `${jobsPath}/${job.id}`);
         return json(res, 202, job);
@@ -59,9 +77,11 @@ export function createHttpServer({ jobs, validateInput, openapiPath, maxBodyByte
       const sync = req.method === 'POST' && syncRoutes.get(url.pathname);
       if (sync && sync.run && sync.validate) {
         const payload = await body(req, maxBodyBytes);
+        const settings = settingsFor(payload);
         let input;
         try { input = sync.validate(payload); }
         catch (error) { throw new ServiceError(400, 'INVALID_REQUEST', error.message); }
+        await apply(settings);
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(new Error(`${sync.label} request timed out`)), sync.timeoutMs);
         let output;

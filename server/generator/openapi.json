@@ -533,6 +533,31 @@
           },
           "context": {
             "$ref": "#/components/schemas/GeneratorContext"
+          },
+          "agentSettings": {
+            "$ref": "#/components/schemas/AgentSettings"
+          }
+        }
+      },
+      "AgentSettings": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "revision",
+          "content"
+        ],
+        "description": "Claude configuration CaseHub holds for this agent, sent with every request. Before the request runs, the service makes its own settings file match this content (writing only when it differs), so no configuration file has to be shared between the two deployments and a drifted file is corrected.",
+        "properties": {
+          "revision": {
+            "type": "string",
+            "description": "Opaque identifier of this configuration version, advanced by CaseHub whenever the content changes",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "content": {
+            "type": "string",
+            "description": "Complete setting.json text (Claude settings object: env, model, permissions, …)",
+            "maxLength": 1048576
           }
         }
       },
@@ -1033,7 +1058,7 @@
         "properties": {
           "code": {
             "type": "string",
-            "description": "Machine-readable error code; task errors include GENERATOR_FAILED, JOB_TIMEOUT, JOB_CANCELLED and SERVER_RESTARTED"
+            "description": "Machine-readable error code; task errors include GENERATOR_FAILED, JOB_TIMEOUT, JOB_CANCELLED and SERVER_RESTARTED; a rejected or unusable agentSettings is INVALID_REQUEST, INVALID_AGENT_SETTINGS or AGENT_SETTINGS_FAILED"
           },
           "message": {
             "type": "string"

@@ -783,6 +783,31 @@
             "type": "string",
             "format": "uuid",
             "description": "Id of a failed task of this service whose status says continuable (typically one that hit JOB_TIMEOUT). The new task reopens that task's exploration session instead of exploring from scratch: the browser is new, the model's earlier findings are not. Every other field must still be supplied and is applied as given, so the continuation may raise timeoutMs or correct the test data. One interrupted task can be continued once; the continuation itself becomes continuable if it also fails."
+          },
+          "agentSettings": {
+            "$ref": "#/components/schemas/AgentSettings"
+          }
+        }
+      },
+      "AgentSettings": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "revision",
+          "content"
+        ],
+        "description": "Claude configuration CaseHub holds for this agent, sent with every request. Before the request runs, the service makes its own settings file match this content (writing only when it differs), so no configuration file has to be shared between the two deployments and a drifted file is corrected.",
+        "properties": {
+          "revision": {
+            "type": "string",
+            "description": "Opaque identifier of this configuration version, advanced by CaseHub whenever the content changes",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "content": {
+            "type": "string",
+            "description": "Complete setting.json text (Claude settings object: env, model, permissions, …)",
+            "maxLength": 1048576
           }
         }
       },
@@ -1250,6 +1275,9 @@
           "expected": {
             "type": "string",
             "maxLength": 20000
+          },
+          "agentSettings": {
+            "$ref": "#/components/schemas/AgentSettings"
           }
         }
       },
@@ -1333,6 +1361,9 @@
                 "description": "The same constraints the planner job receives; scope they exclude is not counted into the number"
               }
             }
+          },
+          "agentSettings": {
+            "$ref": "#/components/schemas/AgentSettings"
           }
         }
       },
@@ -1388,7 +1419,7 @@
         "properties": {
           "code": {
             "type": "string",
-            "description": "Machine-readable error code; task errors include PLANNER_FAILED, JOB_TIMEOUT, JOB_CANCELLED and SERVER_RESTARTED; a rejected continueFrom is NOT_CONTINUABLE"
+            "description": "Machine-readable error code; task errors include PLANNER_FAILED, JOB_TIMEOUT, JOB_CANCELLED and SERVER_RESTARTED; a rejected continueFrom is NOT_CONTINUABLE; a rejected or unusable agentSettings is INVALID_REQUEST, INVALID_AGENT_SETTINGS or AGENT_SETTINGS_FAILED"
           },
           "message": {
             "type": "string"

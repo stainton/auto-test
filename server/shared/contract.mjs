@@ -57,3 +57,19 @@ export function riskList(value, fields, name) {
   return value.map(v => ({ risk: v.risk, ...Object.fromEntries(fields.map(f => [f, v[f].trim()])) }))
     .sort((a, b) => RISK_LEVELS.indexOf(a.risk) - RISK_LEVELS.indexOf(b.risk));
 }
+
+// CaseHub keeps every agent's Claude configuration in its database and sends the current one with each
+// request: content is the setting.json text, revision identifies that version. It is a top-level request
+// field handled by the shared HTTP layer (not by a workflow's own contract), so a service applies it
+// before the request runs and no configuration copy has to be shared between the two deployments.
+export const AGENT_SETTINGS_MAX_CHARS = 1024 * 1024;
+export function takeAgentSettings(payload) {
+  if (!object(payload) || payload.agentSettings === undefined) return undefined;
+  const settings = payload.agentSettings;
+  delete payload.agentSettings;
+  keys(settings, ['revision', 'content'], 'agentSettings');
+  string(settings.revision, 'agentSettings.revision', 200);
+  check(typeof settings.content === 'string' && settings.content.length <= AGENT_SETTINGS_MAX_CHARS,
+    `agentSettings.content must be a string (max ${AGENT_SETTINGS_MAX_CHARS} characters)`);
+  return { revision: settings.revision, content: settings.content };
+}

@@ -100,3 +100,31 @@ test('a request rejected by the input resolver keeps its status code', async t =
   assert.equal(bad.status, 400);
   assert.equal((await bad.json()).error.code, 'INVALID_REQUEST');
 });
+
+test('the configuration CaseHub sends is applied before the work starts, on jobs and sync routes alike', async t => {
+  const applied = [];
+  const applySettings = async settings => {
+    if (settings.content.includes('broken')) throw Object.assign(new Error('Claude settings file contains invalid JSON'), { invalidSettings: true });
+    if (settings.content.includes('readonly')) throw new Error('EACCES: permission denied');
+    applied.push(settings);
+  };
+  const { request, submit, jobs } = await setup(t, async () => formatResult(output, input), {
+    applySettings, validateSimplifyInput: payload => payload, simplify: async () => ({ ok: true })
+  });
+  const settings = { revision: '12', content: JSON.stringify({ model: 'from-casehub' }) };
+  const job = await (await submit({ ...input, agentSettings: settings })).json();
+  await eventually(() => jobs.get(job.id).status === 'succeeded');
+  const simplify = url => request(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ agentSettings: settings }) });
+  assert.equal((await simplify('/v1/planner/simplify')).status, 200);
+  assert.deepEqual(applied, [settings, settings]); // agentSettings never reaches a workflow's own contract.
+  // A rejected request leaves the configuration alone; the sender's fault and ours map to different codes.
+  assert.equal((await submit({ ...input, agentSettings: { revision: '13' } })).status, 400);
+  assert.equal((await submit({ ...input, target: {}, agentSettings: { ...settings, revision: '13' } })).status, 400);
+  const invalid = await submit({ ...input, agentSettings: { revision: '13', content: 'broken' } });
+  assert.equal(invalid.status, 400);
+  assert.equal((await invalid.json()).error.code, 'INVALID_AGENT_SETTINGS');
+  const failed = await submit({ ...input, agentSettings: { revision: '13', content: 'readonly' } });
+  assert.equal(failed.status, 500);
+  assert.equal((await failed.json()).error.code, 'AGENT_SETTINGS_FAILED');
+  assert.equal(applied.length, 2);
+});

@@ -27,3 +27,11 @@ docker run --rm -p 4501:4501 --shm-size=512m \
 支持配置文件中的 `env`（API 地址、API Key/Token 等）、`model` 和其他 Claude 配置。未设置 `PLANNER_MODEL` 时保留 Claude 自身的模型配置优先级；两处都未配置模型时使用 haiku。没有提供 `setting.json` 时安装空配置，继续支持环境变量方式。格式错误会让构建失败，不会打印文件内容。
 
 配置文件随镜像分发，容器启动无需服务 Token；模型平台需要的凭据由 setting.json 提供。也可在运行时挂载配置文件，并用 `PLANNER_CLAUDE_SETTINGS` 指定挂载路径。
+
+### CaseHub 下发配置与免重启生效
+
+agent 的配置由 CaseHub 存在数据库里，planner 自己不再保存副本：每次评估、设计、继续任务或阅读友好版生成的请求都带上 CaseHub 当前的配置（`agentSettings.content` 是 setting.json 正文，`agentSettings.revision` 是版本号）。任务开始前 planner 把 `PLANNER_CLAUDE_SETTINGS` 指向的文件对齐成这份正文（不一致才原子改写，一致则不写）。随后每次 Claude CLI 调用都会重新读取该文件和其中的模型配置，无需重启服务。
+
+因此本地文件只是 CaseHub 配置的落地结果，被覆盖是预期行为：容器重建、回滚到旧镜像或有人手工改过文件，下一次请求都会把 CaseHub 里的配置重新写回来（不需要先在 CaseHub 那边改一次配置），不需要共享卷，也不需要持久卷。无效 JSON 会以 400 拒绝该请求且不落盘（`INVALID_AGENT_SETTINGS`），写文件失败返回 500（`AGENT_SETTINGS_FAILED`），都不会静默退回旧配置。显式设置的 `PLANNER_MODEL` 仍优先于文件中的模型设置。
+
+镜像里的 `setting.json` 仍是首次启动、以及 CaseHub 不下发配置时的兜底；该路径需可写（默认镜像可写，若把根文件系统设为只读需单独挂载可写卷）。配置只影响后续 CLI 调用，已经在跑的 Claude 进程不变。

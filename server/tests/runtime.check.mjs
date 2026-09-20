@@ -77,3 +77,25 @@ test('invalid or oversized streams fail and terminate the runtime', async t => {
     [`process.stdout.write(JSON.stringify({type:'result',subtype:'success'}));`, {}, /no structured/]
   ]) await assert.rejects(runClaude({ ...await setup(t, script), ...options }), pattern);
 });
+
+test('each CLI launch uses the configuration CaseHub sent last, without restarting the server', async t => {
+  const { createReloadingRuntime, createSettingsApplier } = await import('../runtime/settings.mjs');
+  const options = await setup(t, `
+const fs = require('node:fs');
+process.stdin.on('data', () => {});
+process.stdin.on('end', () => {
+ const args = process.argv.slice(2), file = args.includes('--settings') ? args[args.indexOf('--settings') + 1] : null;
+ process.stdout.write(JSON.stringify({type:'result', subtype:'success', structured_output:{file,settings:file&&JSON.parse(fs.readFileSync(file)),model:args.includes('--model')?args[args.indexOf('--model')+1]:null}})+'\\n');
+});`);
+  const file = path.join(options.cwd, 'config', 'settings.json');
+  const apply = createSettingsApplier(file), runtime = createReloadingRuntime(runClaude, { env: {}, defaultSettingsPath: file });
+  // Nothing has been sent yet: the service runs on its built-in fallback model rather than failing.
+  assert.deepEqual(await runtime(options), { file: null, settings: null, model: 'haiku' });
+  const config = { model: 'custom-model', env: { CUSTOM: 'changed' }, permissions: { deny: ['Bash'] } };
+  await apply({ revision: '1', content: JSON.stringify(config) });
+  const next = await runtime(options);
+  assert.equal(next.file, file); assert.deepEqual(next.settings, config); assert.equal(next.model, null);
+  config.model = 'another-model';
+  await apply({ revision: '2', content: JSON.stringify(config) });
+  assert.equal((await runtime(options)).settings.model, 'another-model');
+});
