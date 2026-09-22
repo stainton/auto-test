@@ -38,7 +38,8 @@ drive the workflow from their own UI instead of this repository's files (CaseHub
 | --- | --- | --- |
 | [planner](server/planner/README.md) | 4501 | requirements in, reviewed-ready test case drafts out |
 | [generator](server/generator/README.md) | 4502 | reviewed test cases in, one Playwright spec per case out |
+| [general-agent](server/general-agent/README.md) | 4503 | general structured Claude CLI generation, without Playwright or MCP |
 
-They are separate processes with separate configuration, images and manifests, and either can run
+They are separate processes with separate configuration, images and manifests, and each can run
 alone. They do not touch `docs/`, `specs/`, `.claude/agents/` or the file-based flow above — the human
 review gate is `specs/approved/` here, and the calling application there. See [server/README.md](server/README.md).

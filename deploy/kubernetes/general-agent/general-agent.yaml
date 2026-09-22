@@ -1,0 +1,43 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: general-agent
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: auto-test-general-agent
+  template:
+    metadata:
+      labels:
+        app: auto-test-general-agent
+    spec:
+      containers:
+        - name: general-agent
+          image: auto-test-general-agent:local
+          ports:
+            - name: http
+              containerPort: 4503
+          env:
+            - name: GENERAL_AGENT_TIMEOUT_MS
+              value: '120000'
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+          resources:
+            requests: { cpu: 250m, memory: 256Mi }
+            limits: { cpu: '1', memory: 1Gi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: general-agent
+spec:
+  selector:
+    app: auto-test-general-agent
+  ports:
+    - name: http
+      port: 4503
+      targetPort: http
+  type: ClusterIP
