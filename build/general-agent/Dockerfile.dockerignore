@@ -1,0 +1,15 @@
+# 与 planner / generator 的 Dockerfile.dockerignore 同构：白名单式，只把景象真正需要的
+# 路径放进构建上下文（默认是整个仓库，含 .git）。
+# build/planner/insall-settings.mjs 是本景象唯一的跨服务依赖：Dockerfile 复用 planner 的
+# 安装脚本把 setting.json 装成 /app/config/claude/settings.json，所以必须一并方形，
+# 否则 COPY 直接失败。
+**
+!build/
+!build/general-agent/
+!build/general-agent/settings.json
+!build/general-agent/setting.example.json
+!build/planner/install-settings.mjs
+!build/planner/
+!server/
+!server/**
+server/tests/
