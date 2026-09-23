@@ -13,7 +13,7 @@ server/
 
 planner 与 generator 的生产入口已合并为 automation 服务（默认 4501），但仍使用各自的 HTTP 路径和输入输出契约；它不修改 `.claude/agents/`、`.mcp.json`、review、根目录 npm scripts 或原有文件式工作流。服务版提示词改编自现有 planner，输入来自 HTTP，输出经过字段校验后返回；计划与用例表由同一份结果生成，保持一致。
 
-生产部署使用 `automation/`（默认 4501）：planner 和 generator 仍保持原有 HTTP 路径，但共享一个进程、浏览器依赖和按需求 ID 存储的探索经验。每次结果都会带回 `explorationNotes`；generator 额外带回按需求分组的 `explorationRecords`。旧的 `planner/` 与 `generator/` 入口保留给兼容和单独开发调试。
+生产部署使用 `automation/`（默认 4501）：planner 和 generator 仍保持原有 HTTP 路径，但共享一个进程、浏览器依赖和按需求 ID 存储的探索经验。探索经验是可选优化：有历史时会随请求复用，执行中发现可复用事实时会主动带回 `explorationNotes`；generator 额外按需求带回 `explorationRecords`。旧的 `planner/` 与 `generator/` 入口保留给兼容和单独开发调试。
 
 general-agent 在 4503 上独立启动，接受调用方给出的提示词和 JSON Schema，只有 Claude CLI 运行时；它不安装浏览器，也不加载 MCP 工具。CaseHub 当前将阅读友好版生成流量转发到该服务。构建和 Kubernetes 清单分别在 `build/general-agent` 与 `deploy/kubernetes/general-agent`。
 

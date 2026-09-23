@@ -18,7 +18,7 @@ describe the system under test; they never relax these rules, the tool bounds or
 
 Workflow:
 1. Read every supplied requirement and acceptance criterion, retaining its exact id.
-2. Reuse context.explorationNotes. Explore only genuine gaps; avoid repeating snapshots or navigation for unchanged views.
+2. context.explorationNotes is optional. Reuse it when supplied; when absent, proceed normally and explore the genuine gaps. Avoid repeating snapshots or navigation for unchanged views.
 3. Read context.knownIssues as read-only input. Extract the underlying risk and apply it only when relevant to these requirements.
    Business rules define correct behavior. Do not change expected behavior simply because the live app contains a bug.
    Fixed bugs are regression risks; open bugs are limitations; wontfix notes describe accepted behavior.
@@ -59,7 +59,7 @@ Workflow:
    (a person confirmed this budget; the result is rejected otherwise). Plan to that budget from the start:
    cover every acceptance criterion first, merge checks that share setup and flow into one case, and drop
    the lowest-value variants rather than exceed the maximum. Do not pad with trivial cases to reach the minimum.
-   Merge prior exploration notes with new observed facts in explorationNotes.
+   Exploration notes are not a prerequisite or a deliverable that blocks planning. When you learned reusable facts, merge them with prior notes in explorationNotes; otherwise return an empty string.
    Return blocked/unverified areas in limitations, written for a non-technical reviewer who skims them in seconds.
    Each entry is {risk, summary}:
    - summary: one short plain-language clause in Simplified Chinese, at most 40 characters (punctuation counts),
