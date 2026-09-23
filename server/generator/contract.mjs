@@ -69,9 +69,10 @@ export function validateInput(input) {
 // One model call per case (see worker.mjs), so the schema describes a single spec. A case the model
 // cannot honestly automate comes back blocked with the reason instead of a spec that skips, fixmes or
 // asserts something it never verified.
+const missingInputsSchema={type:'array',minItems:0,maxItems:10,items:{type:'string',minLength:1,maxLength:200}};
 export const SCRIPT_OUTPUT_SCHEMA = {
   type: 'object', additionalProperties: false,
-  required: ['status', 'code', 'summary', 'deviations', 'explorationNotes'],
+  required: ['status', 'code', 'summary', 'deviations', 'missingInputs', 'explorationNotes'],
   properties: {
     status: { type: 'string', enum: SCRIPT_STATUSES },
     code: { type: 'string', maxLength: SCRIPT_MAX_CHARS },
@@ -79,19 +80,22 @@ export const SCRIPT_OUTPUT_SCHEMA = {
     // What the live application actually did where it contradicts the case's expected result: the
     // spec asserts the observed behaviour with a // deviation: comment, and says so here too.
     deviations: { type: 'array', maxItems: 10, items: riskEntry('summary') },
+    missingInputs: missingInputsSchema,
     explorationNotes: { type: 'string' }
   }
 };
 
 // Validates one model result against the case it was generated for, and returns the stored script.
 export function formatScript(output, testCase) {
-  keys(output, ['status', 'code', 'summary', 'deviations', 'explorationNotes'], 'generator output');
+  keys(output, ['status', 'code', 'summary', 'deviations', 'missingInputs', 'explorationNotes'], 'generator output');
   check(SCRIPT_STATUSES.includes(output.status), `generator status must be one of ${SCRIPT_STATUSES.join(', ')}`);
   check(typeof output.code === 'string' && output.code.length <= SCRIPT_MAX_CHARS, `generated code must be a string of at most ${SCRIPT_MAX_CHARS} characters`);
   check(typeof output.summary === 'string' && output.summary.trim().length > 0 && [...output.summary].length <= LIMITATION_MAX_CHARS,
     `generator summary must be at most ${LIMITATION_MAX_CHARS} characters`);
   check(typeof output.explorationNotes === 'string', 'explorationNotes must be a string');
   const deviations = riskList(output.deviations ?? [], ['summary'], 'deviations');
+  check(Array.isArray(output.missingInputs) && output.missingInputs.length <= 10 && output.missingInputs.every(x=>typeof x==='string'&&x.trim()&&x.length<=200), 'missingInputs must contain at most 10 nonempty strings');
+  const missingInputs=[...new Set(output.missingInputs.map(x=>x.trim()))];
   const code = output.code.trim();
   if (output.status === 'generated') {
     check(code.includes('@playwright/test') && /\btest\s*\(/.test(code),
@@ -99,9 +103,12 @@ export function formatScript(output, testCase) {
     check(!/\btest\.(skip|fixme)\s*\(/.test(code), 'a generated script must not skip or fixme the case');
     check(/\btestInfo\.attach\s*\(/.test(code) && /\bpage\.screenshot\s*\(/.test(code),
       'a generated script must attach Playwright screenshots as execution evidence');
+    check(missingInputs.length===0, 'a generated script must not report missing inputs');
+  } else {
+    check(missingInputs.length>0, 'a blocked script must explain each missing input or unreachable dependency');
   }
   return { caseId: testCase.id, title: testCase.title, fileName: `${testCase.id}.spec.ts`, language: 'typescript',
-    status: output.status, code: output.status === 'generated' ? code : '', summary: output.summary.trim(), deviations };
+    status: output.status, code: output.status === 'generated' ? code : '', summary: output.summary.trim(), deviations, missingInputs };
 }
 
 // Job result: every submitted case appears exactly once, in submission order. A job succeeds as long

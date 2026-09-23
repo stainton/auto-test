@@ -20,7 +20,7 @@ const input = {
   context: { explorationNotes: 'Existing login form', testData: { password: 'super-secret-password' } }
 };
 const spec = `import { test, expect } from '@playwright/test';\ntest('拒绝错误密码', async ({ page }, testInfo) => { await page.goto('/login'); await testInfo.attach('登录页', { body: await page.screenshot(), contentType: 'image/png' }); });\n`;
-const output = { status: 'generated', code: spec, summary: '验证错误密码被拒绝', deviations: [], explorationNotes: 'Existing login form\nError banner' };
+const output = { status: 'generated', code: spec, summary: '验证错误密码被拒绝', deviations: [], missingInputs: [], explorationNotes: 'Existing login form\nError banner' };
 
 test('rejects malformed cases, local storage-state paths and unsupported fields', () => {
   assert.deepEqual(validateInput(input), input);
@@ -36,7 +36,7 @@ test('rejects malformed cases, local storage-state paths and unsupported fields'
 test('accepts a runnable spec and refuses one that is stubbed, skipped or not a Playwright test', () => {
   const script = formatScript(output, input.cases[0]);
   assert.deepEqual(script, { caseId: 'TC-LOGIN-AUTH-FUNC-001', title: '拒绝错误密码', fileName: 'TC-LOGIN-AUTH-FUNC-001.spec.ts',
-    language: 'typescript', status: 'generated', code: spec.trim(), summary: '验证错误密码被拒绝', deviations: [] });
+    language: 'typescript', status: 'generated', code: spec.trim(), summary: '验证错误密码被拒绝', deviations: [], missingInputs: [] });
   for (const invalid of [ { ...output, code: '// nothing here' },
     { ...output, code: `import { test } from '@playwright/test';\ntest.skip('x', async () => {});` },
     { ...output, code: `import { test } from '@playwright/test';\ntest('no evidence', async ({ page }) => { await page.goto('/'); });` },
@@ -45,7 +45,7 @@ test('accepts a runnable spec and refuses one that is stubbed, skipped or not a 
 });
 
 test('a blocked case keeps its reason, drops any code and is reported as a limitation', () => {
-  const blocked = formatScript({ status: 'blocked', code: spec, summary: '缺少测试账号，无法登录', deviations: [], explorationNotes: '' }, input.cases[0]);
+  const blocked = formatScript({ status: 'blocked', code: spec, summary: '缺少测试账号，无法登录', deviations: [], missingInputs: ['可登录的测试账号'], explorationNotes: '' }, input.cases[0]);
   assert.equal(blocked.code, '');
   assert.equal(blocked.status, 'blocked');
   const result = formatResult([formatScript(output, input.cases[0]), blocked], { explorationNotes: 'notes' });
@@ -138,7 +138,7 @@ test('the OpenAPI document describes this service and only its own routes', () =
     ['/v1/generator/jobs', '/v1/generator/jobs/{jobId}', '/v1/generator/jobs/{jobId}/result', '/v1/generator/jobs/{jobId}/events']);
   assert.equal(spec.components.schemas.Job.properties.kind.const, 'generator');
   assert.equal(JSON.stringify(spec).includes('planner'), false);
-  assert.deepEqual(Object.keys(SCRIPT_OUTPUT_SCHEMA.properties).sort(), ['code', 'deviations', 'explorationNotes', 'status', 'summary']);
+  assert.deepEqual(Object.keys(SCRIPT_OUTPUT_SCHEMA.properties).sort(), ['code', 'deviations', 'explorationNotes', 'missingInputs', 'status', 'summary']);
 });
 
 test('the shared HTTP layer serves this service under its own base path', async t => {

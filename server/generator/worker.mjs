@@ -123,7 +123,7 @@ async function runCase({ runtime, input, testCase, workspace, mcpConfig, signal,
     // A cancelled or timed-out JOB aborts the whole run; a single case that failed on its own is
     // reported as blocked so the rest of the batch still produces specs.
     if (signal.aborted) throw signal.reason ?? error;
-    return { status: 'blocked', code: '', summary: caseFailureSummary(error), deviations: [], explorationNotes: '' };
+    const summary=caseFailureSummary(error);return { status: 'blocked', code: '', summary, deviations: [], missingInputs: [summary], explorationNotes: '' };
   } finally {
     clearTimeout(timer);
     signal.removeEventListener('abort', abort);

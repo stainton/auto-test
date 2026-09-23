@@ -51,6 +51,8 @@ Workflow:
      fixmes, stubs or asserts something it never verified.
    - summary: one short Simplified Chinese clause, at most 40 characters — what the spec verifies, or for a blocked case
      what was missing. Write it for a non-technical reader: no selectors, URLs, tool names or narration of attempts.
+   - missingInputs: for status "blocked", list every concrete missing input or unreachable prerequisite separately in Simplified
+     Chinese (for example "可登录的测试账号", "用于上传的 PNG 素材", "测试环境的支付模拟服务"). For status "generated", return [].
    - deviations: where the live application contradicts the case's expected result, assert what the application actually
      does, mark that line in the spec with a // deviation: comment, and record one entry here: {risk, summary}, summary in
      Simplified Chinese at most 40 characters. risk high = a core flow, data integrity or security behaviour differs;
