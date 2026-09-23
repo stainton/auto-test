@@ -40,23 +40,25 @@ export function createGeneratorWorker({ runtime = runClaude, command, model, set
       const scripts = [];
       // Notes accumulate across the batch: what case 1 learned about the app saves case 2 an
       // exploration round, which is the dominant cost of a run.
-      let notes = input.context?.explorationNotes ?? '';
+      const notesByRequirement = new Map((input.requirements ?? []).map(requirement => [requirement.id, requirement.explorationNotes ?? input.context?.explorationNotes ?? '']));
       const total = input.cases.length;
       for (const [index, testCase] of input.cases.entries()) {
         signal.throwIfAborted();
         const position = `${index + 1}/${total}`;
         emit({ stage: 'generating', message: `Generating ${testCase.id} (${position})`, caseId: testCase.id, caseIndex: index + 1, caseTotal: total });
+        const notes = notesByRequirement.get(testCase.requirement) ?? input.context?.explorationNotes ?? '';
         const output = await runCase({ runtime, input: { ...input, context: { ...input.context, explorationNotes: notes } },
           testCase, workspace, mcpConfig, signal, command, model, settingsPath, caseTimeoutMs, emit, position });
         const script = formatScript(output, testCase);
         scripts.push(script);
-        if (typeof output.explorationNotes === 'string' && output.explorationNotes.trim()) notes = output.explorationNotes;
+        if (typeof output.explorationNotes === 'string' && output.explorationNotes.trim() && testCase.requirement) notesByRequirement.set(testCase.requirement, output.explorationNotes);
         emit({ stage: 'generating', message: `${testCase.id} ${script.status === 'generated' ? 'generated' : `blocked: ${script.summary}`} (${position})`,
           caseId: testCase.id, caseIndex: index + 1, caseTotal: total, caseStatus: script.status });
       }
       signal.throwIfAborted();
       emit({ stage: 'finalizing', message: 'Validating generated specs' });
-      return formatResult(scripts, { explorationNotes: notes });
+      const explorationRecords = Object.fromEntries([...notesByRequirement].filter(([, notes]) => notes.trim()));
+      return formatResult(scripts, { explorationNotes: Object.values(explorationRecords).join('\n\n'), explorationRecords });
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }

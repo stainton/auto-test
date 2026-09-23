@@ -40,10 +40,12 @@ export function validateCases(cases) {
 export function validateRequirements(requirements) {
   check(Array.isArray(requirements) && requirements.length <= 50, 'requirements must contain at most 50 documents');
   for (const req of requirements) {
-    keys(req, ['id', 'title', 'content'], 'requirement');
+    keys(req, ['id', 'title', 'content', 'explorationNotes'], 'requirement');
     string(req.id, 'requirement.id', 128);
     string(req.title, 'requirement.title', 500);
     string(req.content, 'requirement.content');
+
+    if (req.explorationNotes !== undefined) string(req.explorationNotes, 'requirement.explorationNotes');
   }
 }
 
@@ -101,7 +103,7 @@ export function formatScript(output, testCase) {
 // Job result: every submitted case appears exactly once, in submission order. A job succeeds as long
 // as it ran to completion — blocked scripts are a reported outcome, not a service failure — so the
 // caller can store what worked and see per case why the rest did not.
-export function formatResult(scripts, { explorationNotes = '' } = {}) {
+export function formatResult(scripts, { explorationNotes = '', explorationRecords = {} } = {}) {
   check(Array.isArray(scripts) && scripts.length > 0, 'generator must return at least one script');
   const blocked = scripts.filter(s => s.status === 'blocked');
   return {
@@ -109,6 +111,7 @@ export function formatResult(scripts, { explorationNotes = '' } = {}) {
     generated: scripts.length - blocked.length,
     blocked: blocked.length,
     explorationNotes,
+    explorationRecords,
     // Blocked cases, highest risk first, in the same shape the planner's limitations use so the
     // caller renders both with one component.
     limitations: riskList(blocked.map(s => ({ risk: 'high', summary: s.summary })), ['summary'], 'limitations')

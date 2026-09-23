@@ -21,7 +21,7 @@ async function body(req, maxBytes) {
   catch { throw new ServiceError(400, 'INVALID_JSON', 'Request body must contain valid JSON'); }
 }
 // basePath is the workflow's route prefix (/v1/planner, /v1/generator); everything below is shared.
-export function createHttpServer({ jobs, validateInput, openapiPath, maxBodyBytes = 2 * 1024 * 1024,
+export function createHttpHandler({ jobs, validateInput, openapiPath, maxBodyBytes = 2 * 1024 * 1024,
   basePath = '/v1/planner', applySettings, assetCache,
   validateSimplifyInput, simplify, simplifyTimeoutMs = 60000,
   validateEstimateInput, estimate, estimateTimeoutMs = 120000 }) {
@@ -49,7 +49,7 @@ export function createHttpServer({ jobs, validateInput, openapiPath, maxBodyByte
     [`${basePath}/simplify`, { run: simplify, validate: validateSimplifyInput, timeoutMs: simplifyTimeoutMs, code: 'SIMPLIFY_FAILED', label: 'Simplify' }],
     [`${basePath}/estimate`, { run: estimate, validate: validateEstimateInput, timeoutMs: estimateTimeoutMs, code: 'ESTIMATE_FAILED', label: 'Estimate' }]
   ]);
-  const server = http.createServer(async (req, res) => {
+  const handler = async (req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, POST, PUT, DELETE, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Last-Event-ID');
@@ -148,8 +148,16 @@ export function createHttpServer({ jobs, validateInput, openapiPath, maxBodyByte
       json(res, error.status ?? 500, { error: { code: error.code && error.status ? error.code : 'INTERNAL_ERROR',
         message: error.message || 'Internal server error' } });
     }
-  });
-  server.requestTimeout = assetCache ? 600000 : 30000; // an asset upload can be large server.headersTimeout = 15000;
-  server.closeStreams = () => { for (const res of streams) res.end(); };
+  };
+  handler.requestTimeout = assetCache ? 600000 : 30000;
+  handler.closeStreams = () => { for (const res of streams) res.end(); };
+  return handler;
+}
+
+export function createHttpServer(options) {
+  const handler = createHttpHandler(options);
+  const server = http.createServer(handler);
+  server.requestTimeout = handler.requestTimeout;
+  server.closeStreams = handler.closeStreams;
   return server;
 }

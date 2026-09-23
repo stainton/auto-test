@@ -626,6 +626,11 @@
           "content": {
             "type": "string",
             "maxLength": 200000
+          },
+          "explorationNotes": {
+            "type": "string",
+            "maxLength": 200000,
+            "description": "Experience saved for this requirement; it is passed only to cases that reference this requirement."
           }
         }
       },
@@ -704,6 +709,13 @@
           },
           "explorationNotes": {
             "type": "string"
+          },
+          "explorationRecords": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Merged exploration experience keyed by requirement ID, for the caller to persist separately."
           },
           "limitations": {
             "type": "array",

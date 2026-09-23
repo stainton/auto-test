@@ -1,0 +1,45 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: automation-data
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: automation
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: auto-test-automation } }
+  template:
+    metadata: { labels: { app: auto-test-automation } }
+    spec:
+      containers:
+        - name: automation
+          image: auto-test-automation:local
+          ports: [{ name: http, containerPort: 4501 }]
+          readinessProbe: { httpGet: { path: /readyz, port: http } }
+          livenessProbe: { httpGet: { path: /healthz, port: http } }
+          resources:
+            requests: { cpu: '1', memory: 1Gi }
+            limits: { cpu: '2', memory: 3Gi }
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/automation }
+            - { name: shared-memory, mountPath: /dev/shm }
+      volumes:
+        - name: data
+          persistentVolumeClaim: { claimName: automation-data }
+        - name: shared-memory
+          emptyDir: { medium: Memory, sizeLimit: 512Mi }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: automation }
+spec:
+  selector: { app: auto-test-automation }
+  ports: [{ name: http, port: 4501, targetPort: http }]
