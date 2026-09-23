@@ -22,7 +22,7 @@ spec:
       containers:
         - name: automation
           image: auto-test-automation:local
-          ports: [{ name: http, containerPort: 4501 }]
+          ports: [{ name: http, containerPort: 4501 }, { name: executor, containerPort: 4504 }]
           readinessProbe: { httpGet: { path: /readyz, port: http } }
           livenessProbe: { httpGet: { path: /healthz, port: http } }
           resources:
@@ -42,4 +42,4 @@ kind: Service
 metadata: { name: automation }
 spec:
   selector: { app: auto-test-automation }
-  ports: [{ name: http, port: 4501, targetPort: http }]
+  ports: [{ name: http, port: 4501, targetPort: http }, { name: executor, port: 4504, targetPort: executor }]

@@ -20,6 +20,7 @@ import { createSimplifier, validateSimplifyInput } from '../planner/simplify.mjs
 import { createEstimator, validateEstimateInput } from '../planner/estimate.mjs';
 import { validateInput as validateGeneratorInput } from '../generator/contract.mjs';
 import { createGeneratorWorker } from '../generator/worker.mjs';
+import { startExecutor } from '../executor/main.mjs';
 
 const positive=(name,fallback)=>{const n=Number(process.env[name]??fallback);if(!Number.isSafeInteger(n)||n<1)throw new Error(`${name} must be a positive integer`);return n};
 const trimNotes=notes=>String(notes||'').trim().slice(0,200000);
@@ -89,8 +90,9 @@ export async function main() {
     return pathname.startsWith('/v1/generator/')?generatorHandler(req,res):plannerHandler(req,res);
   });
   server.requestTimeout=600000; server.listen(positive('AUTOMATION_PORT',4501),host,()=>console.log(`Automation HTTP service listening on ${host}:${server.address().port}`));
-  let stopping=false; const shutdown=async()=>{if(stopping)return;stopping=true;server.close();await Promise.all([plannerJobs.close(),generatorJobs.close()]);plannerHandler.closeStreams();generatorHandler.closeStreams();server.closeAllConnections();};
+  const executor=await startExecutor({host,port:positive('EXECUTOR_PORT',4504),dataDir:path.join(dataDir,'executor')});
+  let stopping=false; const shutdown=async()=>{if(stopping)return;stopping=true;server.close();executor.server.close();await Promise.all([plannerJobs.close(),generatorJobs.close(),executor.jobs.close()]);plannerHandler.closeStreams();generatorHandler.closeStreams();executor.server.closeStreams();server.closeAllConnections();executor.server.closeAllConnections();};
   process.on('SIGTERM',shutdown);process.on('SIGINT',shutdown);
-  return {server,plannerJobs,generatorJobs,experience};
+  return {server,plannerJobs,generatorJobs,executor,experience};
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url))main().catch(error=>{console.error(`Automation startup failed: ${error.message}`);process.exitCode=1});
