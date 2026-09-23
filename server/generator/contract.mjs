@@ -72,6 +72,18 @@ export function validateInput(input) {
 // cannot honestly automate comes back blocked with the reason instead of a spec that skips, fixmes or
 // asserts something it never verified.
 const missingInputsSchema={type:'array',minItems:0,maxItems:10,items:{type:'string',minLength:1,maxLength:200}};
+// A report needs evidence at the same granularity as the generated business steps.
+// This deliberately lightweight brace matcher is sufficient for generated specs and rejects a
+// spec whose screenshots were appended only after all verification steps.
+function stepBodies(code){
+  const bodies=[];const re=/\btest\.step\s*\(\s*(['"][^'"]+['"])[\s\S]{0,300}?=>\s*\{/g;let match;
+  while((match=re.exec(code))){let depth=1,index=re.lastIndex;for(;index<code.length&&depth;index++){if(code[index]==='{')depth++;else if(code[index]==='}')depth--;}if(depth)throw Error('a generated script has an unclosed test.step');bodies.push({title:match[1],body:code.slice(re.lastIndex,index-1)});re.lastIndex=index;}
+  return bodies;
+}
+function validateStepEvidence(code){
+  const steps=stepBodies(code);check(steps.length>0,'a generated script must contain business test steps');
+  for(const step of steps)check(/\btestInfo\.attach\s*\(/.test(step.body)&&/\bpage\.screenshot\s*\(/.test(step.body),`business test step ${step.title} must attach its own screenshot evidence`);
+}
 export const SCRIPT_OUTPUT_SCHEMA = {
   type: 'object', additionalProperties: false,
   required: ['status', 'code', 'summary', 'deviations', 'missingInputs', 'explorationNotes'],
@@ -103,8 +115,7 @@ export function formatScript(output, testCase) {
     check(code.includes('@playwright/test') && /\btest\s*\(/.test(code),
       'a generated script must be a Playwright spec importing @playwright/test and declaring a test');
     check(!/\btest\.(skip|fixme)\s*\(/.test(code), 'a generated script must not skip or fixme the case');
-    check(/\btest\.step\s*\(/.test(code) && /\btestInfo\.attach\s*\(/.test(code) && /\bpage\.screenshot\s*\(/.test(code),
-      'a generated script must place Playwright screenshot evidence in business test steps');
+    validateStepEvidence(code);
     check(missingInputs.length===0, 'a generated script must not report missing inputs');
   } else {
     check(missingInputs.length>0, 'a blocked script must explain each missing input or unreachable dependency');

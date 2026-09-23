@@ -40,6 +40,7 @@ test('accepts a runnable spec and refuses one that is stubbed, skipped or not a 
   for (const invalid of [ { ...output, code: '// nothing here' },
     { ...output, code: `import { test } from '@playwright/test';\ntest.skip('x', async () => {});` },
     { ...output, code: `import { test } from '@playwright/test';\ntest('no evidence', async ({ page }) => { await page.goto('/'); });` },
+    { ...output, code: `import { test, expect } from '@playwright/test';\ntest('partial evidence', async ({ page }, testInfo) => { await test.step('有证据', async () => { await expect(page).toHaveTitle(/x/); await testInfo.attach('有证据', { body: await page.screenshot(), contentType: 'image/png' }); }); await test.step('无证据', async () => { await expect(page).toHaveURL(/x/); }); });` },
     { ...output, status: 'done' }, { ...output, summary: '' }, { ...output, summary: '汉'.repeat(41) },
     { ...output, deviations: [{ risk: 'unknown', summary: 'x' }] } ]) assert.throws(() => formatScript(invalid, input.cases[0]));
 });

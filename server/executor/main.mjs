@@ -15,7 +15,7 @@ import { resolveClaudeOptions, createReloadingRuntime, createSettingsApplier, se
 const maxCode=120000, maxArtifactBytes=8*1024*1024;
 const positive=(name,fallback)=>{const n=Number(process.env[name]??fallback);if(!Number.isSafeInteger(n)||n<1)throw new Error(`${name} must be a positive integer`);return n};
 const schema={type:'object',additionalProperties:false,required:['markdown'],properties:{markdown:{type:'string',minLength:1,maxLength:200000}}};
-const systemPrompt=`你是测试记录整理助手。根据提供的 Playwright 脚本执行状态、控制台输出和截图清单，写一份简体中文 Markdown 测试记录。包含结论、执行信息、关键步骤/现象和失败摘要。截图只能使用给定的 {{image:文件名}} 占位符；不要写外部 URL、相对路径或引用链接。没有证据时明确说明。只返回符合 Schema 的结果。`;
+const systemPrompt=`你是测试记录整理助手。根据提供的 Playwright 脚本执行状态、控制台输出和截图清单，写一份简体中文 Markdown 测试记录。包含结论、执行信息、关键步骤/现象和失败摘要。必须有“关键断言证据”章节：截图清单中的每一张图都必须各自列在一个步骤下，使用该图的 {{image:文件名}} 占位符，并说明它证明的断言或状态；附件名称就是该证据的业务名称。截图只能使用给定的占位符；不要写外部 URL、相对路径或引用链接。没有证据时明确说明。只返回符合 Schema 的结果。`;
 function validate(input){
   if(!input||typeof input!=='object'||Array.isArray(input))throw Error('request must be an object');
   for(const key of Object.keys(input))if(!['code','fileName','target','title'].includes(key))throw Error('request contains unsupported fields');
@@ -25,11 +25,29 @@ function validate(input){
   return structuredClone(input);
 }
 const exec=(command,args,cwd,signal)=>new Promise(resolve=>{const child=spawn(command,args,{cwd,stdio:['ignore','pipe','pipe']});let output='';const add=x=>output=(output+x).slice(-30000);child.stdout.on('data',x=>add(x));child.stderr.on('data',x=>add(x));const abort=()=>child.kill('SIGTERM');signal.addEventListener('abort',abort,{once:true});child.on('close',code=>{signal.removeEventListener('abort',abort);resolve({code:code??1,output})});});
-async function images(dir){
-  const found=[];async function walk(current){for(const entry of await readdir(current,{withFileTypes:true}).catch(()=>[])){const file=path.join(current,entry.name);if(entry.isDirectory())await walk(file);else if(/\.(png|jpe?g)$/i.test(entry.name)){const data=await readFile(file);if(data.length<=maxArtifactBytes)found.push({name:entry.name,data:`data:image/${entry.name.endsWith('.png')?'png':'jpeg'};base64,${data.toString('base64')}`});}}}await walk(dir);return found;
+function imageMime(file){return file.toLowerCase().endsWith('.png')?'image/png':'image/jpeg';}
+function uniqueName(name, used){
+  const base=(name||'未命名截图').trim();let candidate=base,index=2;
+  while(used.has(candidate))candidate=`${base}（${index++}）`;
+  used.add(candidate);return candidate;
+}
+export async function collectImages(dir, reportPath){
+  const found=[], seenPaths=new Set(), usedNames=new Set(), pending=[];
+  const add=async(file, name)=>{
+    if(!file||seenPaths.has(file)||!/\.(png|jpe?g)$/i.test(file))return;
+    const data=await readFile(file).catch(()=>null);if(!data||data.length>maxArtifactBytes)return;
+    seenPaths.add(file);found.push({name:uniqueName(name||path.basename(file),usedNames),data:`data:${imageMime(file)};base64,${data.toString('base64')}`});
+  };
+  // The JSON reporter preserves testInfo.attach's business name. Reading it avoids
+  // flattening every attachment to e.g. attachment.png, which made report evidence ambiguous.
+  const report=JSON.parse(await readFile(reportPath,'utf8').catch(()=>'{}'));
+  const visit=value=>{if(!value||typeof value!=='object')return;if(Array.isArray(value)){value.forEach(visit);return}if(Array.isArray(value.attachments))for(const attachment of value.attachments)if(attachment?.path)pending.push(add(attachment.path,attachment.name));for(const child of Object.values(value))visit(child)};
+  visit(report);await Promise.all(pending);
+  async function walk(current){for(const entry of await readdir(current,{withFileTypes:true}).catch(()=>[])){const file=path.join(current,entry.name);if(entry.isDirectory())await walk(file);else await add(file,entry.name);}}
+  await walk(dir);return found;
 }
 export function embedArtifacts(markdown,artifacts){
-  for(const image of artifacts){const token=`{{image:${image.name}}}`,embedded=`![${image.name}](${image.data})`;markdown=markdown.includes(token)?markdown.replaceAll(token,embedded):`${markdown}\n\n## 附件：${image.name}\n\n${embedded}`;}
+  for(const image of artifacts){const token=`{{image:${image.name}}}`,embedded=`![${image.name}](${image.data})`;markdown=markdown.includes(token)?markdown.replaceAll(token,embedded):`${markdown}\n\n### 关键断言证据：${image.name}\n\n${embedded}`;}
   return markdown;
 }
 export async function startExecutor({host=process.env.EXECUTOR_HOST??'0.0.0.0',port=positive('EXECUTOR_PORT',4504),dataDir=process.env.EXECUTOR_DATA_DIR??path.join(tmpdir(),'auto-test-executor')}={}){
@@ -44,7 +62,7 @@ export async function startExecutor({host=process.env.EXECUTOR_HOST??'0.0.0.0',p
     // Generated specs attach important-step screenshots. Playwright also captures the
     // final page on every run, so an older script or an unexpected failure still has evidence.
     await writeFile(spec,input.code,{mode:0o600});const config={testDir:project,testMatch:path.basename(spec),workers:1,retries:0,timeout:60000,outputDir:path.join(workspace,'test-results'),reporter:[['json',{outputFile:path.join(workspace,'report.json')}]],use:{headless:true,browserName:'chromium',baseURL:input.target.baseUrl,screenshot:'on',trace:'off',video:'off'}};
-    const configPath=path.join(project,'playwright.config.cjs');await writeFile(configPath,`module.exports=${JSON.stringify(config)};\n`,{mode:0o600});const run=await exec(process.execPath,[cli,'test','--config',configPath],project,signal);const artifacts=await images(path.join(workspace,'test-results'));
+    const configPath=path.join(project,'playwright.config.cjs');await writeFile(configPath,`module.exports=${JSON.stringify(config)};\n`,{mode:0o600});const run=await exec(process.execPath,[cli,'test','--config',configPath],project,signal);const artifacts=await collectImages(path.join(workspace,'test-results'),path.join(workspace,'report.json'));
     emit({stage:'summarizing',message:'Organizing execution evidence into Markdown'});const controller=new AbortController(),timer=setTimeout(()=>controller.abort(Error('Record summarization timed out')),positive('EXECUTOR_SUMMARY_TIMEOUT_MS',120000));let markdown;
     try{const output=await runtime({cwd:workspace,prompt:JSON.stringify({title:input.title||input.fileName,passed:run.code===0,output:run.output,images:artifacts.map(a=>a.name)}),systemPrompt,schema,mcpConfig:{mcpServers:{}},allowedTools:[],command,signal:controller.signal,env:{CLAUDE_CONFIG_DIR:path.join(workspace,'claude-config')}});markdown=output.markdown;}finally{clearTimeout(timer)}
     // A report must still work after it is downloaded. Keep every collected image
