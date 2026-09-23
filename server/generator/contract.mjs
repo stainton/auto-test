@@ -10,6 +10,7 @@ export const MAX_CASES_PER_JOB = 50;
 // One spec file. Well past a realistic generated spec, small enough that a runaway model output is
 // rejected instead of persisted into the caller's state.
 export const SCRIPT_MAX_CHARS = 120000;
+export const MIN_CASE_TIMEOUT_MS = 60000, MAX_CASE_TIMEOUT_MS = 3600000;
 export const CASE_ID_PATTERN = '^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$';
 const CASE_ID_RE = new RegExp(CASE_ID_PATTERN);
 export const SCRIPT_STATUSES = ['generated', 'blocked'];
@@ -51,10 +52,11 @@ export function validateRequirements(requirements) {
 }
 
 export function validateInput(input) {
-  keys(input, ['cases', 'requirements', 'target', 'context'], 'request');
+  keys(input, ['cases', 'requirements', 'target', 'context', 'caseTimeoutMs'], 'request');
   validateCases(input.cases);
   if (input.requirements !== undefined) validateRequirements(input.requirements);
   validateTarget(input.target);
+  if(input.caseTimeoutMs!==undefined)check(Number.isSafeInteger(input.caseTimeoutMs)&&input.caseTimeoutMs>=MIN_CASE_TIMEOUT_MS&&input.caseTimeoutMs<=MAX_CASE_TIMEOUT_MS,`caseTimeoutMs must be between ${MIN_CASE_TIMEOUT_MS} and ${MAX_CASE_TIMEOUT_MS}`);
   if (input.context !== undefined) {
     keys(input.context, ['explorationNotes', 'knownIssues', 'instructions', 'testData', 'assets'], 'context');
     for (const key of ['explorationNotes', 'knownIssues', 'instructions']) {

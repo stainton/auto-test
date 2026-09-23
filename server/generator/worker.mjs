@@ -1,4 +1,4 @@
-import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, writeFile, rm, mkdir, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -22,17 +22,18 @@ export function createGeneratorWorker({ runtime = runClaude, command, model, set
     try {
       emit({ stage: 'preparing', message: 'Preparing an isolated browser session' });
       const packagePath = playwrightPackage ?? require.resolve('@playwright/test/package.json');
+      const project=path.join(workspace,'project'),nodeModules=path.dirname(path.dirname(path.dirname(packagePath)));await mkdir(project,{mode:0o700});await symlink(nodeModules,path.join(project,'node_modules'),'dir');
       const testEntry = path.join(path.dirname(packagePath), 'index.js');
       const cli = path.join(path.dirname(packagePath), 'cli.js');
-      const configPath = path.join(workspace, 'playwright.config.cjs');
-      const config = { testDir: workspace, testMatch: '*.spec.ts', workers: 1, retries: 0,
+      const configPath = path.join(project, 'playwright.config.cjs');
+      const config = { testDir: project, testMatch: '*.spec.ts', workers: 1, retries: 0,
         timeout: 60000, outputDir: path.join(workspace, 'test-results'), reporter: [['list']],
         use: { headless: true, browserName: 'chromium', baseURL: input.target.baseUrl,
           actionTimeout: 10000, navigationTimeout: 30000, screenshot: 'off', trace: 'off', video: 'off',
           ...(input.target.storageState ? { storageState: input.target.storageState } : {}),
           ...(input.target.extraHTTPHeaders ? { extraHTTPHeaders: input.target.extraHTTPHeaders } : {}) } };
       await writeFile(configPath, `module.exports = ${JSON.stringify(config)};\n`, { mode: 0o600 });
-      await writeFile(path.join(workspace, 'seed.spec.ts'),
+      await writeFile(path.join(project, 'seed.spec.ts'),
         `const { test } = require(${JSON.stringify(testEntry)});\ntest('generator seed', async ({ page }) => { await page.goto(${JSON.stringify(input.target.baseUrl)}, { waitUntil: 'domcontentloaded', timeout: 30000 }); });\n`, { mode: 0o600 });
       const mcpConfig = { mcpServers: { 'playwright-test': { type: 'stdio', command: process.execPath,
         args: [cli, 'run-test-mcp-server', '--headless', '--config', configPath] } } };
@@ -53,7 +54,7 @@ export function createGeneratorWorker({ runtime = runClaude, command, model, set
         emit({ stage: 'generating', message: `Generating ${testCase.id} (${position})`, caseId: testCase.id, caseIndex: index + 1, caseTotal: total });
         const notes = notesByRequirement.get(testCase.requirement) ?? promptInput.context?.explorationNotes ?? '';
         const output = await runCase({ runtime, input: { ...promptInput, context: { ...promptInput.context, explorationNotes: notes } },
-          testCase, workspace, mcpConfig, signal, command, model, settingsPath, caseTimeoutMs, emit, position });
+          testCase, workspace, mcpConfig, signal, command, model, settingsPath, caseTimeoutMs:input.caseTimeoutMs??caseTimeoutMs, emit, position });
         const script = formatScript(output, testCase);
         scripts.push(script);
         if (typeof output.explorationNotes === 'string' && output.explorationNotes.trim() && testCase.requirement) notesByRequirement.set(testCase.requirement, output.explorationNotes);
