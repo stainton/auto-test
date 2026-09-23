@@ -1,4 +1,7 @@
 import { runClaude } from '../runtime/claude.mjs';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 
 // Rewrites one already-designed test case (precondition/steps/expected) into a short,
 // plain-language version a non-technical reviewer can skim — the counterpart to
@@ -80,11 +83,12 @@ const joinFriendly = list => list.length === 1 ? list[0] : list.map((line, index
 
 export function createSimplifier({ runtime = runClaude, command, model, settingsPath } = {}) {
   return async function simplify(input, signal) {
-    const output = await runtime({
-      cwd: process.cwd(), prompt: buildSimplifyPrompt(input), systemPrompt: SIMPLIFY_SYSTEM_PROMPT,
+    const workspace=await mkdtemp(path.join(tmpdir(),'planner-simplify-'));
+    let output;try { output = await runtime({
+      cwd: workspace, prompt: buildSimplifyPrompt(input), systemPrompt: SIMPLIFY_SYSTEM_PROMPT,
       schema: SIMPLIFY_OUTPUT_SCHEMA, mcpConfig: { mcpServers: {} }, allowedTools: [],
-      signal, command, model, settingsPath
-    });
+      signal, command, model, settingsPath, env:{CLAUDE_CONFIG_DIR:path.join(workspace,'claude-config')}
+    }); } finally { await rm(workspace,{recursive:true,force:true}); }
     return {
       preconditions: output.preconditions,
       steps: joinFriendly(output.steps.map(s => s.step)),

@@ -1,5 +1,8 @@
 import { runClaude } from '../runtime/claude.mjs';
 import { MAX_CASES, CODE_PATTERN, validateRequirements } from './contract.mjs';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 
 // Estimates the "建议覆盖用例数量" (and suggests each requirement's code for case IDs) before the full planning job runs. It is a cheap,
 // text-only judgement (no browser, no tools) whose number a person reviews and adjusts; the confirmed
@@ -83,11 +86,12 @@ export function buildEstimatePrompt(input) {
 
 export function createEstimator({ runtime = runClaude, command, model, settingsPath } = {}) {
   return async function estimate(input, signal) {
-    const output = await runtime({
-      cwd: process.cwd(), prompt: buildEstimatePrompt(input), systemPrompt: ESTIMATE_SYSTEM_PROMPT,
+    const workspace=await mkdtemp(path.join(tmpdir(),'planner-estimate-'));
+    let output;try { output = await runtime({
+      cwd: workspace, prompt: buildEstimatePrompt(input), systemPrompt: ESTIMATE_SYSTEM_PROMPT,
       schema: ESTIMATE_OUTPUT_SCHEMA, mcpConfig: { mcpServers: {} }, allowedTools: [],
-      signal, command, model, settingsPath
-    });
+      signal, command, model, settingsPath, env:{CLAUDE_CONFIG_DIR:path.join(workspace,'claude-config')}
+    }); } finally { await rm(workspace,{recursive:true,force:true}); }
     check(Number.isSafeInteger(output.suggestedCaseCount) && output.suggestedCaseCount >= 1 && output.suggestedCaseCount <= MAX_CASES,
       'estimate returned an invalid suggestedCaseCount');
     // A code the caller already confirmed wins; an invalid or missing suggestion comes back empty for a person to fill.

@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { execFileSync, spawn } from 'node:child_process';
-import { mkdtemp, readdir, readFile, rm, writeFile, access } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm, writeFile, access, mkdir, symlink } from 'node:fs/promises';
 import { Jobs } from '../shared/jobs.mjs';
 import { createHttpServer } from '../shared/http.mjs';
 import { runClaude } from '../runtime/claude.mjs';
@@ -36,13 +36,15 @@ export async function startExecutor({host=process.env.EXECUTOR_HOST??'0.0.0.0',p
   const settings={prefix:'EXECUTOR',defaultSettingsPath:fileURLToPath(new URL('../../build/automation/setting.json',import.meta.url))};
   await resolveClaudeOptions(settings);const runtime=createReloadingRuntime(runClaude,settings),applySettings=createSettingsApplier(settingsPathFor(settings));
   const command=process.env.EXECUTOR_CLAUDE_COMMAND??process.env.AUTOMATION_CLAUDE_COMMAND??'claude';execFileSync(command,['--version'],{timeout:10000,stdio:'ignore'});
-  const require=createRequire(import.meta.url),pkg=require.resolve('@playwright/test/package.json'),cli=path.join(path.dirname(pkg),'cli.js');await access(cli);
+  const require=createRequire(import.meta.url),pkg=require.resolve('@playwright/test/package.json'),cli=path.join(path.dirname(pkg),'cli.js'),nodeModules=path.dirname(path.dirname(path.dirname(pkg)));await access(cli);
   const worker=async(input,{signal,emit})=>{const workspace=await mkdtemp(path.join(tmpdir(),'executor-'));try{
-    emit({stage:'running',message:'Running Playwright script'});const spec=path.join(workspace,path.basename(input.fileName));
-    await writeFile(spec,input.code,{mode:0o600});const config={testDir:workspace,testMatch:path.basename(spec),workers:1,retries:0,timeout:60000,outputDir:path.join(workspace,'test-results'),reporter:[['json',{outputFile:path.join(workspace,'report.json')}]],use:{headless:true,browserName:'chromium',baseURL:input.target.baseUrl,screenshot:'off',trace:'off',video:'off'}};
-    const configPath=path.join(workspace,'playwright.config.cjs');await writeFile(configPath,`module.exports=${JSON.stringify(config)};\n`,{mode:0o600});const run=await exec(process.execPath,[cli,'test',spec,'--config',configPath],workspace,signal);const artifacts=await images(path.join(workspace,'test-results'));
+    // Keep the spec in an isolated project. The temporary node_modules link makes
+    // @playwright/test resolve from the spec's own directory without writing into /app.
+    emit({stage:'running',message:'Running Playwright script'});const project=path.join(workspace,'project');await mkdir(project,{mode:0o700});await symlink(nodeModules,path.join(project,'node_modules'),'dir');const spec=path.join(project,path.basename(input.fileName));
+    await writeFile(spec,input.code,{mode:0o600});const config={testDir:project,testMatch:path.basename(spec),workers:1,retries:0,timeout:60000,outputDir:path.join(workspace,'test-results'),reporter:[['json',{outputFile:path.join(workspace,'report.json')}]],use:{headless:true,browserName:'chromium',baseURL:input.target.baseUrl,screenshot:'off',trace:'off',video:'off'}};
+    const configPath=path.join(project,'playwright.config.cjs');await writeFile(configPath,`module.exports=${JSON.stringify(config)};\n`,{mode:0o600});const run=await exec(process.execPath,[cli,'test','--config',configPath],project,signal);const artifacts=await images(path.join(workspace,'test-results'));
     emit({stage:'summarizing',message:'Organizing execution evidence into Markdown'});const controller=new AbortController(),timer=setTimeout(()=>controller.abort(Error('Record summarization timed out')),positive('EXECUTOR_SUMMARY_TIMEOUT_MS',120000));let markdown;
-    try{const output=await runtime({cwd:workspace,prompt:JSON.stringify({title:input.title||input.fileName,passed:run.code===0,output:run.output,images:artifacts.map(a=>a.name)}),systemPrompt,schema,mcpConfig:{mcpServers:{}},allowedTools:[],command,signal:controller.signal});markdown=output.markdown;}finally{clearTimeout(timer)}
+    try{const output=await runtime({cwd:workspace,prompt:JSON.stringify({title:input.title||input.fileName,passed:run.code===0,output:run.output,images:artifacts.map(a=>a.name)}),systemPrompt,schema,mcpConfig:{mcpServers:{}},allowedTools:[],command,signal:controller.signal,env:{CLAUDE_CONFIG_DIR:path.join(workspace,'claude-config')}});markdown=output.markdown;}finally{clearTimeout(timer)}
     // A report must still work after it is downloaded. Keep every collected image
     // embedded even when the summarizer did not mention its placeholder.
     markdown=embedArtifacts(markdown,artifacts);

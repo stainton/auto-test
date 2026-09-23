@@ -84,7 +84,7 @@ async function runCase({ runtime, input, testCase, workspace, mcpConfig, signal,
     const output = await runtime({ cwd: workspace, prompt: buildPrompt(input, testCase), systemPrompt: SYSTEM_PROMPT,
       schema: SCRIPT_OUTPUT_SCHEMA, mcpConfig, allowedTools: ['mcp__playwright-test__*'],
       disallowedTools: EXCLUDED_TOOLS.map(t => `mcp__playwright-test__${t}`),
-      signal: controller.signal, command, model, settingsPath,
+      signal: controller.signal, command, model, settingsPath, env: { CLAUDE_CONFIG_DIR: path.join(workspace, 'claude-config') },
       onMessage(message) {
         if (message.type === 'system' && message.subtype === 'init') {
           const server = message.mcp_servers?.find(s => s.name === 'playwright-test');
