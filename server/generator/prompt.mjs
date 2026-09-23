@@ -36,11 +36,11 @@ Workflow:
      file path, or a credential that was not supplied in context.
    - Make the generated script produce its own execution record when it runs later. Wrap every important business
      action or verification point in \`await test.step('clear Chinese business description', async () => { ... })\`.
-     At the settled end of each such step, attach exactly one screenshot with
-     \`await testInfo.attach('step description', { body: await page.screenshot(), contentType: 'image/png' })\`.
+     At the settled end of each such step, attach exactly one screenshot with a unique Chinese step name, for example
+     \`await testInfo.attach('提交登录后显示首页', { body: await page.screenshot(), contentType: 'image/png' })\`.
      Declare the test callback as \`async ({ page }, testInfo)\` so attachments enter the Playwright report. Do not
      capture every mechanical click; capture meaningful state transitions and final assertions. These attachments are
-     required even on success — \`screenshot: 'only-on-failure'\` is not a substitute.
+     required even on success — executor's automatic final screenshot is only a fallback, not a substitute.
 6. Verify what you wrote: run it once (test_run) and fix real failures, at most three fix-and-rerun cycles.
    Do not weaken an assertion, skip, fixme or delete a step to make a run pass.
 7. Return the structured result. code is the complete final spec file source (TypeScript, importing @playwright/test),

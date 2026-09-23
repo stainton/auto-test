@@ -19,7 +19,7 @@ const input = {
   target: { baseUrl: 'https://example.test/login' },
   context: { explorationNotes: 'Existing login form', testData: { password: 'super-secret-password' } }
 };
-const spec = `import { test, expect } from '@playwright/test';\ntest('拒绝错误密码', async ({ page }) => { await page.goto('/login'); });\n`;
+const spec = `import { test, expect } from '@playwright/test';\ntest('拒绝错误密码', async ({ page }, testInfo) => { await page.goto('/login'); await testInfo.attach('登录页', { body: await page.screenshot(), contentType: 'image/png' }); });\n`;
 const output = { status: 'generated', code: spec, summary: '验证错误密码被拒绝', deviations: [], explorationNotes: 'Existing login form\nError banner' };
 
 test('rejects malformed cases, local storage-state paths and unsupported fields', () => {
@@ -39,6 +39,7 @@ test('accepts a runnable spec and refuses one that is stubbed, skipped or not a 
     language: 'typescript', status: 'generated', code: spec.trim(), summary: '验证错误密码被拒绝', deviations: [] });
   for (const invalid of [ { ...output, code: '// nothing here' },
     { ...output, code: `import { test } from '@playwright/test';\ntest.skip('x', async () => {});` },
+    { ...output, code: `import { test } from '@playwright/test';\ntest('no evidence', async ({ page }) => { await page.goto('/'); });` },
     { ...output, status: 'done' }, { ...output, summary: '' }, { ...output, summary: '汉'.repeat(41) },
     { ...output, deviations: [{ risk: 'unknown', summary: 'x' }] } ]) assert.throws(() => formatScript(invalid, input.cases[0]));
 });

@@ -97,6 +97,8 @@ export function formatScript(output, testCase) {
     check(code.includes('@playwright/test') && /\btest\s*\(/.test(code),
       'a generated script must be a Playwright spec importing @playwright/test and declaring a test');
     check(!/\btest\.(skip|fixme)\s*\(/.test(code), 'a generated script must not skip or fixme the case');
+    check(/\btestInfo\.attach\s*\(/.test(code) && /\bpage\.screenshot\s*\(/.test(code),
+      'a generated script must attach Playwright screenshots as execution evidence');
   }
   return { caseId: testCase.id, title: testCase.title, fileName: `${testCase.id}.spec.ts`, language: 'typescript',
     status: output.status, code: output.status === 'generated' ? code : '', summary: output.summary.trim(), deviations };
