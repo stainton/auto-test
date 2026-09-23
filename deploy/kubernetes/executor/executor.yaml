@@ -1,45 +1,45 @@
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: automation-data
+  name: executor-data
 spec:
   accessModes: [ReadWriteOnce]
   resources:
     requests:
-      storage: 5Gi
+      storage: 2Gi
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: automation
+  name: executor
 spec:
   replicas: 1
   strategy: { type: Recreate }
-  selector: { matchLabels: { app: auto-test-automation } }
+  selector: { matchLabels: { app: auto-test-executor } }
   template:
-    metadata: { labels: { app: auto-test-automation } }
+    metadata: { labels: { app: auto-test-executor } }
     spec:
       containers:
-        - name: automation
-          image: auto-test-automation:local
-          ports: [{ name: http, containerPort: 4501 }]
+        - name: executor
+          image: auto-test-executor:local
+          ports: [{ name: http, containerPort: 4504 }]
           readinessProbe: { httpGet: { path: /readyz, port: http } }
           livenessProbe: { httpGet: { path: /healthz, port: http } }
           resources:
             requests: { cpu: '1', memory: 1Gi }
             limits: { cpu: '2', memory: 3Gi }
           volumeMounts:
-            - { name: data, mountPath: /var/lib/automation }
+            - { name: data, mountPath: /var/lib/executor }
             - { name: shared-memory, mountPath: /dev/shm }
       volumes:
         - name: data
-          persistentVolumeClaim: { claimName: automation-data }
+          persistentVolumeClaim: { claimName: executor-data }
         - name: shared-memory
           emptyDir: { medium: Memory, sizeLimit: 512Mi }
 ---
 apiVersion: v1
 kind: Service
-metadata: { name: automation }
+metadata: { name: executor }
 spec:
-  selector: { app: auto-test-automation }
-  ports: [{ name: http, port: 4501, targetPort: http }]
+  selector: { app: auto-test-executor }
+  ports: [{ name: http, port: 4504, targetPort: http }]

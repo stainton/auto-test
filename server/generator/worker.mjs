@@ -46,25 +46,33 @@ export function createGeneratorWorker({ runtime = runClaude, command, model, set
       const scripts = [];
       // Notes accumulate across the batch: what case 1 learned about the app saves case 2 an
       // exploration round, which is the dominant cost of a run.
-      const notesByRequirement = new Map((promptInput.requirements ?? []).map(requirement => [requirement.id, requirement.explorationNotes ?? promptInput.context?.explorationNotes ?? '']));
+      const mergeNotes=(...values)=>[...new Set(values.filter(Boolean).join('\n\n').split(/\n{2,}/).map(value=>value.trim()).filter(Boolean))].slice(-200).join('\n\n');
+      const notesByRequirement = new Map((promptInput.requirements ?? []).map(requirement => [requirement.id, requirement.explorationNotes ?? '']));
+      let batchNotes=promptInput.context?.explorationNotes ?? '';
       const total = promptInput.cases.length;
       for (const [index, testCase] of promptInput.cases.entries()) {
         signal.throwIfAborted();
         const position = `${index + 1}/${total}`;
         emit({ stage: 'generating', message: `Generating ${testCase.id} (${position})`, caseId: testCase.id, caseIndex: index + 1, caseTotal: total });
-        const notes = notesByRequirement.get(testCase.requirement) ?? promptInput.context?.explorationNotes ?? '';
+        // A batch shares discoveries even when its cases reference different requirement
+        // documents. Each spec remains independently generated and verified, while the
+        // expensive product navigation and locator discovery happen only once per batch.
+        const notes = mergeNotes(batchNotes, notesByRequirement.get(testCase.requirement) ?? '');
         const output = await runCase({ runtime, input: { ...promptInput, context: { ...promptInput.context, explorationNotes: notes } },
           testCase, workspace, mcpConfig, signal, command, model, settingsPath, caseTimeoutMs:input.caseTimeoutMs??caseTimeoutMs, emit, position });
         const script = formatScript(output, testCase);
         scripts.push(script);
-        if (typeof output.explorationNotes === 'string' && output.explorationNotes.trim() && testCase.requirement) notesByRequirement.set(testCase.requirement, output.explorationNotes);
+        if (typeof output.explorationNotes === 'string' && output.explorationNotes.trim()) {
+          batchNotes=mergeNotes(batchNotes, output.explorationNotes);
+          if(testCase.requirement)notesByRequirement.set(testCase.requirement, output.explorationNotes);
+        }
         emit({ stage: 'generating', message: `${testCase.id} ${script.status === 'generated' ? 'generated' : `blocked: ${script.summary}`} (${position})`,
           caseId: testCase.id, caseIndex: index + 1, caseTotal: total, caseStatus: script.status });
       }
       signal.throwIfAborted();
       emit({ stage: 'finalizing', message: 'Validating generated specs' });
       const explorationRecords = Object.fromEntries([...notesByRequirement].filter(([, notes]) => notes.trim()));
-      return formatResult(scripts, { explorationNotes: Object.values(explorationRecords).join('\n\n'), explorationRecords });
+      return formatResult(scripts, { explorationNotes: batchNotes, explorationRecords });
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }

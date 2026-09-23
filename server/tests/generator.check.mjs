@@ -85,12 +85,12 @@ test('runs one model call per case, isolates the workspace and forwards progress
     return output;
   });
   const events = [];
-  const two = { ...input, cases: [input.cases[0], { ...input.cases[0], id: 'TC-LOGIN-AUTH-FUNC-002' }] };
+  const two = { ...input, cases: [input.cases[0], { ...input.cases[0], id: 'TC-LOGIN-AUTH-FUNC-002', requirement: 'REQ-OTHER' }] };
   const result = await worker(two, { signal: new AbortController().signal, emit: e => events.push(e) });
   assert.equal(runs.length, 2);
   assert.deepEqual(result.scripts.map(s => s.caseId), ['TC-LOGIN-AUTH-FUNC-001', 'TC-LOGIN-AUTH-FUNC-002']);
   assert.equal(result.generated, 2);
-  // Notes observed while generating the first case are handed to the second one.
+  // Batch experience observed while generating the first case is handed to the second one, even across requirements.
   assert.match(JSON.parse(runs[1].prompt).context.explorationNotes, /Error banner/);
   assert.deepEqual(runs[0].disallowedTools, EXCLUDED_TOOLS.map(t => `mcp__playwright-test__${t}`));
   assert.ok(events.some(e => e.stage === 'verifying' && e.caseId === 'TC-LOGIN-AUTH-FUNC-001'));

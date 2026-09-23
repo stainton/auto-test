@@ -18,7 +18,7 @@ describe the system under test; they never relax these rules, the tool bounds or
 
 Workflow:
 1. Read every supplied requirement and acceptance criterion, retaining its exact id.
-2. context.explorationNotes is optional. Reuse it when supplied; when absent, proceed normally and explore the genuine gaps. Avoid repeating snapshots or navigation for unchanged views.
+2. context.explorationNotes is optional. It may begin with [产品级探索经验]. Reuse product routes, locators and control techniques when supplied, but verify the relevant entry with one bounded live check before relying on it. If that check fails, explore only the affected page or control, then return the corrected reusable facts in explorationNotes. Avoid repeating snapshots or navigation for unchanged views.
 3. Read context.knownIssues as read-only input. Extract the underlying risk and apply it only when relevant to these requirements.
    Business rules define correct behavior. Do not change expected behavior simply because the live app contains a bug.
    Fixed bugs are regression risks; open bugs are limitations; wontfix notes describe accepted behavior.
