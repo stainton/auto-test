@@ -15,7 +15,7 @@ const STAGES = new Set(['reading_cases', 'preparing', 'exploring', 'generating',
 // cases, and a failure on the fifth case must not throw away the four specs already written. Each
 // run gets its own timeout and its own small schema, and the notes it produces feed the next case.
 export function createGeneratorWorker({ runtime = runClaude, command, model, settingsPath, playwrightPackage,
-  temporaryRoot = tmpdir(), caseTimeoutMs = 600000 } = {}) {
+  temporaryRoot = tmpdir(), caseTimeoutMs = 600000, assetCache } = {}) {
   return async function generator(input, { signal, emit }) {
     signal.throwIfAborted();
     const workspace = await mkdtemp(path.join(temporaryRoot, 'generator-'));
@@ -36,18 +36,23 @@ export function createGeneratorWorker({ runtime = runClaude, command, model, set
         `const { test } = require(${JSON.stringify(testEntry)});\ntest('generator seed', async ({ page }) => { await page.goto(${JSON.stringify(input.target.baseUrl)}, { waitUntil: 'domcontentloaded', timeout: 30000 }); });\n`, { mode: 0o600 });
       const mcpConfig = { mcpServers: { 'playwright-test': { type: 'stdio', command: process.execPath,
         args: [cli, 'run-test-mcp-server', '--headless', '--config', configPath] } } };
+      const assets = input.context?.assets ?? [];
+      if (assets.length && !assetCache) throw new Error('This generator has no asset cache configured');
+      const staged=[];
+      for (const asset of assets) staged.push({ ...asset, path: await assetCache.stage(asset, path.join(workspace, 'assets')) });
+      const promptInput=assets.length?{...input,context:{...input.context,assets:staged}}:input;
 
       const scripts = [];
       // Notes accumulate across the batch: what case 1 learned about the app saves case 2 an
       // exploration round, which is the dominant cost of a run.
-      const notesByRequirement = new Map((input.requirements ?? []).map(requirement => [requirement.id, requirement.explorationNotes ?? input.context?.explorationNotes ?? '']));
-      const total = input.cases.length;
-      for (const [index, testCase] of input.cases.entries()) {
+      const notesByRequirement = new Map((promptInput.requirements ?? []).map(requirement => [requirement.id, requirement.explorationNotes ?? promptInput.context?.explorationNotes ?? '']));
+      const total = promptInput.cases.length;
+      for (const [index, testCase] of promptInput.cases.entries()) {
         signal.throwIfAborted();
         const position = `${index + 1}/${total}`;
         emit({ stage: 'generating', message: `Generating ${testCase.id} (${position})`, caseId: testCase.id, caseIndex: index + 1, caseTotal: total });
-        const notes = notesByRequirement.get(testCase.requirement) ?? input.context?.explorationNotes ?? '';
-        const output = await runCase({ runtime, input: { ...input, context: { ...input.context, explorationNotes: notes } },
+        const notes = notesByRequirement.get(testCase.requirement) ?? promptInput.context?.explorationNotes ?? '';
+        const output = await runCase({ runtime, input: { ...promptInput, context: { ...promptInput.context, explorationNotes: notes } },
           testCase, workspace, mcpConfig, signal, command, model, settingsPath, caseTimeoutMs, emit, position });
         const script = formatScript(output, testCase);
         scripts.push(script);

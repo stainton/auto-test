@@ -1,4 +1,5 @@
 import { object, check, string, keys, validateTarget, riskEntry, riskList, LIMITATION_MAX_CHARS } from '../shared/contract.mjs';
+import { validateAssets } from '../planner/contract.mjs';
 
 // Input/output contract of the generator HTTP service: reviewed test cases in, one Playwright spec
 // per case out. The caller (CaseHub's 自动化管理) owns the cases and stores the returned scripts; the
@@ -55,11 +56,12 @@ export function validateInput(input) {
   if (input.requirements !== undefined) validateRequirements(input.requirements);
   validateTarget(input.target);
   if (input.context !== undefined) {
-    keys(input.context, ['explorationNotes', 'knownIssues', 'instructions', 'testData'], 'context');
+    keys(input.context, ['explorationNotes', 'knownIssues', 'instructions', 'testData', 'assets'], 'context');
     for (const key of ['explorationNotes', 'knownIssues', 'instructions']) {
       if (input.context[key] !== undefined) check(typeof input.context[key] === 'string' && input.context[key].length <= 200000, `context.${key} must be a string (max 200000 characters)`);
     }
     if (input.context.testData !== undefined) check(object(input.context.testData), 'context.testData must be an object');
+    if (input.context.assets !== undefined) validateAssets(input.context.assets);
   }
   return structuredClone(input);
 }

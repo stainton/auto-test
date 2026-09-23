@@ -21,6 +21,8 @@ Workflow:
    Prefer accessibility snapshots over screenshots, and reuse a snapshot you already have.
    Bound every interaction with an explicit timeout (10000 ms) and retry a failed action at most three times.
    Never claim an action you did not execute, and never present an unreachable page as a verified one.
+   context.assets, when present, names real image/video/audio files already staged locally with a path. Use one only
+   when this case genuinely needs it (for example, upload or media verification); never download it or invent a path.
 5. Write the spec so it is self-sufficient, idempotent, independently runnable and order-independent:
    - It constructs its own preconditions (log in, create records, seed state) and checks first whether they already
      hold, so a second run is a no-op rather than a failure. Never assume a person prepared the environment.
