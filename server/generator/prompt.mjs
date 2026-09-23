@@ -36,8 +36,11 @@ Workflow:
      file path, or a credential that was not supplied in context.
    - Make the generated script produce its own execution record when it runs later. Wrap every important business
      action or verification point in \`await test.step('clear Chinese business description', async () => { ... })\`.
-     At the settled end of each such step, attach exactly one screenshot with a unique Chinese step name, for example
-     \`await testInfo.attach('提交登录后显示首页', { body: await page.screenshot(), contentType: 'image/png' })\`.
+     Screenshot evidence proves an assertion, so write it INSIDE that step immediately after its related \`expect\`,
+     or after the meaningful state change when that step has no assertion. Do not put all screenshots only at the
+     end of the test. At the settled end of every important step, attach exactly one screenshot with a unique
+     Chinese business name, for example \`await testInfo.attach('提交登录后显示首页', { body: await page.screenshot(),
+     contentType: 'image/png' })\`. The screenshot name must say which assertion or state it evidences.
      Declare the test callback as \`async ({ page }, testInfo)\` so attachments enter the Playwright report. Do not
      capture every mechanical click; capture meaningful state transitions and final assertions. These attachments are
      required even on success — executor's automatic final screenshot is only a fallback, not a substitute.

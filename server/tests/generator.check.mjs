@@ -19,7 +19,7 @@ const input = {
   target: { baseUrl: 'https://example.test/login' },
   context: { explorationNotes: 'Existing login form', testData: { password: 'super-secret-password' } }
 };
-const spec = `import { test, expect } from '@playwright/test';\ntest('拒绝错误密码', async ({ page }, testInfo) => { await page.goto('/login'); await testInfo.attach('登录页', { body: await page.screenshot(), contentType: 'image/png' }); });\n`;
+const spec = `import { test, expect } from '@playwright/test';\ntest('拒绝错误密码', async ({ page }, testInfo) => { await test.step('打开登录页并确认表单', async () => { await page.goto('/login'); await expect(page).toHaveTitle(/登录/); await testInfo.attach('登录页显示表单', { body: await page.screenshot(), contentType: 'image/png' }); }); });\n`;
 const output = { status: 'generated', code: spec, summary: '验证错误密码被拒绝', deviations: [], missingInputs: [], explorationNotes: 'Existing login form\nError banner' };
 
 test('rejects malformed cases, local storage-state paths and unsupported fields', () => {

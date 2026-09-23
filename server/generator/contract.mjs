@@ -103,8 +103,8 @@ export function formatScript(output, testCase) {
     check(code.includes('@playwright/test') && /\btest\s*\(/.test(code),
       'a generated script must be a Playwright spec importing @playwright/test and declaring a test');
     check(!/\btest\.(skip|fixme)\s*\(/.test(code), 'a generated script must not skip or fixme the case');
-    check(/\btestInfo\.attach\s*\(/.test(code) && /\bpage\.screenshot\s*\(/.test(code),
-      'a generated script must attach Playwright screenshots as execution evidence');
+    check(/\btest\.step\s*\(/.test(code) && /\btestInfo\.attach\s*\(/.test(code) && /\bpage\.screenshot\s*\(/.test(code),
+      'a generated script must place Playwright screenshot evidence in business test steps');
     check(missingInputs.length===0, 'a generated script must not report missing inputs');
   } else {
     check(missingInputs.length>0, 'a blocked script must explain each missing input or unreachable dependency');
