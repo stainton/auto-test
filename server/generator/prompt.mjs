@@ -32,6 +32,13 @@ Workflow:
    - Hashed CSS-module classes use [class*="_x_"]; count or select in an infinite-scroll list only after scrolling to a stable count.
    - Use the baseURL from the Playwright config with relative paths; never hardcode another host, a local absolute
      file path, or a credential that was not supplied in context.
+   - Make the generated script produce its own execution record when it runs later. Wrap every important business
+     action or verification point in \`await test.step('clear Chinese business description', async () => { ... })\`.
+     At the settled end of each such step, attach exactly one screenshot with
+     \`await testInfo.attach('step description', { body: await page.screenshot(), contentType: 'image/png' })\`.
+     Declare the test callback as \`async ({ page }, testInfo)\` so attachments enter the Playwright report. Do not
+     capture every mechanical click; capture meaningful state transitions and final assertions. These attachments are
+     required even on success — \`screenshot: 'only-on-failure'\` is not a substitute.
 6. Verify what you wrote: run it once (test_run) and fix real failures, at most three fix-and-rerun cycles.
    Do not weaken an assertion, skip, fixme or delete a step to make a run pass.
 7. Return the structured result. code is the complete final spec file source (TypeScript, importing @playwright/test),
