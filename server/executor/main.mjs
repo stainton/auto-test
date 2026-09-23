@@ -40,8 +40,13 @@ export async function collectImages(dir, reportPath){
   };
   // The JSON reporter preserves testInfo.attach's business name. Reading it avoids
   // flattening every attachment to e.g. attachment.png, which made report evidence ambiguous.
+  const addBody=(name, contentType, body)=>{
+    if(!/^image\//.test(contentType||''))return;const data=Buffer.from(body,'base64');
+    if(!data.length||data.length>maxArtifactBytes)return;
+    found.push({name:uniqueName(name||'未命名截图',usedNames),data:`data:${contentType};base64,${body}`});
+  };
   const report=JSON.parse(await readFile(reportPath,'utf8').catch(()=>'{}'));
-  const visit=value=>{if(!value||typeof value!=='object')return;if(Array.isArray(value)){value.forEach(visit);return}if(Array.isArray(value.attachments))for(const attachment of value.attachments)if(attachment?.path)pending.push(add(attachment.path,attachment.name));for(const child of Object.values(value))visit(child)};
+  const visit=value=>{if(!value||typeof value!=='object')return;if(Array.isArray(value)){value.forEach(visit);return}if(Array.isArray(value.attachments))for(const attachment of value.attachments){if(attachment?.path)pending.push(add(attachment.path,attachment.name));else if(typeof attachment?.body==='string')addBody(attachment.name,attachment.contentType,attachment.body);}for(const child of Object.values(value))visit(child)};
   visit(report);await Promise.all(pending);
   async function walk(current){for(const entry of await readdir(current,{withFileTypes:true}).catch(()=>[])){const file=path.join(current,entry.name);if(entry.isDirectory())await walk(file);else await add(file,entry.name);}}
   await walk(dir);return found;
