@@ -55,6 +55,13 @@ export function embedArtifacts(markdown,artifacts){
   for(const image of artifacts){const token=`{{image:${image.name}}}`,embedded=`![${image.name}](${image.data})`;markdown=markdown.includes(token)?markdown.replaceAll(token,embedded):`${markdown}\n\n### 关键断言证据：${image.name}\n\n${embedded}`;}
   return markdown;
 }
+// A report is still valuable when the optional AI summarizer is unavailable. Keep
+// the evidence self-contained and make every attachment a readable test step.
+export function fallbackReport({title,passed,output,artifacts}){
+  const safeOutput=String(output||'无执行输出').replace(/```/g,'\\`\\`\\`');
+  const steps=artifacts.length?artifacts.map((image,index)=>`### ${index+1}. ${image.name}\n\n已收集该关键步骤的截图证据。\n\n{{image:${image.name}}}`).join('\n\n'):'未收集到步骤截图。';
+  return `# 测试记录\n\n## 结论\n\n${passed?'通过':'失败'}。AI 整理不可用，已自动按执行步骤和截图生成本记录。\n\n## 执行信息\n\n- 用例：${title||'未命名用例'}\n- 结果：${passed?'通过':'失败'}\n\n## 关键步骤与截图\n\n${steps}\n\n## 执行输出\n\n\`\`\`text\n${safeOutput}\n\`\`\``;
+}
 export async function startExecutor({host=process.env.EXECUTOR_HOST??'0.0.0.0',port=positive('EXECUTOR_PORT',4504),dataDir=process.env.EXECUTOR_DATA_DIR??path.join(tmpdir(),'auto-test-executor')}={}){
   const settings={prefix:'EXECUTOR',defaultSettingsPath:fileURLToPath(new URL('../../build/automation/setting.json',import.meta.url))};
   await resolveClaudeOptions(settings);const runtime=createReloadingRuntime(runClaude,settings),applySettings=createSettingsApplier(settingsPathFor(settings));
@@ -69,11 +76,12 @@ export async function startExecutor({host=process.env.EXECUTOR_HOST??'0.0.0.0',p
     await writeFile(spec,input.code,{mode:0o600});const config={testDir:project,testMatch:path.basename(spec),workers:1,retries:0,timeout:60000,outputDir:path.join(workspace,'test-results'),reporter:[['json',{outputFile:path.join(workspace,'report.json')}]],use:{headless:true,browserName:'chromium',baseURL:input.target.baseUrl,screenshot:'on',trace:'off',video:'off'}};
     const configPath=path.join(project,'playwright.config.cjs');await writeFile(configPath,`module.exports=${JSON.stringify(config)};\n`,{mode:0o600});const run=await exec(process.execPath,[cli,'test','--config',configPath],project,signal);const artifacts=await collectImages(path.join(workspace,'test-results'),path.join(workspace,'report.json'));
     emit({stage:'summarizing',message:'Organizing execution evidence into Markdown'});const controller=new AbortController(),timer=setTimeout(()=>controller.abort(Error('Record summarization timed out')),positive('EXECUTOR_SUMMARY_TIMEOUT_MS',120000));let markdown;
-    try{const output=await runtime({cwd:workspace,prompt:JSON.stringify({title:input.title||input.fileName,passed:run.code===0,output:run.output,images:artifacts.map(a=>a.name)}),systemPrompt,schema,mcpConfig:{mcpServers:{}},allowedTools:[],command,signal:controller.signal,env:{CLAUDE_CONFIG_DIR:path.join(workspace,'claude-config')}});markdown=output.markdown;}finally{clearTimeout(timer)}
+    let reportMode='ai';
+    try{const output=await runtime({cwd:workspace,prompt:JSON.stringify({title:input.title||input.fileName,passed:run.code===0,output:run.output,images:artifacts.map(a=>a.name)}),systemPrompt,schema,mcpConfig:{mcpServers:{}},allowedTools:[],command,signal:controller.signal,env:{CLAUDE_CONFIG_DIR:path.join(workspace,'claude-config')}});markdown=output.markdown;}catch(error){if(signal.aborted)throw error;reportMode='fallback';markdown=fallbackReport({title:input.title||input.fileName,passed:run.code===0,output:run.output,artifacts});emit({stage:'summarizing',message:'AI report unavailable; assembled steps and screenshots directly'});}finally{clearTimeout(timer)}
     // A report must still work after it is downloaded. Keep every collected image
     // embedded even when the summarizer did not mention its placeholder.
     markdown=embedArtifacts(markdown,artifacts);
-    return {passed:run.code===0,markdown,artifactCount:artifacts.length,output:run.output};
+    return {passed:run.code===0,markdown,artifactCount:artifacts.length,output:run.output,reportMode};
   }finally{await rm(workspace,{recursive:true,force:true});}};
   const jobs=new Jobs({kind:'executor',label:'Executor',started:{stage:'queued',message:'Waiting to run script'},completion:r=>({message:r.passed?'Script passed':'Script failed',passed:r.passed}),worker,dataDir:path.join(dataDir,'jobs'),concurrency:positive('EXECUTOR_CONCURRENCY',1),timeoutMs:positive('EXECUTOR_TIMEOUT_MS',900000),maxJobs:positive('EXECUTOR_MAX_JOBS',100),retentionMs:positive('EXECUTOR_RETENTION_MS',86400000)});
   const server=createHttpServer({jobs,validateInput:validate,applySettings,basePath:'/v1/executor',openapiPath:fileURLToPath(new URL('./openapi.json',import.meta.url))});
