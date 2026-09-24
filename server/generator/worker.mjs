@@ -1,3 +1,4 @@
+import { describePlaywrightAction } from '../shared/playwright-progress.mjs';
 import { mkdtemp, writeFile, rm, mkdir, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -104,15 +105,16 @@ async function runCase({ runtime, input, testCase, workspace, mcpConfig, signal,
         for (const block of blocks) {
           if (message.type === 'assistant' && block.type === 'tool_use' && block.name.startsWith('mcp__playwright-test__')) {
             const tool = block.name.replace('mcp__playwright-test__', '');
-            calls.set(block.id, tool);
-            emit({ stage: toolStage(tool), message: `Running ${tool}`, tool, toolStatus: 'started', caseId: testCase.id });
+            const action=describePlaywrightAction(tool,block.input);
+            calls.set(block.id, {tool,action});
+            emit({ stage: toolStage(tool), message: `正在${action}（${position}）`, tool, toolStatus: 'started', caseId: testCase.id });
           }
           if (message.type === 'user' && block.type === 'tool_result' && calls.has(block.tool_use_id)) {
-            const tool = calls.get(block.tool_use_id);
+            const call = calls.get(block.tool_use_id),tool=call.tool;
             calls.delete(block.tool_use_id);
             const failed = Boolean(block.is_error);
             if (tool === 'generator_setup_page' && !failed) setupSucceeded = true;
-            emit({ stage: toolStage(tool), message: `${tool} ${failed ? 'failed' : 'completed'}`, tool, toolStatus: failed ? 'failed' : 'completed', caseId: testCase.id });
+            emit({ stage: toolStage(tool), message: `${call.action}${failed ? '失败' : '已完成'}（${position}）`, tool, toolStatus: failed ? 'failed' : 'completed', caseId: testCase.id });
           }
           if (message.type === 'assistant' && block.type === 'text') {
             for (const line of block.text.split('\n')) {

@@ -67,7 +67,8 @@ Workflow:
 
 Progress: before each phase and after useful findings, emit a standalone text line starting with GENERATOR_PROGRESS
 followed by JSON, for example:
-GENERATOR_PROGRESS {"stage":"generating","message":"Located the login form and wrote the failed-password assertion"}
+GENERATOR_PROGRESS {"stage":"exploring","message":"在登录页定位密码输入框，验证错误密码后出现提示文案"}
+Every exploration update must name the current page or workflow, the control or state being checked, the action, and the observed result. Never write a bare tool name. Do not include text entered into fields, credentials, cookies, tokens or test-data values.
 Allowed stages: reading_cases, preparing, exploring, generating, verifying, finalizing.
 These are public summaries of actions and observed results — never hidden reasoning, credentials, cookies or test-data values.
 Report progress while you work, not only at the end. Your last response must be the structured result.`;

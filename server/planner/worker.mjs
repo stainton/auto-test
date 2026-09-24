@@ -1,3 +1,4 @@
+import { describePlaywrightAction } from '../shared/playwright-progress.mjs';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -71,15 +72,16 @@ export function createPlannerWorker({ runtime = runClaude, command, model, setti
           for (const block of blocks) {
             if (message.type === 'assistant' && block.type === 'tool_use' && block.name.startsWith('mcp__playwright-test__')) {
               const tool = block.name.replace('mcp__playwright-test__', '');
-              calls.set(block.id, tool);
-              emit({ stage: tool === 'planner_setup_page' ? 'preparing' : 'exploring', message: `Running ${tool}`, tool, toolStatus: 'started' });
+              const action=describePlaywrightAction(tool,block.input);
+              calls.set(block.id, {tool,action});
+              emit({ stage: tool === 'planner_setup_page' ? 'preparing' : 'exploring', message: `正在${action}`, tool, toolStatus: 'started' });
             }
             if (message.type === 'user' && block.type === 'tool_result' && calls.has(block.tool_use_id)) {
-              const tool = calls.get(block.tool_use_id);
+              const call = calls.get(block.tool_use_id),tool=call.tool;
               calls.delete(block.tool_use_id);
               const failed = Boolean(block.is_error);
               if (tool === 'planner_setup_page' && !failed) setupSucceeded = true;
-              emit({ stage: tool === 'planner_setup_page' ? 'preparing' : 'exploring', message: `${tool} ${failed ? 'failed' : 'completed'}`, tool, toolStatus: failed ? 'failed' : 'completed' });
+              emit({ stage: tool === 'planner_setup_page' ? 'preparing' : 'exploring', message: `${call.action}${failed ? '失败' : '已完成'}`, tool, toolStatus: failed ? 'failed' : 'completed' });
             }
             if (message.type === 'assistant' && block.type === 'text') {
               for (const line of block.text.split('\n')) {
