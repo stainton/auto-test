@@ -41,7 +41,7 @@ export async function main() {
     completion: result => ({ message: `Generated ${result.generated} of ${result.scripts.length} scripts`,
       scriptsGenerated: result.generated, scriptsBlocked: result.blocked }),
     worker: createGeneratorWorker({ command, runtime, playwrightPackage,
-      caseTimeoutMs: positive('GENERATOR_CASE_TIMEOUT_MS', 1800000) }),
+      caseTimeoutMs: positive('GENERATOR_CASE_TIMEOUT_MS', 3600000) }),
     dataDir: process.env.GENERATOR_DATA_DIR ?? path.join(tmpdir(), 'auto-test-generator-jobs'),
     concurrency: positive('GENERATOR_CONCURRENCY', 1), timeoutMs: positive('GENERATOR_TIMEOUT_MS', 3600000),
     maxJobs: positive('GENERATOR_MAX_JOBS', 100), retentionMs: positive('GENERATOR_RETENTION_MS', 86400000)

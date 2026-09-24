@@ -17,7 +17,7 @@ const STAGES = new Set(['reading_cases', 'preparing', 'exploring', 'generating',
 // cases, and a failure on the fifth case must not throw away the four specs already written. Each
 // run gets its own timeout and its own small schema, and the notes it produces feed the next case.
 export function createGeneratorWorker({ runtime = runClaude, command, model, settingsPath, playwrightPackage,
-  temporaryRoot = tmpdir(), caseTimeoutMs = 1800000, assetCache } = {}) {
+  temporaryRoot = tmpdir(), caseTimeoutMs = 3600000, assetCache } = {}) {
   return async function generator(input, { signal, emit }) {
     signal.throwIfAborted();
     const workspace = await mkdtemp(path.join(temporaryRoot, 'generator-'));
