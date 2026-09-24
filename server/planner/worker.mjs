@@ -1,3 +1,4 @@
+import { replaySeed } from '../shared/navigation-replay.mjs';
 import { describePlaywrightAction } from '../shared/playwright-progress.mjs';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -42,7 +43,7 @@ export function createPlannerWorker({ runtime = runClaude, command, model, setti
           ...(input.target.extraHTTPHeaders ? { extraHTTPHeaders: input.target.extraHTTPHeaders } : {}) } };
       await writeFile(configPath, `module.exports = ${JSON.stringify(config)};\n`, { mode: 0o600 });
       await writeFile(path.join(workspace, 'seed.spec.ts'),
-        `const { test } = require(${JSON.stringify(testEntry)});\ntest('planner seed', async ({ page }) => { await page.goto(${JSON.stringify(input.target.baseUrl)}, { waitUntil: 'domcontentloaded', timeout: 30000 }); });\n`, { mode: 0o600 });
+        `const { test } = require(${JSON.stringify(testEntry)});\ntest('planner seed', async ({ page }) => { await page.goto(${JSON.stringify(input.target.baseUrl)}, { waitUntil: 'domcontentloaded', timeout: 30000 }); await page.waitForLoadState('domcontentloaded',{timeout:10000}).catch(()=>{}); ${replaySeed(input.productReplay)} });\n`, { mode: 0o600 });
       const mcpConfig = { mcpServers: { 'playwright-test': { type: 'stdio', command: process.execPath,
         args: [cli, 'run-test-mcp-server', '--headless', '--config', configPath] } } };
       // Files the person attached: copied from the cache into this task's workspace (the directory the

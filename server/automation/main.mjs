@@ -20,6 +20,7 @@ import { createSimplifier, validateSimplifyInput } from '../planner/simplify.mjs
 import { createEstimator, validateEstimateInput } from '../planner/estimate.mjs';
 import { validateInput as validateGeneratorInput } from '../generator/contract.mjs';
 import { createGeneratorWorker } from '../generator/worker.mjs';
+import { replayFromNotes } from '../shared/navigation-replay.mjs';
 
 const positive=(name,fallback)=>{const n=Number(process.env[name]??fallback);if(!Number.isSafeInteger(n)||n<1)throw new Error(`${name} must be a positive integer`);return n};
 const trimNotes=notes=>String(notes||'').trim().slice(0,200000);
@@ -42,6 +43,7 @@ export class ProductExperienceStore extends ExperienceStore {
   scope(target) { try { return new URL(target?.baseUrl||'').origin; } catch { return ''; } }
   entry(target) { const key=this.scope(target); return key?this.records[key]:undefined; }
   notesFor(target) { return this.entry(target)?.notes||''; }
+  replayFor(target) { return this.entry(target)?.replay||[]; }
   async mergeFor(target, notes) {
     const key=this.scope(target); notes=trimNotes(notes); if(!key||!notes)return;
     const old=this.records[key]||{}, oldNotes=old.notes||'';
@@ -54,7 +56,7 @@ export class ProductExperienceStore extends ExperienceStore {
     // Keep the useful history bounded. The agent receives its own latest findings
     // first, while old entries stay available until the product genuinely changes.
     const merged=[...new Set(chunks.join('\n\n').split(/\n{2,}/).map(x=>x.trim()).filter(Boolean))].slice(-200).join('\n\n').slice(-200000);
-    this.records[key]={...old,notes:merged,updatedAt:new Date().toISOString(),verifiedAt:new Date().toISOString(),uses:(old.uses||0)+1};
+    this.records[key]={...old,notes:merged,replay:replayFromNotes(merged),updatedAt:new Date().toISOString(),verifiedAt:new Date().toISOString(),uses:(old.uses||0)+1};
     await mkdir(path.dirname(this.file),{recursive:true});
     await writeFile(this.file,JSON.stringify(this.records,null,2)+'\n',{mode:0o600});
   }
@@ -66,7 +68,7 @@ export function withExperience(worker, store, productStore) {
     const supplied=trimNotes(input.context?.explorationNotes);
     const product=productStore?.notesFor(input.target)||'';
     const notes=[product&&`[产品级探索经验：先快速验证，失效时局部修复]\n${product}`,supplied,prior].filter((value,index,all)=>value&&all.indexOf(value)===index).join('\n\n');
-    const enriched=notes?{...input,context:{...input.context,explorationNotes:notes}}:input;
+    const enriched={...input,...(productStore?.replayFor(input.target).length?{productReplay:productStore.replayFor(input.target)}:{}),...(notes?{context:{...input.context,explorationNotes:notes}}:{})};
     const result=await worker(enriched,context);
     if(result.explorationRecords&&typeof result.explorationRecords==='object'){
       for(const [id,notes] of Object.entries(result.explorationRecords))await store.merge([id],notes);

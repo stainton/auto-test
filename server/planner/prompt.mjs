@@ -92,7 +92,7 @@ followed by JSON, for example:
 PLANNER_PROGRESS {"stage":"exploring","message":"在登录页定位密码输入框，并确认“忘记密码”链接可用"}
 Every exploration update must name the current page or workflow, the control or state being checked, the action, and the observed result. Never write a bare tool name. Do not include text entered into fields, credentials, cookies, tokens or test-data values.
 Allowed stages: reading_requirements, preparing, exploring, designing, finalizing.
-These messages are public summaries of actions and observed results, never hidden reasoning, credentials, cookies or test-data values.
+These messages are public summaries of actions and observed results, never hidden reasoning, credentials, cookies or test-data values. When you discover a stable route, append replay lines to explorationNotes in exactly this form: REPLAY: goto /relative-path and REPLAY: click button | visible control name. Include only stable user-facing button/link/tab/menuitem/option names; never include temporary refs, typed values or destructive actions.
 Update progress during exploration; do not wait until the final response. Your last response must be the structured result.`;
 
 // A continued run resumes the interrupted run's conversation (runtime --resume), so the model still holds

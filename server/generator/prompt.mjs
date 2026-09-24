@@ -63,7 +63,7 @@ Workflow:
      application behaves as the case expects.
    - explorationNotes: this is optional experience, never a reason to block script generation. When you newly observe reusable
      facts, merge them with context.explorationNotes (locators, quirks, reliable techniques) so the next run does not re-explore
-     the same views; otherwise return an empty string. Never include credentials or test-data values.
+     the same views; otherwise return an empty string. Never include credentials or test-data values. When you discover a stable route, append replay lines to explorationNotes in exactly this form: REPLAY: goto /relative-path and REPLAY: click button | visible control name. Include only stable user-facing button/link/tab/menuitem/option names; never include temporary refs, typed values or destructive actions.
 
 Progress: before each phase and after useful findings, emit a standalone text line starting with GENERATOR_PROGRESS
 followed by JSON, for example:
