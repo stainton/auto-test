@@ -109,7 +109,7 @@ node server/generator/main.mjs
 | GENERATOR_DATA_DIR | 系统临时目录/auto-test-generator-jobs | 任务状态与结果目录；镜像为 /var/lib/generator |
 | GENERATOR_CONCURRENCY | 1 | 同时运行的浏览器任务数 |
 | GENERATOR_TIMEOUT_MS | 3600000 | 单个任务（含批量全部用例）的最长时间，不含排队 |
-| GENERATOR_CASE_TIMEOUT_MS | 600000 | 单条用例的最长生成时间；超时该条记为 blocked，任务继续 |
+| GENERATOR_CASE_TIMEOUT_MS | 1800000 | 单条用例的最长生成时间；超时该条记为 blocked，任务继续 |
 | GENERATOR_MAX_JOBS | 100 | 包括终态任务在内的保留数量上限 |
 | GENERATOR_RETENTION_MS | 86400000 | 终态任务保留时间 |
 
