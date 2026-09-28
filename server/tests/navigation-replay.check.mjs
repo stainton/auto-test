@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import { replayFromNotes, replaySeed } from '../shared/navigation-replay.mjs';
 const steps=replayFromNotes('入口\nREPLAY: goto /assets\nREPLAY: click button | 上传素材\nREPLAY: click button | 删除');
-assert.deepEqual(steps.slice(0,2),[{action:'goto',url:'/assets'},{action:'click',role:'button',name:'上传素材'}]);
+assert.deepEqual(steps,[{action:'goto',url:'/assets'},{action:'click',role:'button',name:'上传素材'}]);
+const repaired=replayFromNotes('REPLAY: goto /stale\nREPLAY: click button | 旧入口\nREPLAY_RESET\nREPLAY: goto /assets\nREPLAY: click button | 上传素材');
+assert.deepEqual(repaired,[{action:'goto',url:'/assets'},{action:'click',role:'button',name:'上传素材'}]);
 const seed=replaySeed(steps);
-assert.match(seed,/page\.goto/);assert.match(seed,/getByRole/);assert.match(seed,/waitForLoadState/);assert.doesNotMatch(seed,/删除/);
+assert.match(seed,/page\.goto/);assert.match(seed,/getByRole/);assert.match(seed,/waitForLoadState/);assert.match(seed,/EXPLORATION_REPLAY_FAILED/);assert.match(seed,/catch\(error\).*return/);assert.doesNotMatch(seed,/删除/);
 console.log('navigation replay checks passed');

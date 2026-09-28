@@ -28,16 +28,18 @@ test('product experience is shared by origin, isolated between products and pers
   assert.equal(product.notesFor({baseUrl:'https://other.example.test'}),'');
   assert.equal(product.entry({baseUrl:'https://app.example.test'}).uses,1);
   assert.match(await readFile(path.join(dir,'product.json'),'utf8'),/verifiedAt/);
+  await product.mergeFor({baseUrl:'https://app.example.test'},'REPLAY_RESET\nREPLAY: goto /assets\nREPLAY: click button | 上传素材');
+  assert.deepEqual(product.replayFor({baseUrl:'https://app.example.test'}),[{action:'goto',url:'/assets'},{action:'click',role:'button',name:'上传素材'}]);
 });
 
 test('workflow injects product experience before requirement experience and writes discoveries back', async t => {
   const dir=await mkdtemp(path.join(tmpdir(),'automation-product-worker-'));
   t.after(()=>rm(dir,{recursive:true,force:true}));
   const requirement=new ExperienceStore(path.join(dir,'requirement.json')), product=new ProductExperienceStore(path.join(dir,'product.json'));
-  await product.mergeFor({baseUrl:'https://app.example.test'},'稳定菜单 locator');
-  let seen=''; const worker=withExperience(async input=>{seen=input.context.explorationNotes;return {explorationNotes:'修复后的素材弹窗 locator'};},requirement,product);
+  await product.mergeFor({baseUrl:'https://app.example.test'},'稳定菜单 locator\nREPLAY: goto /assets');
+  let seen='',replay=[]; const worker=withExperience(async input=>{seen=input.context.explorationNotes;replay=input.productReplay;return {explorationNotes:'修复后的素材弹窗 locator'};},requirement,product);
   await worker({target:{baseUrl:'https://app.example.test/a'},requirements:[{id:'REQ-1'}],context:{explorationNotes:'需求字段'}},{});
-  assert.match(seen,/产品级探索经验/);assert.match(seen,/稳定菜单/);assert.match(seen,/需求字段/);
+  assert.match(seen,/产品级探索经验/);assert.match(seen,/稳定菜单/);assert.match(seen,/需求字段/);assert.deepEqual(replay,[{action:'goto',url:'/assets'}]);
   assert.match(product.notesFor({baseUrl:'https://app.example.test'}),/修复后的素材弹窗/);
   await product.mergeFor({baseUrl:'https://app.example.test'},`[产品级探索经验：先快速验证，失效时局部修复]\n${product.notesFor({baseUrl:'https://app.example.test'})}\n新的下拉框 locator`);
   assert.equal((product.notesFor({baseUrl:'https://app.example.test'}).match(/修复后的素材弹窗/g)||[]).length,1);
