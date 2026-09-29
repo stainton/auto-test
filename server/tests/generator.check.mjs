@@ -70,6 +70,8 @@ test('the prompt carries the case and only its own requirement, never the browse
   assert.match(SYSTEM_PROMPT, /delete every asset, file, folder, record/);
   assert.match(SYSTEM_PROMPT, /do not create a test\.step or screenshot for it/);
   assert.match(SYSTEM_PROMPT, /never changes the business assertion outcome/);
+  assert.match(SYSTEM_PROMPT, /Every business `test\.step` must attach its own screenshot on BOTH paths/);
+  assert.match(SYSTEM_PROMPT, /步骤名称失败现场/);
 });
 
 async function setup(t, runtime, options = {}) {
@@ -103,6 +105,20 @@ test('runs one model call per case, isolates the workspace and forwards progress
   assert.ok(events.some(e => e.stage === 'generating' && e.caseStatus === 'generated' && e.caseTotal === 2));
   assert.equal(runs[0].mcpConfig.mcpServers['playwright-test'].args.includes('run-test-mcp-server'), true);
   assert.deepEqual(await readdir(temporaryRoot), []); // workspace removed after the run
+});
+
+test('a script that misses per-step evidence blocks only that case', async t => {
+  const noEvidence={ ...output, code: `import { test, expect } from '@playwright/test';\ntest('无取证步骤', async ({ page }, testInfo) => { await test.step('验证页面标题', async () => { await expect(page).toHaveTitle(/示例/); }); });` };
+  let call=0;
+  const { worker } = await setup(t, async options => {
+    options.onMessage(setupCall()); options.onMessage(setupPage());
+    return ++call===1 ? noEvidence : output;
+  });
+  const two={ ...input, cases:[input.cases[0],{ ...input.cases[0], id:'TC-LOGIN-AUTH-FUNC-002' }] };
+  const result=await worker(two,{ signal:new AbortController().signal, emit:()=>{} });
+  assert.equal(result.scripts[0].status,'blocked');
+  assert.match(result.scripts[0].summary,/must attach its own screenshot evidence/);
+  assert.equal(result.scripts[1].status,'generated');
 });
 
 test('a case that fails on its own is blocked, the rest of the batch still generates', async t => {

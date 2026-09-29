@@ -45,8 +45,12 @@ Workflow:
      action or verification point in \`await test.step('clear Chinese business description', async () => { ... })\`.
      Screenshot evidence proves an assertion, so write it INSIDE that step immediately after its related \`expect\`,
      or after the meaningful state change when that step has no assertion. Do not put all screenshots only at the
-     end of the test. At the settled end of every important step, attach exactly one screenshot with a unique
-     Chinese business name, for example \`await testInfo.attach('提交登录后显示首页', { body: await page.screenshot(),
+     end of the test. Every business \`test.step\` must attach its own screenshot on BOTH paths: put its business work,
+     assertion and normal screenshot in \`try\`; in \`catch (error)\`, immediately attach one \`步骤名称失败现场\` screenshot
+     with \`await testInfo.attach(... page.screenshot() ...)\`, catching only an attachment failure, then rethrow the
+     original error. This preserves failed-step evidence without masking the assertion failure. Do not use
+     \`test.step\` for cleanup. At the settled end of a successful important step, attach exactly one screenshot with a
+     unique Chinese business name, for example \`await testInfo.attach('提交登录后显示首页', { body: await page.screenshot(),
      contentType: 'image/png' })\`. The screenshot name must say which assertion or state it evidences. Before each
      evidence screenshot, wait for the asserted UI to settle: use a short \`await page.waitForTimeout(...)\` only after
      the assertion or meaningful state change, normally 300–800 ms and never more than 2000 ms. Do not capture a

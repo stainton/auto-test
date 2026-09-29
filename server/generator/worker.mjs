@@ -62,7 +62,14 @@ export function createGeneratorWorker({ runtime = runClaude, command, model, set
         const notes = mergeNotes(batchNotes, notesByRequirement.get(testCase.requirement) ?? '');
         const output = await runCase({ runtime, input: { ...promptInput, context: { ...promptInput.context, explorationNotes: notes } },
           testCase, workspace, mcpConfig, signal, command, model, settingsPath, caseTimeoutMs:input.caseTimeoutMs??caseTimeoutMs, emit, position });
-        const script = formatScript(output, testCase);
+        let script;
+        try { script = formatScript(output, testCase); }
+        catch (error) {
+          // A malformed generated spec blocks only this case; later cases in the batch still run.
+          const summary=caseFailureSummary(error);
+          script={ caseId: testCase.id, title: testCase.title, fileName: `${testCase.id}.spec.ts`, language: 'typescript',
+            status: 'blocked', code: '', summary, deviations: [], missingInputs: [summary] };
+        }
         scripts.push(script);
         if (typeof output.explorationNotes === 'string' && output.explorationNotes.trim()) {
           batchNotes=mergeNotes(batchNotes, output.explorationNotes);
