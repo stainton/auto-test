@@ -26,9 +26,14 @@ Workflow:
 5. Write the spec so it is self-sufficient, idempotent, independently runnable and order-independent:
    - It constructs its own preconditions (log in, create records, seed state) and checks first whether they already
      hold, so a second run is a no-op rather than a failure. Never assume a person prepared the environment.
-   - Data it creates carries a unique traceable identifier, and cleanup runs in try/finally so it also runs after a
-     failed assertion. If the notes record a destructive-action rate limit or a shared fixture area, do not delete in
-     teardown: build fixtures by check-then-reuse in one fixed named location and assert baseline + delta, not absolute counts.
+   - It must first try to construct every business precondition itself: create the required product asset, record,
+     upload file, folder, account-scoped object or other fixture through the product UI or an available supported API.
+     Prefer generating simple fixture content in the script over requiring a manually prepared file. Only report a
+     missing input after proving that it cannot be created or supplied by the test (for example, a real external token).
+   - Every created object must carry a unique traceable identifier. Put setup, the business assertions and cleanup in
+     try/finally, then delete every asset, file, folder, record and other fixture created by this run after the test
+     has finished, including after a failed assertion. Cleanup must target only this run's identifier; never delete a
+     pre-existing or shared fixture. Verify the cleanup when the product exposes a reliable confirmation.
    - Drive sliders, ranges and drag-and-drop through a bounded action (fill a range, dispatch input/change, replay the
      pointer path); never an unbounded drag that can hang the suite.
    - Hashed CSS-module classes use [class*="_x_"]; count or select in an infinite-scroll list only after scrolling to a stable count.

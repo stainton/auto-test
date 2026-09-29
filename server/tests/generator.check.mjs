@@ -66,6 +66,8 @@ test('the prompt carries the case and only its own requirement, never the browse
   assert.equal(JSON.stringify(payload).includes('cookies'), false);
   assert.match(SYSTEM_PROMPT, /never more than 2000 ms/);
   assert.match(SYSTEM_PROMPT, /half-transparent/);
+  assert.match(SYSTEM_PROMPT, /construct every business precondition itself/);
+  assert.match(SYSTEM_PROMPT, /delete every asset, file, folder, record/);
 });
 
 async function setup(t, runtime, options = {}) {
