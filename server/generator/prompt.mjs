@@ -30,7 +30,7 @@ Workflow:
      upload file, folder, account-scoped object or other fixture through the product UI or an available supported API.
      Prefer generating simple fixture content in the script over requiring a manually prepared file. Setup is not a
      test step and needs no screenshot evidence: keep it outside \`test.step\`, or, only when grouping is necessary,
-     use a title beginning `[setup]`. Only report a missing input after proving that it cannot be created or supplied
+     use a title beginning \`[setup]\`. Only report a missing input after proving that it cannot be created or supplied
      by the test (for example, a real external token).
    - Every created object must carry a unique traceable identifier. Put setup, the business assertions and cleanup in
      try/finally, then delete every asset, file, folder, record and other fixture created by this run after the test
