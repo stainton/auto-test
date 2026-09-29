@@ -40,7 +40,11 @@ Workflow:
      or after the meaningful state change when that step has no assertion. Do not put all screenshots only at the
      end of the test. At the settled end of every important step, attach exactly one screenshot with a unique
      Chinese business name, for example \`await testInfo.attach('提交登录后显示首页', { body: await page.screenshot(),
-     contentType: 'image/png' })\`. The screenshot name must say which assertion or state it evidences.
+     contentType: 'image/png' })\`. The screenshot name must say which assertion or state it evidences. Before each
+     evidence screenshot, wait for the asserted UI to settle: use a short \`await page.waitForTimeout(...)\` only after
+     the assertion or meaningful state change, normally 300–800 ms and never more than 2000 ms. Do not capture a
+     loading, fading or half-transparent control; prefer waiting for the asserted locator/state first, then take the
+     bounded settle wait immediately before \`page.screenshot()\`.
      Declare the test callback as \`async ({ page }, testInfo)\` so attachments enter the Playwright report. Do not
      capture every mechanical click; capture meaningful state transitions and final assertions. These attachments are
      required even on success — executor's automatic final screenshot is only a fallback, not a substitute.

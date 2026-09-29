@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { validateInput, formatScript, formatResult, SCRIPT_OUTPUT_SCHEMA } from '../generator/contract.mjs';
 import { createGeneratorWorker, EXCLUDED_TOOLS } from '../generator/worker.mjs';
-import { buildPrompt } from '../generator/prompt.mjs';
+import { SYSTEM_PROMPT, buildPrompt } from '../generator/prompt.mjs';
 import { Jobs } from '../shared/jobs.mjs';
 import { createHttpServer } from '../shared/http.mjs';
 import { fileURLToPath } from 'node:url';
@@ -64,6 +64,8 @@ test('the prompt carries the case and only its own requirement, never the browse
   assert.deepEqual(payload.requirements.map(r => r.id), ['REQ-001']);
   assert.deepEqual(payload.target, { baseUrl: 'https://example.test/login', authenticationProvided: true });
   assert.equal(JSON.stringify(payload).includes('cookies'), false);
+  assert.match(SYSTEM_PROMPT, /never more than 2000 ms/);
+  assert.match(SYSTEM_PROMPT, /half-transparent/);
 });
 
 async function setup(t, runtime, options = {}) {
