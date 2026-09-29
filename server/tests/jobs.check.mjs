@@ -125,3 +125,18 @@ test('enforces admission and expires completed jobs', async t => {
   assert.throws(() => jobs.get(job.id), error => error.status === 404);
   assert.ok(jobs.submit(input).id);
 });
+
+test('diagnostic artifacts survive restart without offering continuation and expire with their job', async t => {
+  const discarded=[];
+  const artifacts={workspace:'/tmp/generator-diagnostic-fixture'};
+  const jobs=await make(t,async (_input,{retain})=>{retain(artifacts);throw new Error('validation failed');},
+    {discard:value=>discarded.push(value)});
+  const submitted=jobs.submit(input);
+  await eventually(()=>jobs.get(submitted.id).status==='failed');
+  const restored=new Jobs({dataDir:jobs.dataDir,worker:blocked,discard:value=>discarded.push(value)});
+  assert.deepEqual(restored.summary(restored.get(submitted.id)).artifacts,artifacts);
+  assert.equal(restored.summary(restored.get(submitted.id)).continuable,undefined);
+  restored.get(submitted.id).finishedAt=new Date(Date.now()-86400001).toISOString();
+  restored.prune();
+  assert.deepEqual(discarded,[artifacts]);
+});

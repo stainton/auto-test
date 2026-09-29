@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, rm, readFile, writeFile, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { validateInput, formatScript, formatResult, SCRIPT_OUTPUT_SCHEMA } from '../generator/contract.mjs';
@@ -78,7 +78,7 @@ test('the prompt carries the case and only its own requirement, never the browse
   assert.match(SYSTEM_PROMPT, /never changes the business assertion outcome/);
   assert.match(SYSTEM_PROMPT, /Every actual test-step `test\.step` must attach its own screenshot on BOTH paths/);
   assert.match(SYSTEM_PROMPT, /步骤名称失败现场/);
-  assert.match(SYSTEM_PROMPT, /Setup is not a test step and needs no screenshot evidence/);
+  assert.match(SYSTEM_PROMPT.replace(/\s+/g, ' '), /Setup is not a test step and needs no screenshot evidence/);
 });
 
 async function setup(t, runtime, options = {}) {
@@ -119,12 +119,12 @@ test('a script that misses per-step evidence blocks only that case', async t => 
   let call=0;
   const { worker } = await setup(t, async options => {
     options.onMessage(setupCall()); options.onMessage(setupPage());
-    return ++call===1 ? noEvidence : output;
+    return ++call<=3 ? noEvidence : output;
   });
   const two={ ...input, cases:[input.cases[0],{ ...input.cases[0], id:'TC-LOGIN-AUTH-FUNC-002' }] };
   const result=await worker(two,{ signal:new AbortController().signal, emit:()=>{} });
   assert.equal(result.scripts[0].status,'blocked');
-  assert.match(result.scripts[0].summary,/must attach its own screenshot evidence/);
+  assert.match(result.scripts[0].missingInputs[0],/测试步骤缺少截图附件/);
   assert.equal(result.scripts[1].status,'generated');
 });
 
@@ -195,4 +195,77 @@ test('the shared HTTP layer serves this service under its own base path', async 
   const result = await (await fetch(url(`/v1/generator/jobs/${job.id}/result`))).json();
   assert.equal(result.scripts[0].fileName, 'TC-LOGIN-AUTH-FUNC-001.spec.ts');
   assert.equal(jobs.get(job.id).events.at(-1).scriptsGenerated, 1);
+});
+
+test('evidence validation follows local helpers and handles TypeScript, aliases, templates and braces', () => {
+  const code = `import { test, expect } from '@playwright/test';
+  test('fixture', async ({ page: browser }, info) => {
+    async function capture(name: string) {
+      await info.attach(name, { body: await browser.screenshot(), contentType: 'image/png' });
+    }
+    const evidence = async (name: string) => { await capture(name); };
+    await test.step('[setup] 创建目录', async () => {});
+    await test.step(\`验证 "目录"\`, async () => {
+      const text = '}'; // } this must not terminate the step
+      await expect(browser).toHaveTitle(text);
+      await evidence('名称无需与步骤标题完全一致');
+    });
+    await test.step('[cleanup] 清理目录', async () => {});
+  });`;
+  assert.equal(formatScript({ ...output, code }, input.cases[0]).status, 'generated');
+  for (const body of [
+    `// testInfo.attach(page.screenshot())\n await page.goto('/');`,
+    `async function unused() { await testInfo.attach('x', { body: await page.screenshot() }); }`,
+    `await test.step('inner', async () => { await testInfo.attach('x', { body: await page.screenshot() }); });`
+  ]) assert.throws(() => formatScript({ ...output, code: `import {test} from '@playwright/test';
+    test('x', async ({page}, testInfo) => { await test.step('missing', async () => { ${body} }); });` }, input.cases[0]), /missing/);
+});
+
+test('a screenshot contract error is repaired in the same session and within the same case', async t => {
+  const runs=[];
+  const { temporaryRoot, worker }=await setup(t, async options => {
+    runs.push(options);
+    options.onMessage(setupCall()); options.onMessage(setupPage());
+    return runs.length===1 ? { ...output, code: spec.replace('testInfo.attach(', 'testInfo.log(') } : output;
+  });
+  const result=await worker(input, { signal: new AbortController().signal, emit:()=>{} });
+  assert.equal(result.generated, 1);
+  assert.equal(runs.length, 2);
+  assert.equal(runs[1].sessionId, runs[0].sessionId);
+  assert.equal(runs[1].resume, true);
+  assert.match(runs[1].prompt, /测试步骤缺少截图附件/);
+  assert.deepEqual(await readdir(temporaryRoot), []);
+});
+
+test('exhausted repairs preserve source, full error, runtime log and debug artifacts', async t => {
+  const bad={ ...output, code: spec.replace('testInfo.attach(', 'testInfo.log(') };
+  let attempt=0, retained;
+  const { worker }=await setup(t, async options => {
+    options.onMessage(setupCall()); options.onMessage(setupPage());
+    const artifacts=path.join(options.cwd,'test-results');
+    await mkdir(artifacts, { recursive:true });
+    await writeFile(path.join(artifacts,'trace.zip'), `attempt-${++attempt}`);
+    return bad;
+  });
+  const result=await worker(input, { signal:new AbortController().signal, emit:()=>{}, retain:value=>{retained=value;} });
+  assert.equal(result.blocked,1);
+  assert.equal(attempt,3);
+  for (let i=1;i<=3;i++) {
+    const dir=path.join(retained.workspace,'diagnostics',input.cases[0].id,String(i));
+    assert.equal(await readFile(path.join(dir,`${input.cases[0].id}.spec.ts`),'utf8'),bad.code);
+    assert.match(await readFile(path.join(dir,'validation-error.txt'),'utf8'),/测试步骤缺少截图附件/);
+    assert.match(await readFile(path.join(dir,'runtime.jsonl'),'utf8'),/generator_setup_page/);
+    assert.equal(await readFile(path.join(dir,'test-results','trace.zip'),'utf8'),`attempt-${i}`);
+  }
+});
+
+test('aborted generation preserves work already written before returning no result', async t => {
+  const controller=new AbortController(); let retained;
+  const { worker }=await setup(t, async options=>{
+    await writeFile(path.join(options.cwd,'project','partial.spec.ts'),'// in progress');
+    controller.abort(new Error('timeout')); throw controller.signal.reason;
+  });
+  await assert.rejects(worker(input,{signal:controller.signal,emit:()=>{},retain:value=>{retained=value;}}),/timeout/);
+  assert.equal(await readFile(path.join(retained.workspace,'project','partial.spec.ts'),'utf8'),'// in progress');
+  assert.match(await readFile(path.join(retained.workspace,'failure.json'),'utf8'),/timeout/);
 });

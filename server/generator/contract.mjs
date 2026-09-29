@@ -1,3 +1,4 @@
+import { validateStepEvidence } from './evidence.mjs';
 import { object, check, string, keys, validateTarget, riskEntry, riskList, LIMITATION_MAX_CHARS } from '../shared/contract.mjs';
 import { validateAssets } from '../planner/contract.mjs';
 
@@ -72,19 +73,6 @@ export function validateInput(input) {
 // cannot honestly automate comes back blocked with the reason instead of a spec that skips, fixmes or
 // asserts something it never verified.
 const missingInputsSchema={type:'array',minItems:0,maxItems:10,items:{type:'string',minLength:1,maxLength:200}};
-// A report needs evidence at the same granularity as the generated business steps.
-// This deliberately lightweight brace matcher is sufficient for generated specs and rejects a
-// spec whose screenshots were appended only after all verification steps.
-function stepBodies(code){
-  const bodies=[];const re=/\btest\.step\s*\(\s*(['"][^'"]+['"])[\s\S]{0,300}?=>\s*\{/g;let match;
-  while((match=re.exec(code))){let depth=1,index=re.lastIndex;for(;index<code.length&&depth;index++){if(code[index]==='{')depth++;else if(code[index]==='}')depth--;}if(depth)throw Error('a generated script has an unclosed test.step');bodies.push({title:match[1],body:code.slice(re.lastIndex,index-1)});re.lastIndex=index;}
-  return bodies;
-}
-function validateStepEvidence(code){
-  const steps=stepBodies(code),testSteps=steps.filter(step=>!/^['"]\[setup\]/.test(step.title));
-  check(testSteps.length>0,'a generated script must contain business test steps');
-  for(const step of testSteps)check(/\btestInfo\.attach\s*\(/.test(step.body)&&/\bpage\.screenshot\s*\(/.test(step.body),`business test step ${step.title} must attach its own screenshot evidence`);
-}
 export const SCRIPT_OUTPUT_SCHEMA = {
   type: 'object', additionalProperties: false,
   required: ['status', 'code', 'summary', 'deviations', 'missingInputs', 'explorationNotes'],

@@ -63,6 +63,7 @@ export class Jobs extends EventEmitter {
     for (const [id, job] of this.jobs) {
       if (TERMINAL.has(job.status) && Date.now() - Date.parse(job.finishedAt) > this.retentionMs) {
         if (job.continuation) this.discard(job.continuation);
+        if (job.artifacts) this.discard(job.artifacts);
         unlinkSync(path.join(this.dataDir, `${id}.json`)); this.jobs.delete(id);
       }
     }
@@ -125,6 +126,8 @@ export class Jobs extends EventEmitter {
       this.event(job, { ...this.started });
       const result = await this.worker(input, { signal: controller.signal,
         emit: progress => { if (!controller.signal.aborted) this.event(job, progress); },
+        // Diagnostic files have a retention lifecycle, but do not offer user continuation.
+        retain: artifacts => { if (artifacts) job.artifacts = artifacts; else delete job.artifacts; this.persist(job); },
         // Recorded even after an abort: a task killed by its time limit is exactly the one worth continuing.
         checkpoint: state => { if (state) job.continuation = state; else delete job.continuation; this.persist(job); } });
       controller.signal.throwIfAborted();

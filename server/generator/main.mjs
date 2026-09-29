@@ -1,3 +1,4 @@
+import { rmSync } from 'node:fs';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -35,14 +36,16 @@ export async function main() {
   await access(path.join(path.dirname(playwrightPackage), 'cli.js'));
   const { chromium } = require('playwright');
   await access(chromium.executablePath());
+  const dataDir = process.env.GENERATOR_DATA_DIR ?? path.join(tmpdir(), 'auto-test-generator-jobs');
   const jobs = new Jobs({
     kind: 'generator', label: 'Generator',
     started: { stage: 'reading_cases', message: 'Reading the submitted test cases and context' },
     completion: result => ({ message: `Generated ${result.generated} of ${result.scripts.length} scripts`,
       scriptsGenerated: result.generated, scriptsBlocked: result.blocked }),
-    worker: createGeneratorWorker({ command, runtime, playwrightPackage,
+    worker: createGeneratorWorker({ command, runtime, playwrightPackage, temporaryRoot: path.join(dataDir, 'workspaces'),
       caseTimeoutMs: positive('GENERATOR_CASE_TIMEOUT_MS', 3600000) }),
-    dataDir: process.env.GENERATOR_DATA_DIR ?? path.join(tmpdir(), 'auto-test-generator-jobs'),
+    dataDir,
+    discard: state => { if (state?.workspace) rmSync(state.workspace, { recursive: true, force: true }); },
     concurrency: positive('GENERATOR_CONCURRENCY', 1), timeoutMs: positive('GENERATOR_TIMEOUT_MS', 3600000),
     maxJobs: positive('GENERATOR_MAX_JOBS', 100), retentionMs: positive('GENERATOR_RETENTION_MS', 86400000)
   });

@@ -87,14 +87,14 @@ node server/generator/main.mjs
 }
 ```
 
-- `code` 是完整的 spec 源码，由调用方保存；服务不向仓库写文件，任务结束即删除临时工作目录。
+- `code` 是完整的 spec 源码，由调用方保存；服务不向仓库写文件，全部成功时删除工作目录；有用例受阻、失败、超时或取消时保留现场。
 - `status` 为 `blocked` 表示无法诚实地生成可运行脚本（缺少账号/令牌/素材等必需输入，或流程三次尝试仍不可达）：此时 `code` 为空，`summary` 说明缺什么。**不会**返回 skip、fixme、占位或未经验证的断言。所有 blocked 用例同时汇总在 `limitations` 里（`{risk, summary}`，与 planner 的字段一致，便于同一套界面展示）。
 - `deviations` 是实测行为与用例预期不一致的地方：脚本按实测行为断言并在该行标注 `// deviation:`，同时在这里登记一条中文说明（每条不超过 40 字，按风险排序）。
 - `summary` 与 `deviations[].summary` 都写给非技术评审人看：中文、不含选择器/URL/工具名。
 - `explorationNotes` 是合并后的探索记录，建议调用方保存并在下次请求中回传，可显著减少重复探索。
 - 任务只要跑完就是 `succeeded`，blocked 属于结果而非失败，调用方据此保存能用的脚本、并逐条看到其余用例为什么没生成。
 
-每条用例单独一次模型调用（见 worker.mjs）：批量任务里第五条失败不会丢掉前四条已经写好的脚本，每次调用有独立超时，前一条用例观察到的页面信息会传给下一条。
+每条用例独立生成（见 worker.mjs）；返回代码校验失败时，最多在原 Claude 会话中修复两轮，共用本条用例的超时预算：批量任务里第五条失败不会丢掉前四条已经写好的脚本，每次调用有独立超时，前一条用例观察到的页面信息会传给下一条。
 
 ## 配置
 
@@ -117,6 +117,8 @@ node server/generator/main.mjs
 
 ```sh
 node --test server/tests/generator.check.mjs
+# 实际浏览器取证检查（不调用模型）
+node server/tests/generator-evidence-smoke.mjs
 ```
 
 用受控 Agent 替身验证输入校验、每条用例一次调用、批量中单条失败的降级、取消传播、脚本合法性（必须是导入 `@playwright/test` 且不含 skip/fixme 的真实 spec）以及 OpenAPI 文档，不消耗模型额度。真实生成质量仍需要有效的模型 API Key 和实际被测系统。
@@ -128,3 +130,11 @@ agent 的配置由 CaseHub 存在数据库里，generator 自己不再保存副�
 因此本地文件只是 CaseHub 配置的落地结果，被覆盖是预期行为：容器重建、回滚到旧镜像或有人手工改过文件，下一次请求都会把 CaseHub 里的配置重新写回来（不需要先在 CaseHub 那边改一次配置），不需要共享卷，也不需要持久卷。无效 JSON 会以 400 拒绝该请求且不落盘（`INVALID_AGENT_SETTINGS`），写文件失败返回 500（`AGENT_SETTINGS_FAILED`），都不会静默退回旧配置。显式设置的 `GENERATOR_MODEL` 仍优先于文件中的模型设置。
 
 镜像里的 `setting.json` 仍是首次启动、以及 CaseHub 不下发配置时的兜底；该路径需可写（默认镜像可写，若把根文件系统设为只读需单独挂载可写卷）。配置只影响后续 CLI 调用，已经在跑的 Claude 进程不变。
+
+### 截图校验与失败现场
+
+仅实际测试步骤必须提供截图附件，前置构造 `[setup]` 和清理 `[cleanup]` 不要求。校验解析 TypeScript 语法和本地辅助函数调用，不要求页面/附件变量的固定名称，也不要求截图标题与步骤标题完全一致。清理应在业务步骤之外执行，异常只记日志。
+
+失败现场保存在任务独立目录。合并服务默认位于 `AUTOMATION_DATA_DIR/generator-workspaces/generator-*`，独立 generator 位于 `GENERATOR_DATA_DIR/workspaces/generator-*`。任务状态的 `artifacts.workspace` 和结束进度日志给出位置。目录包含原始返回代码、调试脚本、完整校验错误、runtime.jsonl、Claude 会话和已有测试产物；调试失败时启用兜底截图与 trace，每轮产物单独快照。成功的中间用例也会先写入现场文件，避免后续超时丢失。
+
+现场不保持浏览器进程存活。其保留期跟随 `GENERATOR_RETENTION_MS`（默认 24 小时），到期随任务清理；挂载对应数据目录后可跨容器重建保留，否则只保留到容器磁盘被删除。现场文件可能含请求凭据或测试数据，仅在服务端目录以私有权限保存，不经公共进度流发送原始日志。

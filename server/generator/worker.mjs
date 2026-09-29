@@ -1,6 +1,8 @@
+import { appendFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { replaySeed } from '../shared/navigation-replay.mjs';
 import { describePlaywrightAction } from '../shared/playwright-progress.mjs';
-import { mkdtemp, writeFile, rm, mkdir, symlink } from 'node:fs/promises';
+import { mkdtemp, writeFile, rm, mkdir, symlink, cp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -18,9 +20,14 @@ const STAGES = new Set(['reading_cases', 'preparing', 'exploring', 'generating',
 // run gets its own timeout and its own small schema, and the notes it produces feed the next case.
 export function createGeneratorWorker({ runtime = runClaude, command, model, settingsPath, playwrightPackage,
   temporaryRoot = tmpdir(), caseTimeoutMs = 3600000, assetCache } = {}) {
-  return async function generator(input, { signal, emit }) {
+  return async function generator(input, { signal, emit, retain = () => {} }) {
     signal.throwIfAborted();
+    await mkdir(temporaryRoot, { recursive: true, mode: 0o700 });
     const workspace = await mkdtemp(path.join(temporaryRoot, 'generator-'));
+    let completed = false;
+    retain({ workspace });
+    const progress = emit;
+    emit = event => { appendFileSync(path.join(workspace, 'progress.jsonl'), JSON.stringify({ ...event, time: new Date().toISOString() }) + '\n', { mode: 0o600 }); progress(event); };
     try {
       emit({ stage: 'preparing', message: 'Preparing an isolated browser session' });
       const packagePath = playwrightPackage ?? require.resolve('@playwright/test/package.json');
@@ -29,9 +36,9 @@ export function createGeneratorWorker({ runtime = runClaude, command, model, set
       const cli = path.join(path.dirname(packagePath), 'cli.js');
       const configPath = path.join(project, 'playwright.config.cjs');
       const config = { testDir: project, testMatch: '*.spec.ts', workers: 1, retries: 0,
-        timeout: 60000, outputDir: path.join(workspace, 'test-results'), reporter: [['list']],
+        timeout: 60000, outputDir: path.join(workspace, 'test-results'), reporter: [['list'], ['json', { outputFile: path.join(workspace, 'test-results', 'report.json') }]],
         use: { headless: true, browserName: 'chromium', baseURL: input.target.baseUrl,
-          actionTimeout: 10000, navigationTimeout: 30000, screenshot: 'off', trace: 'off', video: 'off',
+          actionTimeout: 10000, navigationTimeout: 30000, screenshot: 'only-on-failure', trace: 'retain-on-failure', video: 'off',
           ...(input.target.storageState ? { storageState: input.target.storageState } : {}),
           ...(input.target.extraHTTPHeaders ? { extraHTTPHeaders: input.target.extraHTTPHeaders } : {}) } };
       await writeFile(configPath, `module.exports = ${JSON.stringify(config)};\n`, { mode: 0o600 });
@@ -68,7 +75,7 @@ export function createGeneratorWorker({ runtime = runClaude, command, model, set
           // A malformed generated spec blocks only this case; later cases in the batch still run.
           const summary=caseFailureSummary(error);
           script={ caseId: testCase.id, title: testCase.title, fileName: `${testCase.id}.spec.ts`, language: 'typescript',
-            status: 'blocked', code: '', summary, deviations: [], missingInputs: [summary] };
+            status: 'blocked', code: '', summary, deviations: [], missingInputs: [String(error.message || summary).slice(0, 200)] };
         }
         scripts.push(script);
         if (typeof output.explorationNotes === 'string' && output.explorationNotes.trim()) {
@@ -81,9 +88,16 @@ export function createGeneratorWorker({ runtime = runClaude, command, model, set
       signal.throwIfAborted();
       emit({ stage: 'finalizing', message: 'Validating generated specs' });
       const explorationRecords = Object.fromEntries([...notesByRequirement].filter(([, notes]) => notes.trim()));
-      return formatResult(scripts, { explorationNotes: batchNotes, explorationRecords });
+      const result = formatResult(scripts, { explorationNotes: batchNotes, explorationRecords });
+      await writeFile(path.join(workspace, 'result.json'), JSON.stringify(result, null, 2), { mode: 0o600 });
+      completed = !result.blocked;
+      return result;
+    } catch (error) {
+      await writeFile(path.join(workspace, 'failure.json'), JSON.stringify({ message: error.message, stack: error.stack }), { mode: 0o600 });
+      throw error;
     } finally {
-      await rm(workspace, { recursive: true, force: true });
+      if (completed && !signal.aborted) { await rm(workspace, { recursive: true, force: true }); retain(null); }
+      else emit({ stage: 'finalizing', message: `生成现场已保留：${workspace}（原脚本、完整错误、会话日志和调试产物）` });
     }
   };
 }
@@ -98,51 +112,81 @@ async function runCase({ runtime, input, testCase, workspace, mcpConfig, signal,
   timer.unref();
   const calls = new Map();
   let setupSucceeded = false;
+  const sessionId = randomUUID();
+  let prompt = buildPrompt(input, testCase);
+  const diagnostics = path.join(workspace, 'diagnostics', testCase.id);
+  await mkdir(diagnostics, { recursive: true, mode: 0o700 });
+  await writeFile(path.join(diagnostics, 'session.json'), JSON.stringify({ sessionId }), { mode: 0o600 });
   try {
-    const output = await runtime({ cwd: workspace, prompt: buildPrompt(input, testCase), systemPrompt: SYSTEM_PROMPT,
-      schema: SCRIPT_OUTPUT_SCHEMA, mcpConfig, allowedTools: ['mcp__playwright-test__*'],
-      disallowedTools: EXCLUDED_TOOLS.map(t => `mcp__playwright-test__${t}`),
-      signal: controller.signal, command, model, settingsPath, env: { CLAUDE_CONFIG_DIR: path.join(workspace, 'claude-config') },
-      onMessage(message) {
-        if (message.type === 'system' && message.subtype === 'init') {
-          const server = message.mcp_servers?.find(s => s.name === 'playwright-test');
-          if (!server || server.status !== 'connected') throw new Error('Playwright MCP is not connected');
-        }
-        const blocks = message.message?.content;
-        if (!Array.isArray(blocks)) return;
-        for (const block of blocks) {
-          if (message.type === 'assistant' && block.type === 'tool_use' && block.name.startsWith('mcp__playwright-test__')) {
-            const tool = block.name.replace('mcp__playwright-test__', '');
-            const action=describePlaywrightAction(tool,block.input);
-            calls.set(block.id, {tool,action});
-            emit({ stage: toolStage(tool), message: `正在${action}（${position}）`, tool, toolStatus: 'started', caseId: testCase.id });
-          }
-          if (message.type === 'user' && block.type === 'tool_result' && calls.has(block.tool_use_id)) {
-            const call = calls.get(block.tool_use_id),tool=call.tool;
-            calls.delete(block.tool_use_id);
-            const failed = Boolean(block.is_error);
-            if (tool === 'generator_setup_page' && !failed) setupSucceeded = true;
-            emit({ stage: toolStage(tool), message: `${call.action}${failed ? '失败' : '已完成'}（${position}）`, tool, toolStatus: failed ? 'failed' : 'completed', caseId: testCase.id });
-          }
-          if (message.type === 'assistant' && block.type === 'text') {
-            for (const line of block.text.split('\n')) {
-              if (!line.startsWith('GENERATOR_PROGRESS ')) continue;
-              let progress;
-              try { progress = JSON.parse(line.slice('GENERATOR_PROGRESS '.length)); } catch { continue; }
-              if (STAGES.has(progress.stage) && typeof progress.message === 'string')
-                emit({ stage: progress.stage, message: `${progress.message} (${position})`, caseId: testCase.id });
+    for (let attempt = 0; attempt < 3; attempt++) {
+      controller.signal.throwIfAborted();
+      const attemptDir = path.join(diagnostics, String(attempt + 1));
+      await mkdir(attemptDir, { mode: 0o700 });
+      try {
+        setupSucceeded = false;
+        const output = await runtime({ cwd: workspace, prompt, sessionId, resume: attempt > 0, systemPrompt: SYSTEM_PROMPT,
+          schema: SCRIPT_OUTPUT_SCHEMA, mcpConfig, allowedTools: ['mcp__playwright-test__*'],
+          disallowedTools: EXCLUDED_TOOLS.map(t => `mcp__playwright-test__${t}`),
+          signal: controller.signal, command, model, settingsPath, env: { CLAUDE_CONFIG_DIR: path.join(workspace, 'claude-config') },
+          onMessage(message) {
+            appendFileSync(path.join(attemptDir, 'runtime.jsonl'), JSON.stringify(message) + '\n', { mode: 0o600 });
+            if (message.type === 'system' && message.subtype === 'init') {
+              const server = message.mcp_servers?.find(s => s.name === 'playwright-test');
+              if (!server || server.status !== 'connected') throw new Error('Playwright MCP is not connected');
+            }
+            const blocks = message.message?.content;
+            if (!Array.isArray(blocks)) return;
+            for (const block of blocks) {
+              if (message.type === 'assistant' && block.type === 'tool_use' && block.name.startsWith('mcp__playwright-test__')) {
+                const tool = block.name.replace('mcp__playwright-test__', '');
+                const action=describePlaywrightAction(tool,block.input);
+                calls.set(block.id, {tool,action});
+                emit({ stage: toolStage(tool), message: `正在${action}（${position}）`, tool, toolStatus: 'started', caseId: testCase.id });
+              }
+              if (message.type === 'user' && block.type === 'tool_result' && calls.has(block.tool_use_id)) {
+                const call = calls.get(block.tool_use_id),tool=call.tool;
+                calls.delete(block.tool_use_id);
+                const failed = Boolean(block.is_error);
+                if (tool === 'generator_setup_page' && !failed) setupSucceeded = true;
+                emit({ stage: toolStage(tool), message: `${call.action}${failed ? '失败' : '已完成'}（${position}）`, tool, toolStatus: failed ? 'failed' : 'completed', caseId: testCase.id });
+              }
+              if (message.type === 'assistant' && block.type === 'text') {
+                for (const line of block.text.split('\n')) {
+                  if (!line.startsWith('GENERATOR_PROGRESS ')) continue;
+                  let progress;
+                  try { progress = JSON.parse(line.slice('GENERATOR_PROGRESS '.length)); } catch { continue; }
+                  if (STAGES.has(progress.stage) && typeof progress.message === 'string')
+                    emit({ stage: progress.stage, message: `${progress.message} (${position})`, caseId: testCase.id });
+                }
+              }
             }
           }
+        });
+        await writeFile(path.join(attemptDir, 'output.json'), JSON.stringify(output, null, 2), { mode: 0o600 });
+        if (typeof output?.code === 'string') await writeFile(path.join(attemptDir, `${testCase.id}.spec.ts`), output.code, { mode: 0o600 });
+        if (!setupSucceeded) throw new Error('Generator did not successfully initialize the target browser');
+        try { formatScript(output, testCase); }
+        catch (error) {
+          await writeFile(path.join(attemptDir, 'validation-error.txt'), error.stack || error.message, { mode: 0o600 });
+          if (attempt === 2) throw error;
+          emit({ stage: 'verifying', caseId: testCase.id, message: `脚本校验未通过，正在原会话修复（${attempt + 1}/2）：${error.message}` });
+          prompt = JSON.stringify({ instruction: 'Continue the same case. Fix the returned source using the validation error below. Do not re-explore working flows or weaken assertions. Only actual test steps need screenshots; setup/cleanup do not. Use a local screenshot helper or inline screenshot and attach. Run the corrected spec with test_run and return the complete structured result. The browser is new: initialize generator_setup_page before debugging.', validationError: error.message, previousOutput: output });
+          continue;
         }
+        return output;
+      } finally {
+        // Playwright can replace its output directory on the next test run: snapshot each model attempt.
+        await cp(path.join(workspace, 'project'), path.join(attemptDir, 'project'), { recursive: true, filter: source => path.basename(source) !== 'node_modules' });
+        try { await cp(path.join(workspace, 'test-results'), path.join(attemptDir, 'test-results'), { recursive: true }); }
+        catch (error) { if (error.code !== 'ENOENT') throw error; }
       }
-    });
-    if (!setupSucceeded) throw new Error('Generator did not successfully initialize the target browser');
-    return output;
+    }
   } catch (error) {
     // A cancelled or timed-out JOB aborts the whole run; a single case that failed on its own is
     // reported as blocked so the rest of the batch still produces specs.
+    await writeFile(path.join(diagnostics, 'failure.json'), JSON.stringify({ message: error.message, stack: error.stack, sessionId }), { mode: 0o600 });
     if (signal.aborted) throw signal.reason ?? error;
-    const summary=caseFailureSummary(error);return { status: 'blocked', code: '', summary, deviations: [], missingInputs: [summary], explorationNotes: '' };
+    const summary=caseFailureSummary(error);return { status: 'blocked', code: '', summary, deviations: [], missingInputs: [String(error.message || summary).slice(0, 200)], explorationNotes: '' };
   } finally {
     clearTimeout(timer);
     signal.removeEventListener('abort', abort);

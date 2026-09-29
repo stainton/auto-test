@@ -1,3 +1,12 @@
+// Copy this helper into the returned spec; it has no dependency on the generator workspace.
+export const EVIDENCE_CAPTURE_HELPER = `async function captureEvidence(page, testInfo, name) {
+  await page.waitForTimeout(500);
+  await testInfo.attach(name, {
+    body: await page.screenshot({ timeout: 5000 }),
+    contentType: 'image/png'
+  });
+}`;
+
 // Service adaptation of .claude/agents/playwright-test-generator.md. The interactive file-based
 // workflow (specs/approved/, progress tables, _helpers.ts) stays unchanged; here one HTTP job
 // generates one spec per reviewed case, and the caller stores the returned source.
@@ -61,6 +70,14 @@ Workflow:
      Declare the test callback as \`async ({ page }, testInfo)\` so attachments enter the Playwright report. Do not
      capture every mechanical click; capture meaningful state transitions and final assertions. These attachments are
      required even on success — executor's automatic final screenshot is only a fallback, not a substitute.
+   - Use this concrete screenshot helper in the returned spec (not an external import):
+${EVIDENCE_CAPTURE_HELPER}
+     In EACH actual test.step callback: execute that step and its assertions, then
+     await captureEvidence(page, testInfo, '步骤编号与验证结果'); in catch(error), call
+     await captureEvidence(page, testInfo, '步骤编号失败现场').catch(e => console.warn('截图失败', e.message));
+     then throw error. Wait for the relevant visible/loaded state before the helper.
+     Call this helper inside the step; attachment names do not have to exactly match step titles.
+     Setup and cleanup need no screenshots. Do not label an actual test step [setup] or [cleanup] to bypass evidence.
 6. Verify what you wrote: run it once (test_run) and fix real failures, at most three fix-and-rerun cycles.
    Do not weaken an assertion, skip, fixme or delete a step to make a run pass.
 7. Return the structured result. code is the complete final spec file source (TypeScript, importing @playwright/test),
