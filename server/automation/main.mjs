@@ -20,6 +20,8 @@ import { createSimplifier, validateSimplifyInput } from '../planner/simplify.mjs
 import { createEstimator, validateEstimateInput } from '../planner/estimate.mjs';
 import { validateInput as validateGeneratorInput } from '../generator/contract.mjs';
 import { createGeneratorWorker } from '../generator/worker.mjs';
+import { createHealerWorker } from '../healer/worker.mjs';
+import { validateInput as validateHealerInput } from '../healer/contract.mjs';
 import { replayFromNotes } from '../shared/navigation-replay.mjs';
 
 const positive=(name,fallback)=>{const n=Number(process.env[name]??fallback);if(!Number.isSafeInteger(n)||n<1)throw new Error(`${name} must be a positive integer`);return n};
@@ -84,6 +86,16 @@ export async function main() {
   const defaultSettingsPath=fileURLToPath(new URL('../../build/automation/setting.json',import.meta.url));
   const plannerSettings={defaultSettingsPath};
   const generatorSettings={prefix:'GENERATOR',defaultSettingsPath};
+  const healerSettings={prefix:'HEALER',defaultSettingsPath:path.join(dataDir,'healer-settings.json')};
+  const healerFile=settingsPathFor(healerSettings);
+  if(!existsSync(healerFile)){
+    const source=settingsPathFor(generatorSettings);
+    await mkdir(path.dirname(healerFile),{recursive:true});
+    await writeFile(healerFile,source&&existsSync(source)?readFileSync(source):'{}',{mode:0o600});
+  }
+  await resolveClaudeOptions(healerSettings);
+  const healerRuntime=createReloadingRuntime(runClaude,healerSettings);
+  const healerApply=createSettingsApplier(healerFile);
   await resolveClaudeOptions(plannerSettings); await resolveClaudeOptions(generatorSettings);
   const plannerRuntime=createReloadingRuntime(runClaude,plannerSettings);
   const generatorRuntime=createReloadingRuntime(runClaude,generatorSettings);
@@ -110,17 +122,22 @@ export async function main() {
   };
   const generatorWorker=withExperience(createGeneratorWorker({command,runtime:generatorRuntime,playwrightPackage,assetCache,temporaryRoot:path.join(dataDir,'generator-workspaces'),caseTimeoutMs:positive('GENERATOR_CASE_TIMEOUT_MS',3600000)}),experience,productExperience);
   const generatorJobs=new Jobs({kind:'generator',label:'Generator',started:{stage:'reading_cases',message:'Reading the submitted test cases and context'},completion:result=>({message:`Generated ${result.generated} of ${result.scripts.length} scripts`,scriptsGenerated:result.generated,scriptsBlocked:result.blocked}),worker:generatorWorker,dataDir:path.join(dataDir,'generator-jobs'),concurrency:positive('AUTOMATION_CONCURRENCY',1),timeoutMs:positive('GENERATOR_TIMEOUT_MS',3600000),maxJobs:positive('GENERATOR_MAX_JOBS',100),retentionMs:positive('GENERATOR_RETENTION_MS',86400000),discard:state=>{if(state?.workspace)rmSync(state.workspace,{recursive:true,force:true})}});
+  const healerWorker=withExperience(createHealerWorker({command,runtime:healerRuntime,playwrightPackage,assetCache,temporaryRoot:path.join(dataDir,'healer-workspaces'),caseTimeoutMs:positive('HEALER_CASE_TIMEOUT_MS',3600000)}),experience,productExperience);
+  const healerJobs=new Jobs({kind:'healer',label:'Healer',started:{stage:'reading_cases',message:'Reading the existing script and failure details'},completion:result=>({message:`Repaired ${result.generated} scripts`,scriptsGenerated:result.generated,scriptsBlocked:result.blocked}),worker:healerWorker,dataDir:path.join(dataDir,'healer-jobs'),concurrency:positive('HEALER_CONCURRENCY',1),timeoutMs:positive('HEALER_TIMEOUT_MS',3600000),maxJobs:positive('HEALER_MAX_JOBS',100),retentionMs:positive('HEALER_RETENTION_MS',86400000),discard:state=>{if(state?.workspace)rmSync(state.workspace,{recursive:true,force:true})}});
+  const validateHealer=async payload=>{const input=validateHealerInput(payload);for(const asset of input.context?.assets??[])if(!await assetCache.has(asset.sha256))throw new ServiceError(409,'ASSET_NOT_CACHED',`Asset ${asset.name} has not been uploaded to this service`);return input;};
+  const healerHandler=createHttpHandler({jobs:healerJobs,applySettings:healerApply,assetCache,validateInput:validateHealer,basePath:'/v1/healer',openapiPath:fileURLToPath(new URL('../healer/openapi.json',import.meta.url))});
   const plannerHandler=createHttpHandler({jobs:plannerJobs,applySettings:plannerApply,assetCache,validateInput:validatePlanner,validateSimplifyInput,simplify:createSimplifier({command,runtime:plannerRuntime}),simplifyTimeoutMs:positive('PLANNER_SIMPLIFY_TIMEOUT_MS',60000),validateEstimateInput,estimate:createEstimator({command,runtime:plannerRuntime}),estimateTimeoutMs:positive('PLANNER_ESTIMATE_TIMEOUT_MS',120000),openapiPath:fileURLToPath(new URL('../planner/openapi.json',import.meta.url))});
   const validateGenerator=async payload=>{const input=validateGeneratorInput(payload);for(const asset of input.context?.assets??[])if(!await assetCache.has(asset.sha256))throw new ServiceError(409,'ASSET_NOT_CACHED',`Asset ${asset.name} has not been uploaded to this service`);return input;};
   const generatorHandler=createHttpHandler({jobs:generatorJobs,applySettings:generatorApply,assetCache,validateInput:validateGenerator,basePath:'/v1/generator',openapiPath:fileURLToPath(new URL('../generator/openapi.json',import.meta.url))});
   const server=http.createServer((req,res)=>{
     const pathname=new URL(req.url,'http://automation.local').pathname;
-    if(req.method==='GET'&&(pathname==='/healthz'||pathname==='/readyz')){const ready=!plannerJobs.closing&&!generatorJobs.closing;res.writeHead(ready?200:503,{'Content-Type':'application/json'});return res.end(JSON.stringify({status:ready?'ready':'unavailable'}));}
+    if(req.method==='GET'&&(pathname==='/healthz'||pathname==='/readyz')){const ready=!plannerJobs.closing&&!generatorJobs.closing&&!healerJobs.closing;res.writeHead(ready?200:503,{'Content-Type':'application/json'});return res.end(JSON.stringify({status:ready?'ready':'unavailable'}));}
+    if(pathname.startsWith('/v1/healer/'))return healerHandler(req,res);
     return pathname.startsWith('/v1/generator/')?generatorHandler(req,res):plannerHandler(req,res);
   });
   server.requestTimeout=600000; server.listen(positive('AUTOMATION_PORT',4501),host,()=>console.log(`Automation HTTP service listening on ${host}:${server.address().port}`));
-  let stopping=false; const shutdown=async()=>{if(stopping)return;stopping=true;server.close();await Promise.all([plannerJobs.close(),generatorJobs.close()]);plannerHandler.closeStreams();generatorHandler.closeStreams();server.closeAllConnections();};
+  let stopping=false; const shutdown=async()=>{if(stopping)return;stopping=true;server.close();await Promise.all([plannerJobs.close(),generatorJobs.close(),healerJobs.close()]);plannerHandler.closeStreams();generatorHandler.closeStreams();healerHandler.closeStreams();server.closeAllConnections();};
   process.on('SIGTERM',shutdown);process.on('SIGINT',shutdown);
-  return {server,plannerJobs,generatorJobs,experience,productExperience};
+  return {server,plannerJobs,generatorJobs,healerJobs,experience,productExperience};
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url))main().catch(error=>{console.error(`Automation startup failed: ${error.message}`);process.exitCode=1});

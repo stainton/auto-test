@@ -9,4 +9,4 @@ kubectl rollout status deployment/automation
 kubectl rollout status deployment/executor
 ```
 
-服务在 `http://automation:4501` 提供 `/api/planner/*` 与 `/api/generator/*`。产品级与需求级探索经验位于 PVC，Pod 重建后仍会保留。脚本执行由独立的 `executor` Deployment 提供。
+服务在 `http://automation:4501` 提供 `/v1/planner/*`、`/v1/generator/*` 与 `/v1/healer/*`。产品级与需求级探索经验位于 PVC，Pod 重建后仍会保留。脚本执行由独立的 `executor` Deployment 提供。

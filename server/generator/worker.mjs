@@ -19,17 +19,18 @@ const STAGES = new Set(['reading_cases', 'preparing', 'exploring', 'generating',
 // cases, and a failure on the fifth case must not throw away the four specs already written. Each
 // run gets its own timeout and its own small schema, and the notes it produces feed the next case.
 export function createGeneratorWorker({ runtime = runClaude, command, model, settingsPath, playwrightPackage,
-  temporaryRoot = tmpdir(), caseTimeoutMs = 3600000, assetCache } = {}) {
+  temporaryRoot = tmpdir(), caseTimeoutMs = 3600000, assetCache,
+  workflow = { kind: 'generator', systemPrompt: SYSTEM_PROMPT, buildPrompt } } = {}) {
   return async function generator(input, { signal, emit, retain = () => {} }) {
     signal.throwIfAborted();
     await mkdir(temporaryRoot, { recursive: true, mode: 0o700 });
-    const workspace = await mkdtemp(path.join(temporaryRoot, 'generator-'));
+    const workspace = await mkdtemp(path.join(temporaryRoot, `${workflow.kind}-`));
     let completed = false;
     retain({ workspace });
     const progress = emit;
     emit = event => { appendFileSync(path.join(workspace, 'progress.jsonl'), JSON.stringify({ ...event, time: new Date().toISOString() }) + '\n', { mode: 0o600 }); progress(event); };
     try {
-      emit({ stage: 'preparing', message: 'Preparing an isolated browser session' });
+      emit({ stage: 'preparing', message: workflow.kind === 'healer' ? '准备独立脚本修复工作区' : 'Preparing an isolated browser session' });
       const packagePath = playwrightPackage ?? require.resolve('@playwright/test/package.json');
       const project=path.join(workspace,'project'),nodeModules=path.dirname(path.dirname(path.dirname(packagePath)));await mkdir(project,{mode:0o700});await symlink(nodeModules,path.join(project,'node_modules'),'dir');
       const testEntry = path.join(path.dirname(packagePath), 'index.js');
@@ -62,13 +63,14 @@ export function createGeneratorWorker({ runtime = runClaude, command, model, set
       for (const [index, testCase] of promptInput.cases.entries()) {
         signal.throwIfAborted();
         const position = `${index + 1}/${total}`;
-        emit({ stage: 'generating', message: `Generating ${testCase.id} (${position})`, caseId: testCase.id, caseIndex: index + 1, caseTotal: total });
+        emit({ stage: 'generating', message: `${workflow.kind === 'healer' ? 'Repairing' : 'Generating'} ${testCase.id} (${position})`, caseId: testCase.id, caseIndex: index + 1, caseTotal: total });
         // A batch shares discoveries even when its cases reference different requirement
         // documents. Each spec remains independently generated and verified, while the
         // expensive product navigation and locator discovery happen only once per batch.
         const notes = mergeNotes(batchNotes, notesByRequirement.get(testCase.requirement) ?? '');
+        await workflow.prepareCase?.({ workspace, project, testCase });
         const output = await runCase({ runtime, input: { ...promptInput, context: { ...promptInput.context, explorationNotes: notes } },
-          testCase, workspace, mcpConfig, signal, command, model, settingsPath, caseTimeoutMs:input.caseTimeoutMs??caseTimeoutMs, emit, position });
+          testCase, workspace, mcpConfig, signal, workflow, command, model, settingsPath, caseTimeoutMs:input.caseTimeoutMs??caseTimeoutMs, emit, position });
         let script;
         try { script = formatScript(output, testCase); }
         catch (error) {
@@ -97,23 +99,23 @@ export function createGeneratorWorker({ runtime = runClaude, command, model, set
       throw error;
     } finally {
       if (completed && !signal.aborted) { await rm(workspace, { recursive: true, force: true }); retain(null); }
-      else emit({ stage: 'finalizing', message: `生成现场已保留：${workspace}（原脚本、完整错误、会话日志和调试产物）` });
+      else emit({ stage: 'finalizing', message: `${workflow.kind === 'healer' ? '修复' : '生成'}现场已保留：${workspace}（原脚本、完整错误、会话日志和调试产物）` });
     }
   };
 }
 
 // A single case. Its own AbortController bounds the run so one stuck case fails that case (recorded
 // as blocked below) instead of consuming the whole job's budget; a cancelled job still aborts everything.
-async function runCase({ runtime, input, testCase, workspace, mcpConfig, signal, command, model, settingsPath, caseTimeoutMs, emit, position }) {
+async function runCase({ runtime, input, testCase, workspace, mcpConfig, signal, workflow, command, model, settingsPath, caseTimeoutMs, emit, position }) {
   const controller = new AbortController();
   const abort = () => controller.abort(signal.reason);
   signal.addEventListener('abort', abort, { once: true });
   const timer = setTimeout(() => controller.abort(new Error(`Generating ${testCase.id} exceeded its time limit`)), caseTimeoutMs);
   timer.unref();
   const calls = new Map();
-  let setupSucceeded = false;
+  let setupSucceeded = false, testRunSucceeded = false;
   const sessionId = randomUUID();
-  let prompt = buildPrompt(input, testCase);
+  let prompt = workflow.buildPrompt(input, testCase);
   const diagnostics = path.join(workspace, 'diagnostics', testCase.id);
   await mkdir(diagnostics, { recursive: true, mode: 0o700 });
   await writeFile(path.join(diagnostics, 'session.json'), JSON.stringify({ sessionId }), { mode: 0o600 });
@@ -123,8 +125,8 @@ async function runCase({ runtime, input, testCase, workspace, mcpConfig, signal,
       const attemptDir = path.join(diagnostics, String(attempt + 1));
       await mkdir(attemptDir, { mode: 0o700 });
       try {
-        setupSucceeded = false;
-        const output = await runtime({ cwd: workspace, prompt, sessionId, resume: attempt > 0, systemPrompt: SYSTEM_PROMPT,
+        setupSucceeded = false; testRunSucceeded = false;
+        const output = await runtime({ cwd: workspace, prompt, sessionId, resume: attempt > 0, systemPrompt: workflow.systemPrompt,
           schema: SCRIPT_OUTPUT_SCHEMA, mcpConfig, allowedTools: ['mcp__playwright-test__*'],
           disallowedTools: EXCLUDED_TOOLS.map(t => `mcp__playwright-test__${t}`),
           signal: controller.signal, command, model, settingsPath, env: { CLAUDE_CONFIG_DIR: path.join(workspace, 'claude-config') },
@@ -148,13 +150,15 @@ async function runCase({ runtime, input, testCase, workspace, mcpConfig, signal,
                 calls.delete(block.tool_use_id);
                 const failed = Boolean(block.is_error);
                 if (tool === 'generator_setup_page' && !failed) setupSucceeded = true;
+                if (tool === 'test_run' && !failed) testRunSucceeded = true;
                 emit({ stage: toolStage(tool), message: `${call.action}${failed ? '失败' : '已完成'}（${position}）`, tool, toolStatus: failed ? 'failed' : 'completed', caseId: testCase.id });
               }
               if (message.type === 'assistant' && block.type === 'text') {
                 for (const line of block.text.split('\n')) {
-                  if (!line.startsWith('GENERATOR_PROGRESS ')) continue;
+                  const prefix = `${workflow.kind.toUpperCase()}_PROGRESS `;
+                  if (!line.startsWith(prefix)) continue;
                   let progress;
-                  try { progress = JSON.parse(line.slice('GENERATOR_PROGRESS '.length)); } catch { continue; }
+                  try { progress = JSON.parse(line.slice(prefix.length)); } catch { continue; }
                   if (STAGES.has(progress.stage) && typeof progress.message === 'string')
                     emit({ stage: progress.stage, message: `${progress.message} (${position})`, caseId: testCase.id });
                 }
@@ -164,13 +168,16 @@ async function runCase({ runtime, input, testCase, workspace, mcpConfig, signal,
         });
         await writeFile(path.join(attemptDir, 'output.json'), JSON.stringify(output, null, 2), { mode: 0o600 });
         if (typeof output?.code === 'string') await writeFile(path.join(attemptDir, `${testCase.id}.spec.ts`), output.code, { mode: 0o600 });
-        if (!setupSucceeded) throw new Error('Generator did not successfully initialize the target browser');
-        try { formatScript(output, testCase); }
+        if (!(workflow.kind === 'healer' ? output.status === 'blocked' || testRunSucceeded : setupSucceeded)) throw new Error(workflow.kind === 'healer' ? 'Healer did not run the original script with test_run' : 'Generator did not successfully initialize the target browser');
+        try {
+          formatScript(output, testCase);
+          if (output.status === 'generated') await workflow.verifyOutput?.({ output, testCase, workspace, signal: controller.signal, emit });
+        }
         catch (error) {
           await writeFile(path.join(attemptDir, 'validation-error.txt'), error.stack || error.message, { mode: 0o600 });
           if (attempt === 2) throw error;
           emit({ stage: 'verifying', caseId: testCase.id, message: `脚本校验未通过，正在原会话修复（${attempt + 1}/2）：${error.message}` });
-          prompt = JSON.stringify({ instruction: 'Continue the same case. Fix the returned source using the validation error below. Do not re-explore working flows or weaken assertions. Only actual test steps need screenshots; setup/cleanup do not. Use a local screenshot helper or inline screenshot and attach. Run the corrected spec with test_run and return the complete structured result. The browser is new: initialize generator_setup_page before debugging.', validationError: error.message, previousOutput: output });
+          prompt = JSON.stringify({ instruction: 'Continue the same case. Fix the returned source using the validation error below. Do not re-explore working flows or weaken assertions. Only actual test steps need screenshots; setup/cleanup do not. Use a local screenshot helper or inline screenshot and attach. Run the corrected spec with test_run and return the complete structured result. The browser is new: initialize generator_setup_page before debugging.', workflow: workflow.kind, validationError: error.message, previousOutput: output });
           continue;
         }
         return output;
