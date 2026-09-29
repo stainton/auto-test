@@ -37,6 +37,12 @@ test('accepts a runnable spec and refuses one that is stubbed, skipped or not a 
   const script = formatScript(output, input.cases[0]);
   assert.deepEqual(script, { caseId: 'TC-LOGIN-AUTH-FUNC-001', title: '拒绝错误密码', fileName: 'TC-LOGIN-AUTH-FUNC-001.spec.ts',
     language: 'typescript', status: 'generated', code: spec.trim(), summary: '验证错误密码被拒绝', deviations: [], missingInputs: [] });
+  const setupWithoutEvidence=`import { test, expect } from '@playwright/test';
+    test('前置条件不取证', async ({ page }, testInfo) => {
+      await test.step('[setup] 创建临时目录', async () => { await page.goto('/'); });
+      await test.step('验证目录可用', async () => { await expect(page).toHaveTitle(/示例/); await testInfo.attach('目录可用', { body: await page.screenshot(), contentType: 'image/png' }); });
+    });`;
+  assert.equal(formatScript({ ...output, code: setupWithoutEvidence }, input.cases[0]).status, 'generated');
   for (const invalid of [ { ...output, code: '// nothing here' },
     { ...output, code: `import { test } from '@playwright/test';\ntest.skip('x', async () => {});` },
     { ...output, code: `import { test } from '@playwright/test';\ntest('no evidence', async ({ page }) => { await page.goto('/'); });` },
@@ -70,8 +76,9 @@ test('the prompt carries the case and only its own requirement, never the browse
   assert.match(SYSTEM_PROMPT, /delete every asset, file, folder, record/);
   assert.match(SYSTEM_PROMPT, /do not create a test\.step or screenshot for it/);
   assert.match(SYSTEM_PROMPT, /never changes the business assertion outcome/);
-  assert.match(SYSTEM_PROMPT, /Every business `test\.step` must attach its own screenshot on BOTH paths/);
+  assert.match(SYSTEM_PROMPT, /Every actual test-step `test\.step` must attach its own screenshot on BOTH paths/);
   assert.match(SYSTEM_PROMPT, /步骤名称失败现场/);
+  assert.match(SYSTEM_PROMPT, /Setup is not a test step and needs no screenshot evidence/);
 });
 
 async function setup(t, runtime, options = {}) {

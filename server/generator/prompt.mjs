@@ -28,8 +28,10 @@ Workflow:
      hold, so a second run is a no-op rather than a failure. Never assume a person prepared the environment.
    - It must first try to construct every business precondition itself: create the required product asset, record,
      upload file, folder, account-scoped object or other fixture through the product UI or an available supported API.
-     Prefer generating simple fixture content in the script over requiring a manually prepared file. Only report a
-     missing input after proving that it cannot be created or supplied by the test (for example, a real external token).
+     Prefer generating simple fixture content in the script over requiring a manually prepared file. Setup is not a
+     test step and needs no screenshot evidence: keep it outside \`test.step\`, or, only when grouping is necessary,
+     use a title beginning `[setup]`. Only report a missing input after proving that it cannot be created or supplied
+     by the test (for example, a real external token).
    - Every created object must carry a unique traceable identifier. Put setup, the business assertions and cleanup in
      try/finally, then delete every asset, file, folder, record and other fixture created by this run after the test
      has finished, including after a failed assertion. Cleanup must target only this run's identifier; never delete a
@@ -45,8 +47,8 @@ Workflow:
      action or verification point in \`await test.step('clear Chinese business description', async () => { ... })\`.
      Screenshot evidence proves an assertion, so write it INSIDE that step immediately after its related \`expect\`,
      or after the meaningful state change when that step has no assertion. Do not put all screenshots only at the
-     end of the test. Every business \`test.step\` must attach its own screenshot on BOTH paths: put its business work,
-     assertion and normal screenshot in \`try\`; in \`catch (error)\`, immediately attach one \`步骤名称失败现场\` screenshot
+     end of the test. Every actual test-step \`test.step\` must attach its own screenshot on BOTH paths; \`[setup]\` setup
+     steps are excluded and must not attach screenshots. Put the test step's business work, assertion and normal screenshot in \`try\`; in \`catch (error)\`, immediately attach one \`步骤名称失败现场\` screenshot
      with \`await testInfo.attach(... page.screenshot() ...)\`, catching only an attachment failure, then rethrow the
      original error. This preserves failed-step evidence without masking the assertion failure. Do not use
      \`test.step\` for cleanup. At the settled end of a successful important step, attach exactly one screenshot with a

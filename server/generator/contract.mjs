@@ -81,8 +81,9 @@ function stepBodies(code){
   return bodies;
 }
 function validateStepEvidence(code){
-  const steps=stepBodies(code);check(steps.length>0,'a generated script must contain business test steps');
-  for(const step of steps)check(/\btestInfo\.attach\s*\(/.test(step.body)&&/\bpage\.screenshot\s*\(/.test(step.body),`business test step ${step.title} must attach its own screenshot evidence`);
+  const steps=stepBodies(code),testSteps=steps.filter(step=>!/^['"]\[setup\]/.test(step.title));
+  check(testSteps.length>0,'a generated script must contain business test steps');
+  for(const step of testSteps)check(/\btestInfo\.attach\s*\(/.test(step.body)&&/\bpage\.screenshot\s*\(/.test(step.body),`business test step ${step.title} must attach its own screenshot evidence`);
 }
 export const SCRIPT_OUTPUT_SCHEMA = {
   type: 'object', additionalProperties: false,
