@@ -68,6 +68,8 @@ test('the prompt carries the case and only its own requirement, never the browse
   assert.match(SYSTEM_PROMPT, /half-transparent/);
   assert.match(SYSTEM_PROMPT, /construct every business precondition itself/);
   assert.match(SYSTEM_PROMPT, /delete every asset, file, folder, record/);
+  assert.match(SYSTEM_PROMPT, /do not create a test\.step or screenshot for it/);
+  assert.match(SYSTEM_PROMPT, /never changes the business assertion outcome/);
 });
 
 async function setup(t, runtime, options = {}) {

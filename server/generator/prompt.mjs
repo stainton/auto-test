@@ -33,7 +33,9 @@ Workflow:
    - Every created object must carry a unique traceable identifier. Put setup, the business assertions and cleanup in
      try/finally, then delete every asset, file, folder, record and other fixture created by this run after the test
      has finished, including after a failed assertion. Cleanup must target only this run's identifier; never delete a
-     pre-existing or shared fixture. Verify the cleanup when the product exposes a reliable confirmation.
+     pre-existing or shared fixture. Cleanup is a best-effort teardown: do not create a test.step or screenshot for it,
+     do not assert its result, and catch/log any cleanup error so it never changes the business assertion outcome or
+     directly fails the test. A cleanup confirmation may be logged when reliable, but must not be a failing assertion.
    - Drive sliders, ranges and drag-and-drop through a bounded action (fill a range, dispatch input/change, replay the
      pointer path); never an unbounded drag that can hang the suite.
    - Hashed CSS-module classes use [class*="_x_"]; count or select in an infinite-scroll list only after scrolling to a stable count.
