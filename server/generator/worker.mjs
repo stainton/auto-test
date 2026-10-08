@@ -38,7 +38,7 @@ export function createGeneratorWorker({ runtime = runClaude, command, model, set
       const configPath = path.join(project, 'playwright.config.cjs');
       const config = { testDir: project, testMatch: '*.spec.ts', workers: 1, retries: 0,
         timeout: 60000, outputDir: path.join(workspace, 'test-results'), reporter: [['list'], ['json', { outputFile: path.join(workspace, 'test-results', 'report.json') }]],
-        use: { headless: true, browserName: 'chromium', baseURL: input.target.baseUrl,
+        use: { headless: true, browserName: 'chromium', viewport: { width: 1920, height: 1080 }, baseURL: input.target.baseUrl,
           actionTimeout: 10000, navigationTimeout: 30000, screenshot: 'only-on-failure', trace: 'retain-on-failure', video: 'off',
           ...(input.target.storageState ? { storageState: input.target.storageState } : {}),
           ...(input.target.extraHTTPHeaders ? { extraHTTPHeaders: input.target.extraHTTPHeaders } : {}) } };
@@ -72,7 +72,7 @@ export function createGeneratorWorker({ runtime = runClaude, command, model, set
         const output = await runCase({ runtime, input: { ...promptInput, context: { ...promptInput.context, explorationNotes: notes } },
           testCase, workspace, mcpConfig, signal, workflow, command, model, settingsPath, caseTimeoutMs:input.caseTimeoutMs??caseTimeoutMs, emit, position });
         let script;
-        try { script = formatScript(output, testCase); }
+        try { script = formatScript(output, testCase, { requireViewport: workflow.kind !== 'healer' }); }
         catch (error) {
           // A malformed generated spec blocks only this case; later cases in the batch still run.
           const summary=caseFailureSummary(error);
@@ -170,7 +170,7 @@ async function runCase({ runtime, input, testCase, workspace, mcpConfig, signal,
         if (typeof output?.code === 'string') await writeFile(path.join(attemptDir, `${testCase.id}.spec.ts`), output.code, { mode: 0o600 });
         if (!(workflow.kind === 'healer' ? output.status === 'blocked' || testRunSucceeded : setupSucceeded)) throw new Error(workflow.kind === 'healer' ? 'Healer did not run the original script with test_run' : 'Generator did not successfully initialize the target browser');
         try {
-          formatScript(output, testCase);
+          formatScript(output, testCase, { requireViewport: workflow.kind !== 'healer' });
           if (output.status === 'generated') await workflow.verifyOutput?.({ output, testCase, workspace, signal: controller.signal, emit });
         }
         catch (error) {

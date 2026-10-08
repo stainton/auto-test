@@ -233,6 +233,18 @@ application behavior.
       where `<NN>` is the zero-padded step number (`01`, `02`, ...) so attachments stay ordered.
       Use `fullPage: true` only for a step whose result is below the fold; the default viewport
       shot is enough otherwise.
+    - **Choose the window size per scenario while exploring — never hardcode one.** Most apps have no
+      small-window layout, so a too-small window hides/clips/truncates controls and the screenshots
+      lose credibility. The browser starts at the config default 1920×1080. With `browser_evaluate`,
+      probe every control the scenario uses: non-zero size, not `display:none`/`visibility:hidden`/
+      `opacity:0`, `getBoundingClientRect` inside the window, not clipped by an ancestor's
+      `overflow`, text not truncated (`scrollWidth > clientWidth`), no horizontal page scroll. If
+      anything fails, `browser_resize` up (2560×1440, then 3200×1800) and re-probe; if all pass, you
+      may try one smaller size (1600×900 / 1440×900) and keep it only if everything still passes
+      (smaller window = more legible shots). At most 4 resizes, then settle. Declare the result once
+      at file level: `test.use({ viewport: { width: W, height: H } })` (W 1024–3840, H 600–2160);
+      never `setViewportSize` mid-test. Record it in `exploration-notes.md` as `[视口] <page>: WxH`
+      and reuse it (one verifying probe) next time.
     - **Fit as many controls as possible, but stay readable.** Many pages have no small-window
       layout. Before the shot, temporarily set `document.documentElement.style.zoom` to
       `min(1, innerWidth/scrollWidth, innerHeight/scrollHeight)` but **never below 0.6**, take the

@@ -74,6 +74,10 @@ and repeated setup, not token throughput, so the rules below are load-bearing, n
   once (check-then-reuse into one folder), never per scenario. Bulk upload over a network is
   the slowest thing in a run.
 - **Re-run one test (`-g "<title>"`), not the suite,** when checking a freshly generated/fixed spec.
+- **Viewport is explored per scenario, not hardcoded.** Apps under test generally have no small-window layout; a
+  window that is too small crops controls and makes screenshot evidence untrustworthy. Configs start at 1920×1080;
+  the generator probes control visibility (size, in-window rect, overflow clipping, truncation) while exploring,
+  resizes as needed, and declares the result as `test.use({ viewport })` in the spec (validated 1024–3840 × 600–2160).
 - **One screenshot per step** (attach-only; `fullPage` only when the result is below the fold). Temporarily
   zoom the page out (floor 0.6, restored afterwards) so non-responsive pages fit more controls per shot.
 

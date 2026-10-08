@@ -19,7 +19,7 @@ const input = {
   target: { baseUrl: 'https://example.test/login' },
   context: { explorationNotes: 'Existing login form', testData: { password: 'super-secret-password' } }
 };
-const spec = `import { test, expect } from '@playwright/test';\ntest('拒绝错误密码', async ({ page }, testInfo) => { await test.step('打开登录页并确认表单', async () => { await page.goto('/login'); await expect(page).toHaveTitle(/登录/); await testInfo.attach('登录页显示表单', { body: await page.screenshot(), contentType: 'image/png' }); }); });\n`;
+const spec = `import { test, expect } from '@playwright/test';\ntest.use({ viewport: { width: 1600, height: 900 } });\ntest('拒绝错误密码', async ({ page }, testInfo) => { await test.step('打开登录页并确认表单', async () => { await page.goto('/login'); await expect(page).toHaveTitle(/登录/); await testInfo.attach('登录页显示表单', { body: await page.screenshot(), contentType: 'image/png' }); }); });\n`;
 const output = { status: 'generated', code: spec, summary: '验证错误密码被拒绝', deviations: [], missingInputs: [], explorationNotes: 'Existing login form\nError banner' };
 
 test('rejects malformed cases, local storage-state paths and unsupported fields', () => {
@@ -33,11 +33,21 @@ test('rejects malformed cases, local storage-state paths and unsupported fields'
     { ...input, mcpConfig: { command: 'arbitrary-command' } } ]) assert.throws(() => validateInput(invalid));
 });
 
+test('requires an in-range explored viewport for generated specs but not for healed ones', () => {
+  const view = 'test.use({ viewport: { width: 1600, height: 900 } });';
+  const without = spec.replace(view, '');
+  assert.notEqual(without, spec);
+  assert.throws(() => formatScript({ ...output, code: without }, input.cases[0]), /viewport/);
+  for (const bad of ['width: 320, height: 900', 'width: 1600, height: 5000'])
+    assert.throws(() => formatScript({ ...output, code: spec.replace('width: 1600, height: 900', bad) }, input.cases[0]), /viewport/);
+  assert.equal(formatScript({ ...output, code: without }, input.cases[0], { requireViewport: false }).status, 'generated');
+});
+
 test('accepts a runnable spec and refuses one that is stubbed, skipped or not a Playwright test', () => {
   const script = formatScript(output, input.cases[0]);
   assert.deepEqual(script, { caseId: 'TC-LOGIN-AUTH-FUNC-001', title: '拒绝错误密码', fileName: 'TC-LOGIN-AUTH-FUNC-001.spec.ts',
     language: 'typescript', status: 'generated', code: spec.trim(), summary: '验证错误密码被拒绝', deviations: [], missingInputs: [] });
-  const setupWithoutEvidence=`import { test, expect } from '@playwright/test';
+  const setupWithoutEvidence=`import { test, expect } from '@playwright/test';\ntest.use({ viewport: { width: 1600, height: 900 } });
     test('前置条件不取证', async ({ page }, testInfo) => {
       await test.step('[setup] 创建临时目录', async () => { await page.goto('/'); });
       await test.step('验证目录可用', async () => { await expect(page).toHaveTitle(/示例/); await testInfo.attach('目录可用', { body: await page.screenshot(), contentType: 'image/png' }); });
@@ -46,7 +56,7 @@ test('accepts a runnable spec and refuses one that is stubbed, skipped or not a 
   for (const invalid of [ { ...output, code: '// nothing here' },
     { ...output, code: `import { test } from '@playwright/test';\ntest.skip('x', async () => {});` },
     { ...output, code: `import { test } from '@playwright/test';\ntest('no evidence', async ({ page }) => { await page.goto('/'); });` },
-    { ...output, code: `import { test, expect } from '@playwright/test';\ntest('partial evidence', async ({ page }, testInfo) => { await test.step('有证据', async () => { await expect(page).toHaveTitle(/x/); await testInfo.attach('有证据', { body: await page.screenshot(), contentType: 'image/png' }); }); await test.step('无证据', async () => { await expect(page).toHaveURL(/x/); }); });` },
+    { ...output, code: `import { test, expect } from '@playwright/test';\ntest.use({ viewport: { width: 1600, height: 900 } });\ntest('partial evidence', async ({ page }, testInfo) => { await test.step('有证据', async () => { await expect(page).toHaveTitle(/x/); await testInfo.attach('有证据', { body: await page.screenshot(), contentType: 'image/png' }); }); await test.step('无证据', async () => { await expect(page).toHaveURL(/x/); }); });` },
     { ...output, status: 'done' }, { ...output, summary: '' }, { ...output, summary: '汉'.repeat(41) },
     { ...output, deviations: [{ risk: 'unknown', summary: 'x' }] } ]) assert.throws(() => formatScript(invalid, input.cases[0]));
 });
@@ -115,7 +125,7 @@ test('runs one model call per case, isolates the workspace and forwards progress
 });
 
 test('a script that misses per-step evidence blocks only that case', async t => {
-  const noEvidence={ ...output, code: `import { test, expect } from '@playwright/test';\ntest('无取证步骤', async ({ page }, testInfo) => { await test.step('验证页面标题', async () => { await expect(page).toHaveTitle(/示例/); }); });` };
+  const noEvidence={ ...output, code: `import { test, expect } from '@playwright/test';\ntest.use({ viewport: { width: 1600, height: 900 } });\ntest('无取证步骤', async ({ page }, testInfo) => { await test.step('验证页面标题', async () => { await expect(page).toHaveTitle(/示例/); }); });` };
   let call=0;
   const { worker } = await setup(t, async options => {
     options.onMessage(setupCall()); options.onMessage(setupPage());
@@ -198,7 +208,7 @@ test('the shared HTTP layer serves this service under its own base path', async 
 });
 
 test('evidence validation follows local helpers and handles TypeScript, aliases, templates and braces', () => {
-  const code = `import { test, expect } from '@playwright/test';
+  const code = `import { test, expect } from '@playwright/test';\ntest.use({ viewport: { width: 1600, height: 900 } });
   test('fixture', async ({ page: browser }, info) => {
     async function capture(name: string) {
       await info.attach(name, { body: await browser.screenshot(), contentType: 'image/png' });

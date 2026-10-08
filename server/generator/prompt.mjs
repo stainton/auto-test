@@ -63,6 +63,21 @@ Workflow:
    - Drive sliders, ranges and drag-and-drop through a bounded action (fill a range, dispatch input/change, replay the
      pointer path); never an unbounded drag that can hang the suite.
    - Hashed CSS-module classes use [class*="_x_"]; count or select in an infinite-scroll list only after scrolling to a stable count.
+   - Pick the viewport for THIS case while exploring; never assume one. Most apps have no small-window layout, so a
+     window that is too small hides, clips or truncates controls and makes screenshot evidence untrustworthy. The
+     browser starts at the config default 1920x1080. After reaching the page(s) this case touches, use browser_evaluate
+     to probe every control named in the steps and expected results: it must have a non-zero size and not be
+     display:none/visibility:hidden/opacity:0; its getBoundingClientRect must lie inside the window; no ancestor with
+     overflow hidden/auto/scroll may clip it; its text must not be truncated (scrollWidth > clientWidth); and the page
+     must not scroll horizontally (document.documentElement.scrollWidth <= innerWidth). If anything is hidden, clipped
+     or truncated, enlarge with browser_resize (2560x1440, then 3200x1800) and probe again. If everything is fully
+     visible, you may try one smaller size (1600x900 or 1440x900) and keep it only when everything still passes, because
+     the smallest fully-visible window gives the most legible screenshots. Use at most four resizes, then settle on the
+     best size found (vertical scrolling is fine). Declare the result once at file level, before test.describe/test:
+     \`test.use({ viewport: { width: W, height: H } });\` with W in 1024-3840 and H in 600-2160. Never call
+     page.setViewportSize or resize mid-test. When context.explorationNotes already has a verified line starting
+     \`[视口]\` for the same page, verify it with one probe instead of re-searching. Return any size you settled
+     on in explorationNotes as \`[视口] <page/view>: WxH\`.
    - Use the baseURL from the Playwright config with relative paths; never hardcode another host, a local absolute
      file path, or a credential that was not supplied in context.
    - Make the generated script produce its own execution record when it runs later. Wrap every important business

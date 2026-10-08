@@ -89,7 +89,17 @@ export const SCRIPT_OUTPUT_SCHEMA = {
 };
 
 // Validates one model result against the case it was generated for, and returns the stored script.
-export function formatScript(output, testCase) {
+const VIEWPORT = /viewport\s*:\s*\{\s*width\s*:\s*(\d+)\s*,\s*height\s*:\s*(\d+)\s*\}/;
+// A generated spec carries the window size the generator found while exploring; a missing or absurd one would
+// silently fall back to the config default and crop (or waste) the screenshot evidence.
+function checkViewport(code) {
+  const m = VIEWPORT.exec(code);
+  check(m, 'a generated script must declare the explored window size: test.use({ viewport: { width: W, height: H } })');
+  const w = Number(m[1]), h = Number(m[2]);
+  check(w >= 1024 && w <= 3840 && h >= 600 && h <= 2160, 'viewport must be between 1024x600 and 3840x2160');
+}
+
+export function formatScript(output, testCase, { requireViewport = true } = {}) {
   keys(output, ['status', 'code', 'summary', 'deviations', 'missingInputs', 'explorationNotes'], 'generator output');
   check(SCRIPT_STATUSES.includes(output.status), `generator status must be one of ${SCRIPT_STATUSES.join(', ')}`);
   check(typeof output.code === 'string' && output.code.length <= SCRIPT_MAX_CHARS, `generated code must be a string of at most ${SCRIPT_MAX_CHARS} characters`);
@@ -105,6 +115,7 @@ export function formatScript(output, testCase) {
       'a generated script must be a Playwright spec importing @playwright/test and declaring a test');
     check(!/\btest\.(skip|fixme)\s*\(/.test(code), 'a generated script must not skip or fixme the case');
     validateStepEvidence(code);
+    if (requireViewport) checkViewport(code);
     check(missingInputs.length===0, 'a generated script must not report missing inputs');
   } else {
     check(missingInputs.length>0, 'a blocked script must explain each missing input or unreachable dependency');

@@ -37,7 +37,7 @@ export function createPlannerWorker({ runtime = runClaude, command, model, setti
       const configPath = path.join(workspace, 'playwright.config.cjs');
       const config = { testDir: workspace, testMatch: 'seed.spec.ts', workers: 1, retries: 0,
         timeout: 30000, outputDir: path.join(workspace, 'test-results'), reporter: [['list']],
-        use: { headless: true, browserName: 'chromium', baseURL: input.target.baseUrl,
+        use: { headless: true, browserName: 'chromium', viewport: { width: 1920, height: 1080 }, baseURL: input.target.baseUrl,
           actionTimeout: 10000, navigationTimeout: 30000, screenshot: 'off', trace: 'off', video: 'off',
           ...(input.target.storageState ? { storageState: input.target.storageState } : {}),
           ...(input.target.extraHTTPHeaders ? { extraHTTPHeaders: input.target.extraHTTPHeaders } : {}) } };
