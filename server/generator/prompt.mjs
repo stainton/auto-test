@@ -1,10 +1,23 @@
 // Copy this helper into the returned spec; it has no dependency on the generator workspace.
 export const EVIDENCE_CAPTURE_HELPER = `async function captureEvidence(page, testInfo, name) {
   await page.waitForTimeout(500);
-  await testInfo.attach(name, {
-    body: await page.screenshot({ timeout: 5000 }),
-    contentType: 'image/png'
-  });
+  // Many controls have no small-window layout: temporarily shrink the page (never below 60%, to stay legible)
+  // so overflowing content fits one screenshot, then restore it. Failure to zoom must not fail the test.
+  const previous = await page.evaluate(() => {
+    const root = document.documentElement, old = root.style.zoom;
+    const fit = Math.min(innerWidth / Math.max(root.scrollWidth, 1), innerHeight / Math.max(root.scrollHeight, 1));
+    root.style.zoom = String(Math.max(0.6, Math.min(1, Math.floor(fit * 100) / 100)));
+    return old;
+  }).catch(() => null);
+  try {
+    if (previous !== null) await page.waitForTimeout(150);
+    await testInfo.attach(name, {
+      body: await page.screenshot({ timeout: 5000 }),
+      contentType: 'image/png'
+    });
+  } finally {
+    if (previous !== null) await page.evaluate(old => { document.documentElement.style.zoom = old; }, previous).catch(() => {});
+  }
 }`;
 
 // Service adaptation of .claude/agents/playwright-test-generator.md. The interactive file-based
@@ -79,7 +92,8 @@ ${EVIDENCE_CAPTURE_HELPER}
      Call this helper inside the step; attachment names do not have to exactly match step titles.
      Setup and cleanup need no screenshots. Do not label an actual test step [setup] or [cleanup] to bypass evidence.
 6. Verify what you wrote: run it once (test_run) and fix real failures, at most three fix-and-rerun cycles.
-   Do not weaken an assertion, skip, fixme or delete a step to make a run pass.
+   Do not weaken an assertion, skip, fixme or delete a step to make a run pass. A run that fails solely on an assertion
+   the live app genuinely violates (a deviation, below) is the intended outcome, not a failure to fix.
 7. Return the structured result. code is the complete final spec file source (TypeScript, importing @playwright/test),
    exactly as it should be saved — no Markdown fences, no commentary outside the file.
    - status "generated": the spec is complete and you ran it. status "blocked": you could not honestly produce a runnable
@@ -90,11 +104,16 @@ ${EVIDENCE_CAPTURE_HELPER}
      what was missing. Write it for a non-technical reader: no selectors, URLs, tool names or narration of attempts.
    - missingInputs: for status "blocked", list every concrete missing input or unreachable prerequisite separately in Simplified
      Chinese (for example "可登录的测试账号", "用于上传的 PNG 素材", "测试环境的支付模拟服务"). For status "generated", return [].
-   - deviations: where the live application contradicts the case's expected result, assert what the application actually
-     does, mark that line in the spec with a // deviation: comment, and record one entry here: {risk, summary}, summary in
-     Simplified Chinese at most 40 characters. risk high = a core flow, data integrity or security behaviour differs;
+   - deviations: where the live application contradicts the case's expected result, that is a product defect to EXPOSE, not
+     to explain away. Keep the assertion on the case's EXPECTED result so the spec FAILS against the defective behaviour; never
+     rewrite it to assert the buggy behaviour, and never add a step whose purpose is to confirm the defect exists so the run
+     passes. Mark the failing assertion with a // deviation: comment (expected X, observed Y) and record one entry here:
+     {risk, summary}, summary in Simplified Chinese at most 40 characters. Only when context.knownIssues marks the behaviour
+     wontfix (accepted), or the case text itself is wrong about a label/locator rather than the business rule, assert the
+     accepted behaviour instead. risk high = a core flow, data integrity or security behaviour differs;
      medium = a secondary flow, boundary or error handling differs; low = cosmetic or rare edge. Leave empty when the
-     application behaves as the case expects.
+     application behaves as the case expects. A spec that fails ONLY at such a deviation assertion is still status "generated":
+     it is correct as written, so do not spend fix-and-rerun cycles weakening it.
    - explorationNotes: this is optional experience, never a reason to block script generation. When you newly observe reusable
      facts, merge them with context.explorationNotes (locators, quirks, reliable techniques) so the next run does not re-explore
      the same views; otherwise return an empty string. Never include credentials or test-data values. Only record exploration facts you actually verified live: never write a guessed route, locator or action. A seed may have replayed a prior route before setup; if it stops on an earlier page because a route/control changed, explore from that last successful page rather than restarting from login. After repairing it, return REPLAY_RESET on its own line followed by the complete corrected, successfully verified route from the base page to the repaired location. Otherwise, append only newly verified replay lines in exactly this form: REPLAY: goto /relative-path and REPLAY: click button | visible control name. Include only stable user-facing button/link/tab/menuitem/option names; never include temporary refs, typed values or destructive actions.

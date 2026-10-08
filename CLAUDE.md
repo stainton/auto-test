@@ -74,7 +74,8 @@ and repeated setup, not token throughput, so the rules below are load-bearing, n
   once (check-then-reuse into one folder), never per scenario. Bulk upload over a network is
   the slowest thing in a run.
 - **Re-run one test (`-g "<title>"`), not the suite,** when checking a freshly generated/fixed spec.
-- **One screenshot per step** (attach-only; `fullPage` only when the result is below the fold).
+- **One screenshot per step** (attach-only; `fullPage` only when the result is below the fold). Temporarily
+  zoom the page out (floor 0.6, restored afterwards) so non-responsive pages fit more controls per shot.
 
 ## Working rules for exploration (planner AND generator)
 
@@ -127,9 +128,12 @@ Both agents drive a live browser via the `playwright-test` MCP. When they do:
   in a co-located `_helpers.ts`. Save each the moment it works. Skip scenarios whose spec
   exists and passes. Keep `<plan-name>.progress.md` as a `| scenario | status |` table
   (`pending` / `done` / `done (deviation: …)` / `blocked: <need>`) and continue from it.
-- **Live behaviour wins over the plan.** When the app disagrees with a plan `expect:`, assert
-  what the app does, add a `// deviation:` comment, mark `done (deviation: …)`, and correct
-  `exploration-notes.md`. Don't `fixme` over a deviation.
+- **Expose defects, don't codify them.** When the app disagrees with a plan `expect:` (or a known
+  open bug still reproduces), keep asserting the **expected** result, add a `// deviation:` comment,
+  mark `done (deviation: …)` and correct `exploration-notes.md`. The spec must fail at that
+  assertion — never assert the buggy behaviour or add a "confirm the bug exists" step to turn it
+  green. Assert actual behaviour only when the expectation is wrong about a label/locator, or
+  `known-issues.md` marks it `wontfix`. Don't `fixme` over a deviation.
 - **Verify one test, not the suite.** Before `done`, run only that test (`-g "<title>"`).
   Give a failing spec at most 3 fix-and-rerun cycles, then mark it `blocked` for the healer.
 - **Hashed CSS-module classes** → `[class*="_x_"]`. **Infinite-scroll lists** → scroll to a

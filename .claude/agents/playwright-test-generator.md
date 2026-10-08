@@ -35,8 +35,8 @@ application behavior.
   - `fixed` — assert the general correct behavior specifically (not just a shallow happy path), so the
     generated test doubles as a regression guard for that risk class.
   - `open` — do not silently assert the plan's ideal expectation if the live app still reproduces the known
-    symptom; assert real behavior with a `// deviation:` comment (see "When live behaviour deviates" below),
-    or stop and ask the human if the plan requires the now-expected-fixed behavior.
+    symptom; keep asserting the expected behavior and mark it `// deviation:` so the test fails and exposes
+    the still-open bug (see "When live behaviour deviates" below) — never assert the buggy behavior to get a pass.
   - `wontfix` — assert the accepted behavior in that row, not the originally-expected one.
 - If the file does not exist, skip this — it's optional, human-populated.
 
@@ -141,11 +141,17 @@ application behavior.
   via synthetic pointer/mouse events dispatched in `page.evaluate`, per the notes' recipe.
 
 # When live behaviour deviates from the approved plan
-- The plan's `expect:` lines are the human's intent, but the live app is the source of truth.
-  When they disagree, assert **what the app actually does**, add a `// deviation: <plan said X,
-  app does Y>` comment at that step, mark the scenario `done (deviation: …)` in the progress
-  file, and merge the corrected fact into `exploration-notes.md`. Never code the plan's wrong
-  expectation just to match the doc, and never `fixme` the scenario over a mere deviation.
+- **Expose defects, never explain them away.** When exploration shows the app contradicts a plan
+  `expect:` (or a known open bug still reproduces), that is a product defect. Keep the assertion on
+  the **expected** result, add `// deviation: <expected X, app does Y>` at that step, and let the
+  test **fail** there. Do NOT rewrite it to assert the buggy behaviour, and do NOT add a step that
+  "verifies the bug exists" so the run goes green — a passing test would hide the defect.
+- Record it in the progress file as `done (deviation: …)` (the spec is correct as written; a failure
+  at exactly that assertion is the intended result, so spend no fix cycles on it) and merge the
+  observed fact into `exploration-notes.md`.
+- Only assert the app's behaviour instead when the expectation itself is wrong about a label/locator
+  rather than the business rule, or `known-issues.md` marks it `wontfix` (accepted behaviour).
+- Never `fixme`/skip over a deviation either.
 
 # Incremental, resumable generation
 - Treat a plan as a queue of scenarios. Process them **one at a time**, and the moment a
@@ -227,6 +233,11 @@ application behavior.
       where `<NN>` is the zero-padded step number (`01`, `02`, ...) so attachments stay ordered.
       Use `fullPage: true` only for a step whose result is below the fold; the default viewport
       shot is enough otherwise.
+    - **Fit as many controls as possible, but stay readable.** Many pages have no small-window
+      layout. Before the shot, temporarily set `document.documentElement.style.zoom` to
+      `min(1, innerWidth/scrollWidth, innerHeight/scrollHeight)` but **never below 0.6**, take the
+      screenshot, then restore the previous zoom in `finally` (a zoom failure must not fail the
+      test). Do not zoom when the page already fits.
     - Take the screenshot after any `wait_for` / verification in that step so it reflects the settled state.
     - `test.use({ screenshot: 'only-on-failure' })` is NOT a substitute — every step must be captured explicitly.
   - Destructure `{ page }, testInfo` in the test callback so `testInfo` is available.

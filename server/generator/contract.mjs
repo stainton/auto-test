@@ -80,8 +80,8 @@ export const SCRIPT_OUTPUT_SCHEMA = {
     status: { type: 'string', enum: SCRIPT_STATUSES },
     code: { type: 'string', maxLength: SCRIPT_MAX_CHARS },
     summary: { type: 'string', minLength: 1, maxLength: LIMITATION_MAX_CHARS },
-    // What the live application actually did where it contradicts the case's expected result: the
-    // spec asserts the observed behaviour with a // deviation: comment, and says so here too.
+    // Where the live application contradicts the case's expected result: the spec keeps asserting the
+    // EXPECTED result (so it fails and exposes the defect), marked with a // deviation: comment, and says so here too.
     deviations: { type: 'array', maxItems: 10, items: riskEntry('summary') },
     missingInputs: missingInputsSchema,
     explorationNotes: { type: 'string' }
