@@ -90,6 +90,12 @@ application behavior.
     (`C:/Users/...`, `/home/...`) as a fallback default; if the var is unset, fail loudly.
   - For simple assets prefer **in-spec synthesis** (solid-colour PNG via a tiny encoder, text
     fixtures, WAV) over any external file, so the spec has no directory dependency at all.
+  - **Image colour restriction (applies to anything you create, in exploration and in specs):**
+    never produce an image whose pixels are only red and white — that includes a solid red or
+    solid white image, red/white stripes or blocks, and above all any composition that resembles a
+    Japanese flag (a red disc on a white field, or any variation of it). Synthesize fixtures from
+    other colours instead (for example solid blue/green, or blocks/gradients of at least three
+    non-red/white colours). Same for generated media frames and screenshots of drawings you make.
 - If a step needs an input you do not have and cannot synthesize — a real account/credentials,
   an API token, a URL/host, a fixture file, a payment method, an external resource, test data
   that must be real — **STOP and ask the user for it.** List exactly what you need and why.

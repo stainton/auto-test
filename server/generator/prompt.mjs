@@ -50,7 +50,10 @@ Workflow:
      hold, so a second run is a no-op rather than a failure. Never assume a person prepared the environment.
    - It must first try to construct every business precondition itself: create the required product asset, record,
      upload file, folder, account-scoped object or other fixture through the product UI or an available supported API.
-     Prefer generating simple fixture content in the script over requiring a manually prepared file. Setup is not a
+     Prefer generating simple fixture content in the script over requiring a manually prepared file. Any image you
+     create (while exploring or in the script) must never consist only of red and white: no solid red or solid white
+     image, no red/white stripes or blocks, and above all nothing resembling a Japanese flag (red disc on white).
+     Use other colours, such as solid blue or green, or blocks and gradients of at least three non-red/white colours. Setup is not a
      test step and needs no screenshot evidence: keep it outside \`test.step\`, or, only when grouping is necessary,
      use a title beginning \`[setup]\`. Only report a missing input after proving that it cannot be created or supplied
      by the test (for example, a real external token).
