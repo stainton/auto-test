@@ -15,7 +15,7 @@ npm install -g @anthropic-ai/claude-code@2.1.236
 node server/generator/main.mjs
 ```
 
-默认监听 `0.0.0.0:4502`，本机访问 `http://localhost:4502`。与 planner 一样使用 bare 模式，显式加载 `GENERATOR_CLAUDE_SETTINGS` 指定的配置；源码运行时自动查找 `build/generator/setting.json`。服务端提供模型凭据，调用方提供被测系统的 URL、登录状态/登录指引和测试数据。planner 与 generator 是两个独立进程，可以分别部署、分别限流，也可以只启动其中一个。
+默认监听 `0.0.0.0:4502`，本机访问 `http://localhost:4502`。与 planner 一样使用 bare 模式，显式加载 `GENERATOR_CLAUDE_SETTINGS` 指定的配置；源码运行时自动查找 `build/generator/setting.json`。服务端提供模型凭据，调用方提供被测系统的 URL、登录状态/登录指引和测试数据。planner 与 generator 是两个独立进程，可以分别部署、分别限流，也可以只启动其中一个。generator 进程同时提供 `/v1/healer/*`（脚本修复，见 `server/healer/README.md`），两者共用浏览器运行时、资产缓存和探索经验，各自保留独立的任务存储和 Claude 配置。
 
 ## 外部接口
 
@@ -112,6 +112,10 @@ node server/generator/main.mjs
 | GENERATOR_CASE_TIMEOUT_MS | 3600000 | 单条用例的最长生成时间；超时该条记为 blocked，任务继续 |
 | GENERATOR_MAX_JOBS | 100 | 包括终态任务在内的保留数量上限 |
 | GENERATOR_RETENTION_MS | 86400000 | 终态任务保留时间 |
+| GENERATOR_ASSET_DIR | 系统临时目录/auto-test-generator-assets | CaseHub 推送的资产缓存目录（按 SHA-256 命名），generator 与 healer 共用 |
+| GENERATOR_ASSET_CACHE_MB | 2048 | 资产缓存总量上限，超出先淘汰最久未使用的文件 |
+
+`GENERATOR_DATA_DIR` 下还保存 `exploration-experience.json`（按需求 ID）与 `product-exploration-experience.json`（按目标系统 origin）两份探索经验，以及 healer 的 `healer-jobs/`、`healer-workspaces/` 和 `healer-settings.json`；healer 自己的环境变量见 `server/healer/README.md`。
 
 ## 验证
 

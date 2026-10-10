@@ -161,3 +161,28 @@ export function createHttpServer(options) {
   server.closeStreams = handler.closeStreams;
   return server;
 }
+
+// Several workflows in one process (generator + healer, or the combined automation service): each keeps its
+// own routes under its prefix and the last service takes everything else. Health covers all of them, and
+// shutdown drains every job store before the connections close.
+export function createRoutedServer(services) {
+  const fallback = services[services.length - 1];
+  const server = http.createServer((req, res) => {
+    const pathname = new URL(req.url, 'http://service.local').pathname;
+    if (req.method === 'GET' && (pathname === '/healthz' || pathname === '/readyz')) {
+      const ready = services.every(service => !service.jobs.closing);
+      res.writeHead(ready ? 200 : 503, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ status: ready ? 'ready' : 'unavailable' }));
+    }
+    const service = services.find(service => service.prefix && pathname.startsWith(service.prefix)) ?? fallback;
+    return service.handler(req, res);
+  });
+  server.requestTimeout = Math.max(...services.map(service => service.handler.requestTimeout));
+  server.shutdown = async () => {
+    server.close();
+    await Promise.all(services.map(service => service.jobs.close()));
+    for (const service of services) service.handler.closeStreams();
+    server.closeAllConnections();
+  };
+  return server;
+}

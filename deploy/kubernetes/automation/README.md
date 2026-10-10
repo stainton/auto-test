@@ -1,4 +1,6 @@
-# automation Kubernetes 部署
+# automation Kubernetes 部署（单进程组合，可选）
+
+默认部署方式是 planner、generator、executor 三个独立 Pod（见 `deploy/kubernetes/README.md`）。只有需要把 planner、generator、healer 合并到一个 Pod 时才使用本目录，此时 CaseHub 设置 `CASEHUB_AUTOMATION_URL=http://automation:4501`。
 
 准备 `build/automation/setting.json`，构建镜像后执行：
 

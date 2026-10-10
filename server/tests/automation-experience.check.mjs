@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { ExperienceStore, ProductExperienceStore, withExperience } from '../automation/main.mjs';
+import { ExperienceStore, ProductExperienceStore, withExperience } from '../shared/experience.mjs';
 
 test('shared exploration experience is keyed by requirement and returned with each workflow result', async t => {
   const dir=await mkdtemp(path.join(tmpdir(),'automation-experience-'));

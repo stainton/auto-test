@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readdir, rename, rm, stat, utimes, copyFile } from 'node:fs/promises';
 import { createWriteStream } from 'node:fs';
 import path from 'node:path';
+import { ServiceError } from './jobs.mjs';
 
 // CaseHub pushes the files a task needs to the service (PUT .../assets/<sha256>) before it submits the
 // task; the task then only references them. The service never reaches back to CaseHub, so it needs no
@@ -67,4 +68,11 @@ export class AssetCache {
     }
     return target;
   }
+}
+
+// A task may only name files this service already holds: CaseHub pushes them first, so a miss means the
+// push was skipped or the file was pruned, and the caller must upload it again.
+export async function requireCachedAssets(assetCache, input) {
+  for (const asset of input.context?.assets ?? [])
+    if (!await assetCache.has(asset.sha256)) throw new ServiceError(409, 'ASSET_NOT_CACHED', `Asset ${asset.name} has not been uploaded to this service`);
 }

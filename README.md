@@ -36,9 +36,12 @@ drive the workflow from their own UI instead of this repository's files (CaseHub
 
 | Service | Port | Purpose |
 | --- | --- | --- |
-| [automation](server/automation/main.mjs) | 4501 | `/v1/planner/*` designs cases; `/v1/generator/*` generates specs, sharing browser runtime and requirement-scoped exploration experience |
+| [planner](server/planner/README.md) | 4501 | `/v1/planner/*` designs cases |
+| [generator](server/generator/README.md) | 4502 | `/v1/generator/*` generates specs; `/v1/healer/*` repairs them (same browser runtime) |
+| [executor](server/executor/main.mjs) | 4504 | `/v1/executor/*` runs reviewed specs and writes the test record |
 | [general-agent](server/general-agent/README.md) | 4503 | general structured Claude CLI generation, without Playwright or MCP |
 
-The production automation image hosts both specialised paths in one process; general-agent remains a
-separate service. They do not touch `docs/`, `specs/`, `.claude/agents/` or the file-based flow above — the human
+In production each runs in its own pod with its own image and volume (`kubectl apply -k deploy/kubernetes`).
+[automation](server/automation/main.mjs) still serves planner, generator and healer from one process on 4501
+for single-container or local use. They do not touch `docs/`, `specs/`, `.claude/agents/` or the file-based flow above — the human
 review gate is `specs/approved/` here, and the calling application there. See [server/README.md](server/README.md).
