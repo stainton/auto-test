@@ -122,6 +122,9 @@
   #preview tr.revised td { background: #fff8e8; }
   #preview tr.revised td:first-child { box-shadow: inset 3px 0 0 #e8a21c; }
   #preview tr.revised .revBadge { display: inline-block; margin-top: 4px; white-space: normal; }
+  #ctxMenu { position: fixed; z-index: 60; min-width: 160px; padding: 4px; background: var(--panel); border: 1px solid var(--border); border-radius: 9px; box-shadow: var(--shadow); }
+  #ctxMenu button { display: block; width: 100%; text-align: left; border: 0; background: none; min-height: 32px; font-weight: 500; }
+  #ctxMenu button:hover:not(:disabled) { background: var(--accent-soft); }
   dialog { border: 1px solid var(--border); border-radius: 12px; padding: 20px; width: min(560px, calc(100vw - 32px)); box-shadow: var(--shadow); color: var(--text); }
   dialog::backdrop { background: rgba(23,32,51,.35); }
   dialog h2 { font-size: 18px; margin-bottom: 6px; }
@@ -183,6 +186,8 @@
   <input id="refFilter" type="text" placeholder="搜索需求 id / 标题…" aria-label="搜索需求文档" />
   <div id="refList"></div>
 </div>
+
+<div id="ctxMenu" role="menu" hidden><button id="ctxAiRevise" role="menuitem" type="button">🤖 AI 修正</button></div>
 
 <dialog id="aiDialog">
   <h2>🤖 AI 修正需求</h2>
@@ -355,7 +360,7 @@ function syncButtons() {
   $('btnSave').disabled = !dirty || state.busy;
   $('btnReload').disabled = !state.path || !dirty || state.busy;
   $('btnAiRevise').hidden = state.area !== 'requirement';
-  $('btnAiRevise').disabled = dirty || state.busy;
+  $('btnAiRevise').disabled = state.busy;
   $('btnApprove').hidden = state.area !== 'draft';
   $('btnApprove').disabled = dirty || state.busy;
   $('btnUnapprove').hidden = state.area !== 'approved';
@@ -426,6 +431,7 @@ function groupEl(label, files, area, emptyText) {
     if (revN) relTag += `<span class="revBadge" title="${revN} 个用例被 AI 修正，待审阅">⚠ ${revN}</span>`;
     el.innerHTML = `<div>${f.replace(/^(specs|docs)\//, '')}</div><span class="meta"><span class="tag">${kind}</span>${relTag}</span>`;
     el.onclick = () => openFile(f, area);
+    if (area === 'requirement') el.oncontextmenu = (e) => { e.preventDefault(); showCtxMenu(e, f); };
     el.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openFile(f, area); } };
     g.append(el);
   }
@@ -523,7 +529,34 @@ async function runAiRevise() {
   } catch (e) { toast('AI 修正失败：' + e.message); }
   finally { run.disabled = false; run.textContent = '开始修正'; setBusy(false); }
 }
-$('btnAiRevise').onclick = () => $('aiDialog').showModal();
+// Opens the AI revision dialog for the open requirement (guards against unsaved edits).
+function openAiDialog() {
+  if (state.area !== 'requirement') return;
+  if (isDirty()) return toast('请先保存修改，再使用 AI 修正');
+  $('aiDialog').showModal();
+}
+let ctxTarget = null;
+function showCtxMenu(e, reqPath) {
+  ctxTarget = reqPath;
+  const m = $('ctxMenu');
+  m.hidden = false;
+  m.style.left = Math.min(e.clientX, window.innerWidth - 180) + 'px';
+  m.style.top = Math.min(e.clientY, window.innerHeight - 50) + 'px';
+}
+const hideCtxMenu = () => { $('ctxMenu').hidden = true; };
+$('ctxAiRevise').onclick = async () => {
+  const target = ctxTarget; hideCtxMenu();
+  if (target !== state.path) await openFile(target, 'requirement');
+  if (state.path === target) openAiDialog();
+};
+document.addEventListener('click', hideCtxMenu);
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') hideCtxMenu(); });
+// Right-click in the detail preview offers the same action (the editor keeps its native menu).
+$('preview').addEventListener('contextmenu', (e) => {
+  if (state.area !== 'requirement') return;
+  e.preventDefault(); showCtxMenu(e, state.path);
+});
+$('btnAiRevise').onclick = openAiDialog;
 $('aiCancel').onclick = () => $('aiDialog').close();
 $('aiRun').onclick = runAiRevise;
 $('aiResultClose').onclick = () => $('aiResult').close();
