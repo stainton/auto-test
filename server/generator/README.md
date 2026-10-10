@@ -115,7 +115,7 @@ node server/generator/main.mjs
 | GENERATOR_ASSET_DIR | 系统临时目录/auto-test-generator-assets | CaseHub 推送的资产缓存目录（按 SHA-256 命名），generator 与 healer 共用 |
 | GENERATOR_ASSET_CACHE_MB | 2048 | 资产缓存总量上限，超出先淘汰最久未使用的文件 |
 
-`GENERATOR_DATA_DIR` 下还保存 `exploration-experience.json`（按需求 ID）与 `product-exploration-experience.json`（按目标系统 origin）两份探索经验，以及 healer 的 `healer-jobs/`、`healer-workspaces/` 和 `healer-settings.json`；healer 自己的环境变量见 `server/healer/README.md`。
+`GENERATOR_DATA_DIR` 下还保存 healer 的 `healer-jobs/`、`healer-workspaces/` 和 `healer-settings.json`；healer 自己的环境变量见 `server/healer/README.md`。探索经验不保存在服务里：需求级经验随 `requirements[].explorationNotes` / `context.explorationNotes`、产品级经验随 `context.productExperience` 传入，结果的 `explorationRecords` 与 `productExperience`（`{origin, notes}`，仅本次新验证的段落）由 CaseHub 存回。
 
 ## 验证
 

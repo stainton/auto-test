@@ -97,8 +97,8 @@ export function validateInput(input) {
   if (input.continueFrom !== undefined) validateContinueFrom(input.continueFrom);
   validateTarget(input.target);
   if (input.context !== undefined) {
-    keys(input.context, ['explorationNotes', 'knownIssues', 'instructions', 'testData', 'assets'], 'context');
-    for (const key of ['explorationNotes', 'knownIssues', 'instructions']) {
+    keys(input.context, ['explorationNotes', 'productExperience', 'knownIssues', 'instructions', 'testData', 'assets'], 'context');
+    for (const key of ['explorationNotes', 'productExperience', 'knownIssues', 'instructions']) {
       if (input.context[key] !== undefined) check(typeof input.context[key] === 'string' && input.context[key].length <= 200000, `context.${key} must be a string (max 200000 characters)`);
     }
     if (input.context.testData !== undefined) check(object(input.context.testData), 'context.testData must be an object');

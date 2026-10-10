@@ -21,7 +21,7 @@ server/
 | generator | `generator/main.mjs` | 4502 | `/v1/generator/*` 与 `/v1/healer/*`（生成与修复共用浏览器运行时） |
 | executor | `executor/main.mjs` | 4504 | `/v1/executor/*`（执行已审核脚本） |
 
-每个工作流的任务存储与 HTTP 路由由各自的 `service.mjs` 构建，独立入口与 `automation/` 组合入口挂载的是同一份代码，路由和契约完全一致。探索经验（`shared/experience.mjs`）在每个 Pod 的数据目录里各自维护：产品级经验按目标系统 origin 隔离，先做有界在线校验，失效时只探索受影响页面并写回；需求级经验另由 CaseHub 保存并随请求带回，因此 planner 的发现仍会传给另一个 Pod 里的 generator。generator 额外按需求返回 `explorationRecords`，并在一个批次内跨用例共享新发现。
+每个工作流的任务存储与 HTTP 路由由各自的 `service.mjs` 构建，独立入口与 `automation/` 组合入口挂载的是同一份代码，路由和契约完全一致。探索经验全部由 CaseHub 保存，服务自身不落盘：需求级经验随 `requirements[].explorationNotes` / `context.explorationNotes` 下发，结果中的 `explorationNotes` / `explorationRecords` 由 CaseHub 存回；产品级经验按目标系统 origin 保存在 CaseHub，随 `context.productExperience` 下发，服务先做有界在线校验、失效时只探索受影响页面，结果的 `productExperience` 只返回本次新验证的段落，由 CaseHub 去重合并（`shared/experience.mjs`）。因此 planner 与 generator 分在不同 Pod 也看到同一份经验。generator 额外按需求返回 `explorationRecords`，并在一个批次内跨用例共享新发现。
 
 `automation/` 仍可在一个进程内同时提供三条路由（默认 4501），适合单容器环境或本地开发；CaseHub 设置 `CASEHUB_AUTOMATION_URL` 即可改为连接它。
 

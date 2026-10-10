@@ -132,7 +132,7 @@ curl http://localhost:4501/v1/planner/jobs/JOB_ID/result
 | PLANNER_SIMPLIFY_TIMEOUT_MS | 60000 | `/v1/planner/simplify` 单次改写的最长等待时间 |
 | PLANNER_ESTIMATE_TIMEOUT_MS | 120000 | `/v1/planner/estimate` 单次评估的最长等待时间 |
 
-`PLANNER_DATA_DIR` 下还保存 `exploration-experience.json`（按需求 ID）与 `product-exploration-experience.json`（按目标系统 origin）两份探索经验，同一卷上 Pod 重建后仍复用。planner 与 generator 分开部署时各自维护一份；需求级经验另由 CaseHub 保存并随请求带回，因此 planner 的发现仍会传给 generator。
+探索经验不保存在服务里：需求级经验通过 `context.explorationNotes`、产品级经验通过 `context.productExperience` 随请求传入，结果的 `explorationNotes` 与 `productExperience`（`{origin, notes}`，仅本次新验证的段落）由 CaseHub 存回。
 
 ## 验证
 

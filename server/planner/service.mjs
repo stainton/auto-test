@@ -13,9 +13,8 @@ import { createSimplifier, validateSimplifyInput } from './simplify.mjs';
 import { createEstimator, validateEstimateInput } from './estimate.mjs';
 
 export function createPlannerService({ command, runtime, applySettings, playwrightPackage, assetCache, jobsDir,
-  concurrency, experience, productExperience }) {
-  let worker = createPlannerWorker({ command, runtime, playwrightPackage, assetCache });
-  if (experience) worker = withExperience(worker, experience, productExperience);
+  concurrency }) {
+  const worker = withExperience(createPlannerWorker({ command, runtime, playwrightPackage, assetCache }));
   const jobs = new Jobs({
     worker, dataDir: jobsDir, concurrency, timeoutMs: positive('PLANNER_TIMEOUT_MS', 900000),
     // A request may raise or lower its own limit; the deployment keeps the last word through

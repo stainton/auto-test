@@ -675,6 +675,11 @@
             "maxLength": 200000,
             "description": "What is already known about the application. Reused as fact and returned merged with new observations."
           },
+          "productExperience": {
+            "type": "string",
+            "maxLength": 200000,
+            "description": "Product-level exploration experience CaseHub holds for the origin of target.baseUrl; verified with a bounded live check before use, omission means none"
+          },
           "knownIssues": {
             "type": "string",
             "maxLength": 200000,
@@ -716,6 +721,25 @@
               "type": "string"
             },
             "description": "Merged exploration experience keyed by requirement ID, for the caller to persist separately."
+          },
+          "productExperience": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "origin",
+              "notes"
+            ],
+            "properties": {
+              "origin": {
+                "type": "string",
+                "description": "Origin of target.baseUrl the experience belongs to"
+              },
+              "notes": {
+                "type": "string",
+                "description": "Only the paragraphs this run newly verified; the caller merges them into its record for that origin"
+              }
+            },
+            "description": "Present only when the run learned new product-level facts"
           },
           "limitations": {
             "type": "array",

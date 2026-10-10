@@ -20,6 +20,6 @@ planner、generator、executor 分别部署为独立的 Deployment + Service + P
 
 4. CaseHub 清单中设置 `CASEHUB_PLANNER_URL=http://planner:4501`、`CASEHUB_GENERATOR_URL=http://generator:4502`、`CASEHUB_EXECUTOR_URL=http://executor:4504`；healer 默认走 generator 地址（`CASEHUB_HEALER_URL` 可覆盖）。跨 namespace 时改为 `http://<service>.<namespace>.svc.cluster.local:<port>`。
 
-每个 Pod 单副本、Recreate 更新，避免多个进程写同一份任务文件；探索经验保存在各自的 PVC。需求级经验同时由 CaseHub 保存并随请求带回，planner 的发现因此仍会传给 generator。
+每个 Pod 单副本、Recreate 更新，避免多个进程写同一份任务文件；PVC 只保存任务状态与结果。需求级与产品级探索经验都只保存在 CaseHub，随每次请求下发、任务完成后存回，所以 planner 和 generator 分开部署仍共用同一份经验。
 
 只能运行一个 Pod 时可改用 `automation/`（planner + generator + healer 合并在 4501），CaseHub 设置 `CASEHUB_AUTOMATION_URL` 即可。

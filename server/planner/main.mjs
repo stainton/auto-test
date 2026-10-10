@@ -1,5 +1,5 @@
-// The planner pod: test design (/v1/planner/*) in its own process, with its own browser, job store and
-// exploration experience. Generator/healer run in a separate pod (generator/main.mjs).
+// The planner pod: test design (/v1/planner/*) in its own process, with its own browser and job store.
+// Generator/healer run in a separate pod (generator/main.mjs); exploration experience lives in CaseHub.
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -9,7 +9,6 @@ import { resolveClaudeOptions, createReloadingRuntime, createSettingsApplier, se
 import { createRoutedServer } from '../shared/http.mjs';
 import { AssetCache } from '../shared/assets.mjs';
 import { positive } from '../shared/env.mjs';
-import { openExperience } from '../shared/experience.mjs';
 import { createPlannerService } from './service.mjs';
 
 export async function main() {
@@ -25,13 +24,13 @@ export async function main() {
   const command = process.env.PLANNER_CLAUDE_COMMAND ?? 'claude';
   const playwrightPackage = await checkPlaywrightRuntime(command);
   // Job files sit directly in the data dir (the layout earlier planner images used, so an existing volume
-  // keeps its tasks); experience files sit beside them and survive pod restarts on the same volume.
+  // keeps its tasks).
   const dataDir = process.env.PLANNER_DATA_DIR ?? path.join(tmpdir(), 'auto-test-planner-jobs');
   // Files CaseHub pushes for tasks (see shared/assets.mjs); kept apart from job data so pruning one never touches the other.
   const assetCache = new AssetCache({ dir: process.env.PLANNER_ASSET_DIR ?? path.join(tmpdir(), 'auto-test-planner-assets'),
     maxBytes: positive('PLANNER_ASSET_CACHE_MB', 2048) * 1024 * 1024 });
   const planner = createPlannerService({ command, runtime, applySettings, playwrightPackage, assetCache, jobsDir: dataDir,
-    concurrency: positive('PLANNER_CONCURRENCY', 1), ...openExperience(dataDir) });
+    concurrency: positive('PLANNER_CONCURRENCY', 1) });
   const server = createRoutedServer([planner]);
   server.listen(positive('PLANNER_PORT', 4501), host, () => console.log(`Planner HTTP service listening on ${host}:${server.address().port}`));
   let stopping = false;

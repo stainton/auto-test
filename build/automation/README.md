@@ -4,4 +4,4 @@
 
 构建：`sh build/automation/build.sh registry.example.com/auto-test-automation:1.0.0`。
 
-镜像同时提供 `/v1/planner/*`、`/v1/generator/*` 与 `/v1/healer/*`（端口 4501）。服务共用 Playwright、Claude CLI 和 `/var/lib/automation/exploration-experience.json` 中按需求 ID 的经验，以及 `product-exploration-experience.json` 中按目标系统隔离的产品级经验。将实际 `setting.json` 放到此目录（已忽略）后再构建；格式参考 `setting.example.json`。
+镜像同时提供 `/v1/planner/*`、`/v1/generator/*` 与 `/v1/healer/*`（端口 4501）。服务共用 Playwright 与 Claude CLI；探索经验由 CaseHub 保存并随请求下发，镜像不保存经验文件。将实际 `setting.json` 放到此目录（已忽略）后再构建；格式参考 `setting.example.json`。

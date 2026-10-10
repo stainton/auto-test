@@ -1,6 +1,6 @@
 // The generator pod: script generation (/v1/generator/*) and script repair (/v1/healer/*) in one process,
-// separate from the planner pod. Both use the same browser runtime, asset cache and exploration experience;
-// each keeps its own job store and Claude settings.
+// separate from the planner pod. Both use the same browser runtime and asset cache; each keeps its own job
+// store and Claude settings. Exploration experience lives in CaseHub and arrives with each request.
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -10,14 +10,13 @@ import { resolveClaudeOptions, createReloadingRuntime, createSettingsApplier, se
 import { createRoutedServer } from '../shared/http.mjs';
 import { AssetCache } from '../shared/assets.mjs';
 import { positive } from '../shared/env.mjs';
-import { openExperience } from '../shared/experience.mjs';
 import { createGeneratorService } from './service.mjs';
 import { createHealerService, seedHealerSettings } from '../healer/service.mjs';
 
 export async function main() {
   const host = process.env.GENERATOR_HOST ?? '0.0.0.0';
   // Job files sit directly in the data dir (the layout earlier generator images used, so an existing volume
-  // keeps its tasks); healer jobs, workspaces and experience files sit in named entries beside them.
+  // keeps its tasks); healer jobs and workspaces sit in named entries beside them.
   const dataDir = process.env.GENERATOR_DATA_DIR ?? path.join(tmpdir(), 'auto-test-generator-jobs');
   // The runtime reads the same Claude configuration shape as the planner; GENERATOR_* / HEALER_* variables
   // select each workflow's own settings file, model and limits.
@@ -30,7 +29,7 @@ export async function main() {
   const playwrightPackage = await checkPlaywrightRuntime(command);
   const assetCache = new AssetCache({ dir: process.env.GENERATOR_ASSET_DIR ?? path.join(tmpdir(), 'auto-test-generator-assets'),
     maxBytes: positive('GENERATOR_ASSET_CACHE_MB', 2048) * 1024 * 1024 });
-  const shared = { command, playwrightPackage, assetCache, ...openExperience(dataDir) };
+  const shared = { command, playwrightPackage, assetCache };
   // CaseHub stores each agent's configuration and sends it with every request; the applier rewrites the
   // settings file when the content changes and the reloading runtime re-reads it per CLI invocation.
   const generator = createGeneratorService({ ...shared, runtime: createReloadingRuntime(runClaude, generatorSettings),

@@ -11,4 +11,4 @@ kubectl rollout status deployment/automation
 kubectl rollout status deployment/executor
 ```
 
-服务在 `http://automation:4501` 提供 `/v1/planner/*`、`/v1/generator/*` 与 `/v1/healer/*`。产品级与需求级探索经验位于 PVC，Pod 重建后仍会保留。脚本执行由独立的 `executor` Deployment 提供。
+服务在 `http://automation:4501` 提供 `/v1/planner/*`、`/v1/generator/*` 与 `/v1/healer/*`。探索经验由 CaseHub 保存并随请求下发，PVC 只保存任务与资产。脚本执行由独立的 `executor` Deployment 提供。

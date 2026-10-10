@@ -11,10 +11,9 @@ import { validateInput } from './contract.mjs';
 import { createGeneratorWorker } from './worker.mjs';
 
 export function createGeneratorService({ command, runtime, applySettings, playwrightPackage, assetCache, jobsDir,
-  workspaceRoot, concurrency, experience, productExperience }) {
-  let worker = createGeneratorWorker({ command, runtime, playwrightPackage, assetCache, temporaryRoot: workspaceRoot,
-    caseTimeoutMs: positive('GENERATOR_CASE_TIMEOUT_MS', 3600000) });
-  if (experience) worker = withExperience(worker, experience, productExperience);
+  workspaceRoot, concurrency }) {
+  const worker = withExperience(createGeneratorWorker({ command, runtime, playwrightPackage, assetCache, temporaryRoot: workspaceRoot,
+    caseTimeoutMs: positive('GENERATOR_CASE_TIMEOUT_MS', 3600000) }));
   const jobs = new Jobs({
     kind: 'generator', label: 'Generator',
     started: { stage: 'reading_cases', message: 'Reading the submitted test cases and context' },

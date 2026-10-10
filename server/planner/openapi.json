@@ -814,6 +814,11 @@
                 "description": "Prior exploration record; omission means no prior knowledge",
                 "maxLength": 200000
               },
+              "productExperience": {
+                "type": "string",
+                "maxLength": 200000,
+                "description": "Product-level exploration experience CaseHub holds for the origin of target.baseUrl; verified with a bounded live check before use, omission means none"
+              },
               "knownIssues": {
                 "type": "string",
                 "description": "Business rules/historical bugs; read-only for planner",
@@ -1148,6 +1153,25 @@
           "explorationNotes": {
             "type": "string",
             "description": "Merged supplied and newly observed exploration notes for the caller to persist and pass into future requests"
+          },
+          "productExperience": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "origin",
+              "notes"
+            ],
+            "properties": {
+              "origin": {
+                "type": "string",
+                "description": "Origin of target.baseUrl the experience belongs to"
+              },
+              "notes": {
+                "type": "string",
+                "description": "Only the paragraphs this run newly verified; the caller merges them into its record for that origin"
+              }
+            },
+            "description": "Present only when the run learned new product-level facts"
           },
           "limitations": {
             "type": "array",

@@ -12,12 +12,12 @@
 
 无需创建 Secret 或配置服务 Token。setting.json 在构建时自动归位到 `/app/config/claude/settings.json`，启动时显式传给 Claude CLI。部署默认不覆盖文件中的模型；需要覆盖时可以增加 `GENERATOR_MODEL` 环境变量。
 
-同一进程还提供脚本修复 `/v1/healer/*`（与生成共用浏览器运行时，见 `server/healer/README.md`），无需单独部署 healer。healer 首次启动时把 generator 的配置复制到 `/var/lib/generator/healer-settings.json`，之后由 CaseHub「脚本修复」的 agent 设置随请求下发。需求级与产品级探索经验也保存在该 PVC，Pod 重建后继续复用。
+同一进程还提供脚本修复 `/v1/healer/*`（与生成共用浏览器运行时，见 `server/healer/README.md`），无需单独部署 healer。healer 首次启动时把 generator 的配置复制到 `/var/lib/generator/healer-settings.json`，之后由 CaseHub「脚本修复」的 agent 设置随请求下发。
 
 集群内地址为 `http://generator:4502`。CaseHub 的 Kubernetes 清单已经使用此地址；跨 namespace 时改成 `http://generator.<namespace>.svc.cluster.local:4502`。外部调试可以运行 `kubectl port-forward --address 0.0.0.0 service/generator 4502:4502`，随后直接访问，无需鉴权。服务开放 CORS，浏览器可直接调用接口和订阅 SSE。
 
 OpenAPI 文档在 `server/generator/openapi.json`，运行时可直接请求 `GET /openapi.json`。
 
-保留单副本和 Recreate 更新策略，避免多个进程同时写任务文件。默认需要 StorageClass 提供 5Gi RWO PVC，用于保存任务状态、进度、结果和探索经验；没有默认存储类时在 PVC 中填写 storageClassName。重启后未完成任务标记失败，调用方重新提交；已完成结果在保留期内仍可读取。任务默认保留 24 小时，最多保留 100 个，可调整环境变量。
+保留单副本和 Recreate 更新策略，避免多个进程同时写任务文件。默认需要 StorageClass 提供 5Gi RWO PVC，用于保存任务状态、进度和结果（探索经验由 CaseHub 保存并随请求下发）；没有默认存储类时在 PVC 中填写 storageClassName。重启后未完成任务标记失败，调用方重新提交；已完成结果在保留期内仍可读取。任务默认保留 24 小时，最多保留 100 个，可调整环境变量。
 
 清单保留浏览器资源预算、共享内存和健康检查；容器文件系统可写，不设置额外的容器安全策略。Pod 需要能够访问模型 API 和被测系统。

@@ -21,10 +21,9 @@ export async function seedHealerSettings(healerFile, generatorFile) {
 }
 
 export function createHealerService({ command, runtime, applySettings, playwrightPackage, assetCache, jobsDir,
-  workspaceRoot, experience, productExperience }) {
-  let worker = createHealerWorker({ command, runtime, playwrightPackage, assetCache, temporaryRoot: workspaceRoot,
-    caseTimeoutMs: positive('HEALER_CASE_TIMEOUT_MS', 3600000) });
-  if (experience) worker = withExperience(worker, experience, productExperience);
+  workspaceRoot }) {
+  const worker = withExperience(createHealerWorker({ command, runtime, playwrightPackage, assetCache, temporaryRoot: workspaceRoot,
+    caseTimeoutMs: positive('HEALER_CASE_TIMEOUT_MS', 3600000) }));
   const jobs = new Jobs({
     kind: 'healer', label: 'Healer',
     started: { stage: 'reading_cases', message: 'Reading the existing script and failure details' },
