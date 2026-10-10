@@ -110,6 +110,25 @@
     opacity: 0; transition: opacity .2s, transform .2s; pointer-events: none; box-shadow: var(--shadow);
   }
   #toast.show { opacity: 1; }
+  #btnAiRevise { color: #7c3aed; border-color: #ddd0fb; background: #f5f0ff; }
+  #btnAiRevise:hover:not(:disabled) { background: #ebe2ff; border-color: #c9b6f7; }
+  .revBadge { font-size: 10px; font-weight: 700; color: var(--warn); background: #fff4e0; border: 1px solid #f3d29b; border-radius: 99px; padding: 0 6px; cursor: help; }
+  #revBanner { padding: 10px 24px; background: #fff8e8; border-bottom: 1px solid #f3d29b; color: #6b4300; font-size: 13px; }
+  #revBanner .head { display: flex; align-items: center; gap: 10px; }
+  #revBanner .head b { margin-right: auto; }
+  #revBanner button { min-height: 28px; padding: 3px 10px; font-size: 12px; }
+  #revBanner ul { margin: 8px 0 0; padding-left: 20px; max-height: 120px; overflow-y: auto; line-height: 1.6; }
+  #revBanner code { background: #fdeccb; padding: 1px 4px; border-radius: 4px; }
+  #preview tr.revised td { background: #fff8e8; }
+  #preview tr.revised td:first-child { box-shadow: inset 3px 0 0 #e8a21c; }
+  #preview tr.revised .revBadge { display: inline-block; margin-top: 4px; white-space: normal; }
+  dialog { border: 1px solid var(--border); border-radius: 12px; padding: 20px; width: min(560px, calc(100vw - 32px)); box-shadow: var(--shadow); color: var(--text); }
+  dialog::backdrop { background: rgba(23,32,51,.35); }
+  dialog h2 { font-size: 18px; margin-bottom: 6px; }
+  dialog p { margin: 0 0 12px; font-size: 13px; color: var(--muted); line-height: 1.5; }
+  dialog textarea { width: 100%; min-height: 120px; padding: 10px; border: 1px solid var(--border); border-radius: 8px; font: inherit; font-size: 14px; resize: vertical; }
+  dialog .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+  dialog ul { max-height: 240px; overflow-y: auto; font-size: 13px; line-height: 1.6; padding-left: 20px; }
   #viewSwitch { display: none; }
   @media (max-width: 760px) {
     body { display: block; } #sidebar { width: 100%; max-height: 42vh; border-right: 0; border-bottom: 1px solid var(--border); }
@@ -142,11 +161,13 @@
   <div id="toolbar">
     <span class="path" id="curPath">请选择左侧文件<span class="hint" id="fileHint">从需求开始，或查看待评审的测试方案</span></span>
     <span class="dirty" id="dirty" hidden>● 有未保存修改</span>
+    <button id="btnAiRevise" hidden>🤖 AI 修正</button>
     <button id="btnReload" disabled>还原修改</button>
     <button id="btnSave" class="primary" disabled>保存</button>
     <button id="btnApprove" class="approve" disabled hidden>批准并交给生成器</button>
     <button id="btnUnapprove" disabled hidden>退回待评审</button>
   </div>
+  <div id="revBanner" hidden></div>
   <div id="viewSwitch"><button data-view="edit" class="selected">编辑</button><button data-view="preview">预览</button></div>
   <div id="panes" hidden>
     <div class="pane editorPane">
@@ -163,12 +184,25 @@
   <div id="refList"></div>
 </div>
 
+<dialog id="aiDialog">
+  <h2>🤖 AI 修正需求</h2>
+  <p id="aiIntro">描述要如何修改这份需求。AI 会改写需求，并同步修正引用该需求的测试计划和用例；被改动的用例会被标记，等待你确认。修改前的原文件会备份到 specs/.ai-backups/。</p>
+  <textarea id="aiInstruction" placeholder="例如：任务内容长度上限由 120 调整为 200 字符；新增「清空已完成」按钮…"></textarea>
+  <div class="actions"><button id="aiCancel" type="button">取消</button><button id="aiRun" class="primary" type="button">开始修正</button></div>
+</dialog>
+<dialog id="aiResult">
+  <h2>修正完成</h2>
+  <p id="aiSummary"></p>
+  <ul id="aiChanges"></ul>
+  <div class="actions"><button id="aiResultClose" class="primary" type="button">知道了</button></div>
+</dialog>
+
 <div id="toast" role="status" aria-live="polite"></div>
 
 <script>
 marked.setOptions({ gfm: true, breaks: false });
 
-const state = { path: null, saved: '', area: null, busy: false, reqIndex: [] }; // area: 'requirement' | 'draft' | 'approved'
+const state = { path: null, saved: '', area: null, busy: false, reqIndex: [], revisions: {} }; // area: 'requirement' | 'draft' | 'approved'
 const $ = (id) => document.getElementById(id);
 
 // --- Requirement cross-linking ("引用需求") --------------------------------
@@ -275,8 +309,44 @@ async function api(url, opts) {
 
 function isDirty() { return state.path && $('editor').value !== state.saved; }
 
+const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const planKeyOf = (p) => p.split('/').pop().replace(/\.cases\.md$/, '').replace(/\.md$/, '');
+const CHANGE_LABEL = { modified: '已修改', added: '新增', removed: '已删除' };
+const revisionsFor = () => (state.area === 'requirement' || !state.path ? [] : state.revisions[planKeyOf(state.path)] || []);
+
 function renderPreview() {
-  $('preview').innerHTML = marked.parse($('editor').value || '*暂无内容*');
+  const preview = $('preview');
+  preview.innerHTML = marked.parse($('editor').value || '*暂无内容*');
+  // Flag table rows whose case_id was changed by an AI revision and not yet acknowledged.
+  const byId = new Map(revisionsFor().map((r) => [r.caseId, r]));
+  if (!byId.size) return;
+  preview.querySelectorAll('tr').forEach((tr) => {
+    const hit = [...tr.children].map((c) => byId.get(c.textContent.trim())).find(Boolean);
+    if (!hit) return;
+    tr.classList.add('revised');
+    const badge = document.createElement('div');
+    badge.className = 'revBadge';
+    badge.title = `AI 修正（${hit.requirement}）：${hit.instruction}`;
+    badge.textContent = `⚠ AI ${CHANGE_LABEL[hit.change]}：${hit.reason}`;
+    tr.firstElementChild.append(badge);
+  });
+}
+
+function renderRevBanner() {
+  const revs = revisionsFor();
+  const banner = $('revBanner');
+  banner.hidden = !revs.length;
+  if (!revs.length) return;
+  banner.innerHTML = `<div class="head"><b>⚠ ${revs.length} 个用例被 AI 修正，请审阅后确认</b>
+    <span>${state.area === 'approved' ? '已批准的方案被改动，需重新生成对应脚本' : '需求修改后同步变更'}</span>
+    <button id="btnAck">全部已审阅</button></div>
+    <ul>${revs.map((r) => `<li><code>${esc(r.caseId)}</code> ${CHANGE_LABEL[r.change]} —— ${esc(r.reason)}</li>`).join('')}</ul>`;
+  $('btnAck').onclick = async () => {
+    try {
+      await api('/api/revisions/ack', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: planKeyOf(state.path) }) });
+      await loadList(); renderPreview(); renderRevBanner();
+    } catch (e) { toast('操作失败：' + e.message); }
+  };
 }
 
 function syncButtons() {
@@ -284,6 +354,8 @@ function syncButtons() {
   $('dirty').hidden = !dirty;
   $('btnSave').disabled = !dirty || state.busy;
   $('btnReload').disabled = !state.path || !dirty || state.busy;
+  $('btnAiRevise').hidden = state.area !== 'requirement';
+  $('btnAiRevise').disabled = dirty || state.busy;
   $('btnApprove').hidden = state.area !== 'draft';
   $('btnApprove').disabled = dirty || state.busy;
   $('btnUnapprove').hidden = state.area !== 'approved';
@@ -297,8 +369,9 @@ function setBusy(busy) {
 }
 
 async function loadList() {
-  const [tree, reqIndex] = await Promise.all([api('/api/tree'), api('/api/requirements-index')]);
+  const [tree, reqIndex, revisions] = await Promise.all([api('/api/tree'), api('/api/requirements-index'), api('/api/revisions')]);
   state.reqIndex = reqIndex;
+  state.revisions = revisions;
   const { requirements, drafts, approved } = tree;
   const wrap = $('list');
   wrap.innerHTML = '';
@@ -349,6 +422,8 @@ function groupEl(label, files, area, emptyText) {
         relTag = `<span class="relTag" title="${lines.join('\n').replace(/"/g, '&quot;')}">🔗${out.length + inn.length}</span>`;
       }
     }
+    const revN = area === 'requirement' ? 0 : (state.revisions[planKeyOf(f)] || []).length;
+    if (revN) relTag += `<span class="revBadge" title="${revN} 个用例被 AI 修正，待审阅">⚠ ${revN}</span>`;
     el.innerHTML = `<div>${f.replace(/^(specs|docs)\//, '')}</div><span class="meta"><span class="tag">${kind}</span>${relTag}</span>`;
     el.onclick = () => openFile(f, area);
     el.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openFile(f, area); } };
@@ -367,7 +442,7 @@ async function openFile(p, area) {
     $('panes').hidden = false;
     $('btnInsertRef').hidden = area !== 'requirement';
     closeRefDropdown();
-    renderPreview(); syncButtons(); loadList();
+    renderPreview(); renderRevBanner(); syncButtons(); loadList();
   } catch (e) { toast('打开失败：' + e.message); }
 }
 
@@ -425,6 +500,33 @@ $('refFilter').addEventListener('keydown', (e) => {
   if (e.key === 'Escape') { closeRefDropdown(); $('btnInsertRef').focus(); }
   else if (e.key === 'ArrowDown') { e.preventDefault(); $('refList').querySelector('.refItem')?.focus(); }
 });
+async function runAiRevise() {
+  const instruction = $('aiInstruction').value.trim();
+  if (!instruction) return toast('请先填写修正要求');
+  const run = $('aiRun');
+  run.disabled = true; run.textContent = 'AI 修正中…（可能需要几分钟）';
+  setBusy(true);
+  try {
+    const r = await api('/api/ai-revise', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: state.path, instruction }),
+    });
+    $('aiDialog').close(); $('aiInstruction').value = '';
+    state.saved = r.requirement; $('editor').value = r.requirement;
+    await loadList(); renderPreview();
+    const cases = r.files.flatMap((f) => f.cases.map((c) => ({ ...c, file: f.path })));
+    $('aiSummary').textContent = `${r.summary}（原文件已备份：${r.backup}）`;
+    $('aiChanges').innerHTML = cases.length
+      ? cases.map((c) => `<li><code>${esc(c.caseId)}</code> ${CHANGE_LABEL[c.change]} —— ${esc(c.reason)}<br><small>${esc(c.file)}</small></li>`).join('')
+      : '<li>没有用例受影响。</li>';
+    $('aiResult').showModal();
+  } catch (e) { toast('AI 修正失败：' + e.message); }
+  finally { run.disabled = false; run.textContent = '开始修正'; setBusy(false); }
+}
+$('btnAiRevise').onclick = () => $('aiDialog').showModal();
+$('aiCancel').onclick = () => $('aiDialog').close();
+$('aiRun').onclick = runAiRevise;
+$('aiResultClose').onclick = () => $('aiResult').close();
 $('btnSave').onclick = save;
 $('btnNew').onclick = () => newRequirement().catch((e) => toast(e.message));
 $('btnReload').onclick = () => state.path && openFile(state.path, state.area);

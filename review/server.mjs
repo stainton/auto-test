@@ -12,6 +12,7 @@ import http from 'node:http';
 import { readFile, writeFile, readdir, mkdir, rename, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { reviseRequirement, readRevisions, acknowledge } from './ai-revise.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -214,6 +215,24 @@ const server = http.createServer(async (req, res) => {
       const { name } = await readBody(req);
       const moved = await movePlanSet(APPROVED, SPECS, planKey(String(name || '')));
       return send(res, 200, { ok: true, moved });
+    }
+
+    if (req.method === 'GET' && url.pathname === '/api/revisions') {
+      return send(res, 200, await readRevisions());
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/revisions/ack') {
+      const { key, caseId } = await readBody(req);
+      await acknowledge(String(key || ''), caseId ? String(caseId) : undefined);
+      return send(res, 200, { ok: true });
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/ai-revise') {
+      const { path: rp, instruction } = await readBody(req);
+      const abs = safePath(rp);
+      if (path.dirname(abs) !== DOCS) throw new Error('只能对 docs/ 下的需求使用 AI 修正');
+      if (typeof instruction !== 'string' || !instruction.trim()) throw new Error('请填写修正要求');
+      return send(res, 200, await reviseRequirement({ path: rel(abs), instruction: instruction.trim() }, abs));
     }
 
     return send(res, 404, { error: 'not found' });
