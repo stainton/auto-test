@@ -374,7 +374,7 @@ function setBusy(busy) {
 }
 
 async function loadList() {
-  const [tree, reqIndex, revisions] = await Promise.all([api('/api/tree'), api('/api/requirements-index'), api('/api/revisions')]);
+  const [tree, reqIndex, revisions] = await Promise.all([api('/api/tree'), api('/api/requirements-index'), api('/api/revisions').catch(() => ({}))]);
   state.reqIndex = reqIndex;
   state.revisions = revisions;
   const { requirements, drafts, approved } = tree;
