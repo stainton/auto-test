@@ -12,7 +12,7 @@ import http from 'node:http';
 import { readFile, writeFile, readdir, mkdir, rename, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { reviseRequirement, readRevisions, acknowledge } from './ai-revise.mjs';
+import { reviseRequirement, reviseCases, readRevisions, acknowledge } from './ai-revise.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -233,6 +233,16 @@ const server = http.createServer(async (req, res) => {
       if (path.dirname(abs) !== DOCS) throw new Error('只能对 docs/ 下的需求使用 AI 修正');
       if (typeof instruction !== 'string' || !instruction.trim()) throw new Error('请填写修正要求');
       return send(res, 200, await reviseRequirement({ path: rel(abs), instruction: instruction.trim() }, abs));
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/ai-revise-cases') {
+      const { path: rp, instruction } = await readBody(req);
+      const abs = safePath(rp);
+      if (!abs.startsWith(SPECS + path.sep) || abs.endsWith('exploration-notes.md') || abs.endsWith('known-issues.md')) {
+        throw new Error('只能对 specs/ 下的测试计划或用例表使用 AI 修正用例');
+      }
+      if (typeof instruction !== 'string' || !instruction.trim()) throw new Error('请填写修正要求');
+      return send(res, 200, await reviseCases({ path: rel(abs), instruction: instruction.trim() }));
     }
 
     return send(res, 404, { error: 'not found' });

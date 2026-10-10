@@ -112,6 +112,10 @@
   #toast.show { opacity: 1; }
   #btnAiRevise { color: #7c3aed; border-color: #ddd0fb; background: #f5f0ff; }
   #btnAiRevise:hover:not(:disabled) { background: #ebe2ff; border-color: #c9b6f7; }
+  #btnAiReviseCases { color: #0f766e; border-color: #b7e4de; background: #ecfaf8; }
+  #btnAiReviseCases:hover:not(:disabled) { background: #d9f3ef; border-color: #93d3ca; }
+  .revBadge.srcReq { color: #6d28d9; background: #f5f0ff; border-color: #ddd0fb; }
+  .revBadge.srcCase { color: #0f766e; background: #ecfaf8; border-color: #b7e4de; }
   .revBadge { font-size: 10px; font-weight: 700; color: var(--warn); background: #fff4e0; border: 1px solid #f3d29b; border-radius: 99px; padding: 0 6px; cursor: help; }
   #revBanner { padding: 10px 24px; background: #fff8e8; border-bottom: 1px solid #f3d29b; color: #6b4300; font-size: 13px; }
   #revBanner .head { display: flex; align-items: center; gap: 10px; }
@@ -164,7 +168,8 @@
   <div id="toolbar">
     <span class="path" id="curPath">请选择左侧文件<span class="hint" id="fileHint">从需求开始，或查看待评审的测试方案</span></span>
     <span class="dirty" id="dirty" hidden>● 有未保存修改</span>
-    <button id="btnAiRevise" hidden>🤖 AI 修正</button>
+    <button id="btnAiRevise" hidden title="改写需求，并同步修正引用它的测试计划和用例">🤖 AI 修正需求</button>
+    <button id="btnAiReviseCases" hidden title="只修正当前测试方案的用例，不改动需求">🤖 AI 修正用例</button>
     <button id="btnReload" disabled>还原修改</button>
     <button id="btnSave" class="primary" disabled>保存</button>
     <button id="btnApprove" class="approve" disabled hidden>批准并交给生成器</button>
@@ -187,16 +192,16 @@
   <div id="refList"></div>
 </div>
 
-<div id="ctxMenu" role="menu" hidden><button id="ctxAiRevise" role="menuitem" type="button">🤖 AI 修正</button></div>
+<div id="ctxMenu" role="menu" hidden><button id="ctxAiRevise" role="menuitem" type="button"></button></div>
 
 <dialog id="aiDialog">
-  <h2>🤖 AI 修正需求</h2>
-  <p id="aiIntro">描述要如何修改这份需求。AI 会改写需求，并同步修正引用该需求的测试计划和用例；被改动的用例会被标记，等待你确认。修改前的原文件会备份到 specs/.ai-backups/。</p>
+  <h2 id="aiTitle"></h2>
+  <p id="aiIntro"></p>
   <textarea id="aiInstruction" placeholder="例如：任务内容长度上限由 120 调整为 200 字符；新增「清空已完成」按钮…"></textarea>
   <div class="actions"><button id="aiCancel" type="button">取消</button><button id="aiRun" class="primary" type="button">开始修正</button></div>
 </dialog>
 <dialog id="aiResult">
-  <h2>修正完成</h2>
+  <h2 id="aiResultTitle">修正完成</h2>
   <p id="aiSummary"></p>
   <ul id="aiChanges"></ul>
   <div class="actions"><button id="aiResultClose" class="primary" type="button">知道了</button></div>
@@ -316,6 +321,11 @@ function isDirty() { return state.path && $('editor').value !== state.saved; }
 
 const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const planKeyOf = (p) => p.split('/').pop().replace(/\.cases\.md$/, '').replace(/\.md$/, '');
+const SOURCE = {
+  requirement: { label: '需求修正', cls: 'srcReq' },
+  case: { label: '用例修正', cls: 'srcCase' },
+};
+const sourceOf = (r) => SOURCE[r.source] || SOURCE.requirement;
 const CHANGE_LABEL = { modified: '已修改', added: '新增', removed: '已删除' };
 const revisionsFor = () => (state.area === 'requirement' || !state.path ? [] : state.revisions[planKeyOf(state.path)] || []);
 
@@ -330,9 +340,9 @@ function renderPreview() {
     if (!hit) return;
     tr.classList.add('revised');
     const badge = document.createElement('div');
-    badge.className = 'revBadge';
-    badge.title = `AI 修正（${hit.requirement}）：${hit.instruction}`;
-    badge.textContent = `⚠ AI ${CHANGE_LABEL[hit.change]}：${hit.reason}`;
+    badge.className = `revBadge ${sourceOf(hit).cls}`;
+    badge.title = `AI ${sourceOf(hit).label}${hit.requirement ? `（${hit.requirement}）` : ''}：${hit.instruction}`;
+    badge.textContent = `⚠ AI ${sourceOf(hit).label}·${CHANGE_LABEL[hit.change]}：${hit.reason}`;
     tr.firstElementChild.append(badge);
   });
 }
@@ -343,9 +353,9 @@ function renderRevBanner() {
   banner.hidden = !revs.length;
   if (!revs.length) return;
   banner.innerHTML = `<div class="head"><b>⚠ ${revs.length} 个用例被 AI 修正，请审阅后确认</b>
-    <span>${state.area === 'approved' ? '已批准的方案被改动，需重新生成对应脚本' : '需求修改后同步变更'}</span>
+    <span>${state.area === 'approved' ? '已批准的方案被改动，需重新生成对应脚本' : '审阅无误后可批准'}</span>
     <button id="btnAck">全部已审阅</button></div>
-    <ul>${revs.map((r) => `<li><code>${esc(r.caseId)}</code> ${CHANGE_LABEL[r.change]} —— ${esc(r.reason)}</li>`).join('')}</ul>`;
+    <ul>${revs.map((r) => `<li><span class="revBadge ${sourceOf(r).cls}">${sourceOf(r).label}</span> <code>${esc(r.caseId)}</code> ${CHANGE_LABEL[r.change]} —— ${esc(r.reason)}</li>`).join('')}</ul>`;
   $('btnAck').onclick = async () => {
     try {
       await api('/api/revisions/ack', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: planKeyOf(state.path) }) });
@@ -361,6 +371,8 @@ function syncButtons() {
   $('btnReload').disabled = !state.path || !dirty || state.busy;
   $('btnAiRevise').hidden = state.area !== 'requirement';
   $('btnAiRevise').disabled = state.busy;
+  $('btnAiReviseCases').hidden = state.area !== 'draft' && state.area !== 'approved';
+  $('btnAiReviseCases').disabled = state.busy;
   $('btnApprove').hidden = state.area !== 'draft';
   $('btnApprove').disabled = dirty || state.busy;
   $('btnUnapprove').hidden = state.area !== 'approved';
@@ -431,7 +443,7 @@ function groupEl(label, files, area, emptyText) {
     if (revN) relTag += `<span class="revBadge" title="${revN} 个用例被 AI 修正，待审阅">⚠ ${revN}</span>`;
     el.innerHTML = `<div>${f.replace(/^(specs|docs)\//, '')}</div><span class="meta"><span class="tag">${kind}</span>${relTag}</span>`;
     el.onclick = () => openFile(f, area);
-    if (area === 'requirement') el.oncontextmenu = (e) => { e.preventDefault(); showCtxMenu(e, f); };
+    el.oncontextmenu = (e) => { e.preventDefault(); showCtxMenu(e, f, area); };
     el.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openFile(f, area); } };
     g.append(el);
   }
@@ -506,57 +518,92 @@ $('refFilter').addEventListener('keydown', (e) => {
   if (e.key === 'Escape') { closeRefDropdown(); $('btnInsertRef').focus(); }
   else if (e.key === 'ArrowDown') { e.preventDefault(); $('refList').querySelector('.refItem')?.focus(); }
 });
+// Two distinct AI revisions: on a requirement ('requirement' — rewrites it and syncs the cases
+// traced to it) and on a test plan/cases file ('case' — touches only the cases, never the requirement).
+const AI_MODES = {
+  requirement: {
+    title: '🤖 AI 修正需求',
+    intro: '描述要如何修改这份需求。AI 会改写需求，并同步修正引用该需求的测试计划和用例；被改动的用例会被标记，等待你确认。修改前的原文件会备份到 specs/.ai-backups/。',
+    placeholder: '例如：任务内容长度上限由 120 调整为 200 字符；新增「清空已完成」按钮…',
+    menu: '🤖 AI 修正需求（同步用例）', api: '/api/ai-revise', result: '需求修正完成', none: '没有用例受影响。',
+  },
+  case: {
+    title: '🤖 AI 修正用例',
+    intro: '描述要如何修改当前测试方案的用例。AI 只会修改该方案的用例表和计划，不会改动需求；被改动的用例会被标记，等待你确认。修改前的原文件会备份到 specs/.ai-backups/。',
+    placeholder: '例如：补充边界值用例（120/121 字符）；把 TC-…-002 的优先级提升到 P0；删除重复的用例…',
+    menu: '🤖 AI 修正用例', api: '/api/ai-revise-cases', result: '用例修正完成', none: '没有用例被改动。',
+  },
+};
+const aiModeFor = (area) => (area === 'requirement' ? 'requirement' : area === 'draft' || area === 'approved' ? 'case' : null);
+let aiMode = null;
+
 async function runAiRevise() {
   const instruction = $('aiInstruction').value.trim();
   if (!instruction) return toast('请先填写修正要求');
+  const mode = AI_MODES[aiMode];
   const run = $('aiRun');
   run.disabled = true; run.textContent = 'AI 修正中…（可能需要几分钟）';
   setBusy(true);
   try {
-    const r = await api('/api/ai-revise', {
+    const r = await api(mode.api, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ path: state.path, instruction }),
     });
     $('aiDialog').close(); $('aiInstruction').value = '';
-    state.saved = r.requirement; $('editor').value = r.requirement;
-    await loadList(); renderPreview();
+    // Refresh the open file if the revision rewrote it.
+    if (r.requirement !== undefined) { state.saved = r.requirement; $('editor').value = r.requirement; }
+    else if (r.files.some((f) => f.path === state.path)) {
+      const { content } = await api('/api/file?path=' + encodeURIComponent(state.path));
+      state.saved = content; $('editor').value = content;
+    }
+    await loadList(); renderPreview(); renderRevBanner(); syncButtons();
     const cases = r.files.flatMap((f) => f.cases.map((c) => ({ ...c, file: f.path })));
+    $('aiResultTitle').textContent = mode.result;
     $('aiSummary').textContent = `${r.summary}（原文件已备份：${r.backup}）`;
     $('aiChanges').innerHTML = cases.length
       ? cases.map((c) => `<li><code>${esc(c.caseId)}</code> ${CHANGE_LABEL[c.change]} —— ${esc(c.reason)}<br><small>${esc(c.file)}</small></li>`).join('')
-      : '<li>没有用例受影响。</li>';
+      : `<li>${mode.none}</li>`;
     $('aiResult').showModal();
   } catch (e) { toast('AI 修正失败：' + e.message); }
   finally { run.disabled = false; run.textContent = '开始修正'; setBusy(false); }
 }
-// Opens the AI revision dialog for the open requirement (guards against unsaved edits).
+// Opens the matching AI revision dialog for the open file (guards against unsaved edits).
 function openAiDialog() {
-  if (state.area !== 'requirement') return;
+  aiMode = aiModeFor(state.area);
+  if (!aiMode) return;
   if (isDirty()) return toast('请先保存修改，再使用 AI 修正');
+  const mode = AI_MODES[aiMode];
+  $('aiTitle').textContent = mode.title;
+  $('aiIntro').textContent = mode.intro;
+  $('aiInstruction').placeholder = mode.placeholder;
   $('aiDialog').showModal();
 }
 let ctxTarget = null;
-function showCtxMenu(e, reqPath) {
-  ctxTarget = reqPath;
+function showCtxMenu(e, target, area) {
+  const mode = aiModeFor(area);
+  if (!mode) return;
+  ctxTarget = { path: target, area };
+  $('ctxAiRevise').textContent = AI_MODES[mode].menu;
   const m = $('ctxMenu');
   m.hidden = false;
-  m.style.left = Math.min(e.clientX, window.innerWidth - 180) + 'px';
+  m.style.left = Math.min(e.clientX, window.innerWidth - 240) + 'px';
   m.style.top = Math.min(e.clientY, window.innerHeight - 50) + 'px';
 }
 const hideCtxMenu = () => { $('ctxMenu').hidden = true; };
 $('ctxAiRevise').onclick = async () => {
   const target = ctxTarget; hideCtxMenu();
-  if (target !== state.path) await openFile(target, 'requirement');
-  if (state.path === target) openAiDialog();
+  if (target.path !== state.path) await openFile(target.path, target.area);
+  if (state.path === target.path) openAiDialog();
 };
 document.addEventListener('click', hideCtxMenu);
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') hideCtxMenu(); });
 // Right-click in the detail preview offers the same action (the editor keeps its native menu).
 $('preview').addEventListener('contextmenu', (e) => {
-  if (state.area !== 'requirement') return;
-  e.preventDefault(); showCtxMenu(e, state.path);
+  if (!aiModeFor(state.area)) return;
+  e.preventDefault(); showCtxMenu(e, state.path, state.area);
 });
 $('btnAiRevise').onclick = openAiDialog;
+$('btnAiReviseCases').onclick = openAiDialog;
 $('aiCancel').onclick = () => $('aiDialog').close();
 $('aiRun').onclick = runAiRevise;
 $('aiResultClose').onclick = () => $('aiResult').close();
