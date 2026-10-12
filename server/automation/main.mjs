@@ -11,6 +11,7 @@ import { resolveClaudeOptions, createReloadingRuntime, createSettingsApplier, se
 import { createRoutedServer } from '../shared/http.mjs';
 import { AssetCache } from '../shared/assets.mjs';
 import { positive } from '../shared/env.mjs';
+import { authSessionsFromEnv } from '../shared/auth-session.mjs';
 import { createPlannerService } from '../planner/service.mjs';
 import { createGeneratorService } from '../generator/service.mjs';
 import { createHealerService, seedHealerSettings } from '../healer/service.mjs';
@@ -27,7 +28,7 @@ export async function main() {
   const command=process.env.AUTOMATION_CLAUDE_COMMAND??process.env.PLANNER_CLAUDE_COMMAND??'claude';
   const playwrightPackage=await checkPlaywrightRuntime(command);
   const assetCache=new AssetCache({dir:process.env.AUTOMATION_ASSET_DIR??path.join(dataDir,'assets'),maxBytes:positive('AUTOMATION_ASSET_CACHE_MB',2048)*1024*1024});
-  const shared={command,playwrightPackage,assetCache};
+  const shared={command,playwrightPackage,assetCache,authSessions:authSessionsFromEnv()};
   const runtimeFor=options=>({runtime:createReloadingRuntime(runClaude,options),applySettings:createSettingsApplier(settingsPathFor(options))});
   const planner=createPlannerService({...shared,...runtimeFor(plannerSettings),jobsDir:path.join(dataDir,'planner-jobs'),concurrency:positive('AUTOMATION_CONCURRENCY',1)});
   const generator=createGeneratorService({...shared,...runtimeFor(generatorSettings),jobsDir:path.join(dataDir,'generator-jobs'),workspaceRoot:path.join(dataDir,'generator-workspaces'),concurrency:positive('AUTOMATION_CONCURRENCY',1)});

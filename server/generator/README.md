@@ -114,6 +114,8 @@ node server/generator/main.mjs
 | GENERATOR_RETENTION_MS | 86400000 | 终态任务保留时间 |
 | GENERATOR_ASSET_DIR | 系统临时目录/auto-test-generator-assets | CaseHub 推送的资产缓存目录（按 SHA-256 命名），generator 与 healer 共用 |
 | GENERATOR_ASSET_CACHE_MB | 2048 | 资产缓存总量上限，超出先淘汰最久未使用的文件 |
+| AUTH_SESSION_REUSE | 1 | 设为 `0` 关闭登录态复用 |
+| AUTH_SESSION_TTL_MS | 1800000 | 已保存登录态的复用时长（仅内存），应小于被测系统自身的会话有效期 |
 
 `GENERATOR_DATA_DIR` 下还保存 healer 的 `healer-jobs/`、`healer-workspaces/` 和 `healer-settings.json`；healer 自己的环境变量见 `server/healer/README.md`。探索经验不保存在服务里：需求级经验随 `requirements[].explorationNotes` / `context.explorationNotes`、产品级经验随 `context.productExperience` 传入，结果的 `explorationRecords` 与 `productExperience`（`{origin, notes}`，仅本次新验证的段落）由 CaseHub 存回。
 

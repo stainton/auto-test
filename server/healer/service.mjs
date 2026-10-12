@@ -21,8 +21,8 @@ export async function seedHealerSettings(healerFile, generatorFile) {
 }
 
 export function createHealerService({ command, runtime, applySettings, playwrightPackage, assetCache, jobsDir,
-  workspaceRoot }) {
-  const worker = withExperience(createHealerWorker({ command, runtime, playwrightPackage, assetCache, temporaryRoot: workspaceRoot,
+  workspaceRoot, authSessions }) {
+  const worker = withExperience(createHealerWorker({ command, runtime, playwrightPackage, assetCache, authSessions, temporaryRoot: workspaceRoot,
     caseTimeoutMs: positive('HEALER_CASE_TIMEOUT_MS', 3600000) }));
   const jobs = new Jobs({
     kind: 'healer', label: 'Healer',

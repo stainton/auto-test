@@ -1,6 +1,7 @@
 import { appendFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { replaySeed } from '../shared/navigation-replay.mjs';
+import { seedSpec } from '../shared/seed.mjs';
+import { planAuthSession, stageAuthSession, readSavedAuthSession, clearAuthSession, authSessionNote } from '../shared/auth-session.mjs';
 import { describePlaywrightAction } from '../shared/playwright-progress.mjs';
 import { mkdtemp, writeFile, rm, mkdir, symlink, cp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -19,7 +20,7 @@ const STAGES = new Set(['reading_cases', 'preparing', 'exploring', 'generating',
 // cases, and a failure on the fifth case must not throw away the four specs already written. Each
 // run gets its own timeout and its own small schema, and the notes it produces feed the next case.
 export function createGeneratorWorker({ runtime = runClaude, command, model, settingsPath, playwrightPackage,
-  temporaryRoot = tmpdir(), caseTimeoutMs = 3600000, assetCache,
+  temporaryRoot = tmpdir(), caseTimeoutMs = 3600000, assetCache, authSessions,
   workflow = { kind: 'generator', systemPrompt: SYSTEM_PROMPT, buildPrompt } } = {}) {
   return async function generator(input, { signal, emit, retain = () => {} }) {
     signal.throwIfAborted();
@@ -43,8 +44,6 @@ export function createGeneratorWorker({ runtime = runClaude, command, model, set
           ...(input.target.storageState ? { storageState: input.target.storageState } : {}),
           ...(input.target.extraHTTPHeaders ? { extraHTTPHeaders: input.target.extraHTTPHeaders } : {}) } };
       await writeFile(configPath, `module.exports = ${JSON.stringify(config)};\n`, { mode: 0o600 });
-      await writeFile(path.join(project, 'seed.spec.ts'),
-        `const { test } = require(${JSON.stringify(testEntry)});\ntest('generator seed', async ({ page }) => { await page.goto(${JSON.stringify(input.target.baseUrl)}, { waitUntil: 'domcontentloaded', timeout: 30000 }); await page.waitForLoadState('domcontentloaded',{timeout:10000}).catch(()=>{}); ${replaySeed(input.productReplay)} });\n`, { mode: 0o600 });
       const mcpConfig = { mcpServers: { 'playwright-test': { type: 'stdio', command: process.execPath,
         args: [cli, 'run-test-mcp-server', '--headless', '--config', configPath] } } };
       const assets = input.context?.assets ?? [];
@@ -69,8 +68,22 @@ export function createGeneratorWorker({ runtime = runClaude, command, model, set
         // expensive product navigation and locator discovery happen only once per batch.
         const notes = mergeNotes(batchNotes, notesByRequirement.get(testCase.requirement) ?? '');
         await workflow.prepareCase?.({ workspace, project, testCase });
-        const output = await runCase({ runtime, input: { ...promptInput, context: { ...promptInput.context, explorationNotes: notes } },
-          testCase, workspace, mcpConfig, signal, workflow, command, model, settingsPath, caseTimeoutMs:input.caseTimeoutMs??caseTimeoutMs, emit, position });
+        // The seed starts the exploration browser; whether it starts logged in is decided per case (a case about
+        // login itself must start logged out), and only the seed carries the session, never the project config.
+        const authPlan = planAuthSession(authSessions, input, [testCase.title, testCase.id]);
+        const authFile = authPlan.capture ? await stageAuthSession(workspace, authPlan.preload) : undefined;
+        await writeFile(path.join(project, 'seed.spec.ts'), seedSpec({ testEntry, name: 'generator seed', baseUrl: input.target.baseUrl,
+          replay: input.productReplay, storageStatePath: authPlan.preload ? authFile : undefined }), { mode: 0o600 });
+        const authSession = authSessionNote(authPlan, authFile);
+        let output;
+        try {
+          output = await runCase({ runtime, input: { ...promptInput, ...(authSession ? { authSession } : {}), context: { ...promptInput.context, explorationNotes: notes } },
+            testCase, workspace, mcpConfig, signal, workflow, command, model, settingsPath, caseTimeoutMs:input.caseTimeoutMs??caseTimeoutMs, emit, position });
+        } finally {
+          // Keep what the model saved for the next task, then remove it: the retained failure workspace must not hold a session.
+          if (authPlan.capture) { const saved = await readSavedAuthSession(workspace); if (saved) authSessions.put(authPlan.key, saved); }
+          await clearAuthSession(workspace);
+        }
         let script;
         try { script = formatScript(output, testCase, { requireViewport: workflow.kind !== 'healer' }); }
         catch (error) {

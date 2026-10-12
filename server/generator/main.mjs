@@ -10,6 +10,7 @@ import { resolveClaudeOptions, createReloadingRuntime, createSettingsApplier, se
 import { createRoutedServer } from '../shared/http.mjs';
 import { AssetCache } from '../shared/assets.mjs';
 import { positive } from '../shared/env.mjs';
+import { authSessionsFromEnv } from '../shared/auth-session.mjs';
 import { createGeneratorService } from './service.mjs';
 import { createHealerService, seedHealerSettings } from '../healer/service.mjs';
 
@@ -29,7 +30,8 @@ export async function main() {
   const playwrightPackage = await checkPlaywrightRuntime(command);
   const assetCache = new AssetCache({ dir: process.env.GENERATOR_ASSET_DIR ?? path.join(tmpdir(), 'auto-test-generator-assets'),
     maxBytes: positive('GENERATOR_ASSET_CACHE_MB', 2048) * 1024 * 1024 });
-  const shared = { command, playwrightPackage, assetCache };
+  // Generator and healer share saved logins: a script repaired right after being generated needs no new login.
+  const shared = { command, playwrightPackage, assetCache, authSessions: authSessionsFromEnv() };
   // CaseHub stores each agent's configuration and sends it with every request; the applier rewrites the
   // settings file when the content changes and the reloading runtime re-reads it per CLI invocation.
   const generator = createGeneratorService({ ...shared, runtime: createReloadingRuntime(runClaude, generatorSettings),

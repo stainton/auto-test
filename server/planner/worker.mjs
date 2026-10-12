@@ -1,4 +1,5 @@
-import { replaySeed } from '../shared/navigation-replay.mjs';
+import { seedSpec } from '../shared/seed.mjs';
+import { planAuthSession, stageAuthSession, readSavedAuthSession, clearAuthSession, authSessionNote } from '../shared/auth-session.mjs';
 import { describePlaywrightAction } from '../shared/playwright-progress.mjs';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -20,7 +21,7 @@ const STAGES = new Set(['reading_requirements', 'preparing', 'exploring', 'desig
 // hands its location to the job store, and a later request that carries continueFrom arrives here as
 // input.resume and reopens the same conversation. Nothing but that session lives in the workspace, and it is
 // removed as soon as the run ends in a way nobody can continue (success, cancellation).
-export function createPlannerWorker({ runtime = runClaude, command, model, settingsPath, playwrightPackage, assetCache,
+export function createPlannerWorker({ runtime = runClaude, command, model, settingsPath, playwrightPackage, assetCache, authSessions,
   temporaryRoot = tmpdir() } = {}) {
   return async function planner(input, { signal, emit, checkpoint = () => {} }) {
     signal.throwIfAborted();
@@ -28,7 +29,7 @@ export function createPlannerWorker({ runtime = runClaude, command, model, setti
     const workspace = input.resume?.workspace ?? await mkdtemp(path.join(temporaryRoot, 'planner-'));
     const sessionId = input.resume?.sessionId ?? randomUUID();
     checkpoint({ sessionId, workspace });
-    let keepWorkspace = false;
+    let keepWorkspace = false, authFile, authSession, plan;
     try {
       emit({ stage: 'preparing', message: resumed ? 'Reopening the interrupted session in a new browser' : 'Preparing an isolated browser session' });
       const packagePath = playwrightPackage ?? require.resolve('@playwright/test/package.json');
@@ -42,8 +43,14 @@ export function createPlannerWorker({ runtime = runClaude, command, model, setti
           ...(input.target.storageState ? { storageState: input.target.storageState } : {}),
           ...(input.target.extraHTTPHeaders ? { extraHTTPHeaders: input.target.extraHTTPHeaders } : {}) } };
       await writeFile(configPath, `module.exports = ${JSON.stringify(config)};\n`, { mode: 0o600 });
-      await writeFile(path.join(workspace, 'seed.spec.ts'),
-        `const { test } = require(${JSON.stringify(testEntry)});\ntest('planner seed', async ({ page }) => { await page.goto(${JSON.stringify(input.target.baseUrl)}, { waitUntil: 'domcontentloaded', timeout: 30000 }); await page.waitForLoadState('domcontentloaded',{timeout:10000}).catch(()=>{}); ${replaySeed(input.productReplay)} });\n`, { mode: 0o600 });
+      // Exploration may start from a login an earlier task saved, unless the requirements are about authentication
+      // themselves. Only the seed carries it (see shared/auth-session.mjs).
+      const authPlan = planAuthSession(authSessions, input, (input.requirements ?? []).flatMap(r => [r.id, r.title]));
+      authFile = authPlan.capture ? await stageAuthSession(workspace, authPlan.preload) : undefined;
+      await writeFile(path.join(workspace, 'seed.spec.ts'), seedSpec({ testEntry, name: 'planner seed', baseUrl: input.target.baseUrl,
+        replay: input.productReplay, storageStatePath: authPlan.preload ? authFile : undefined }), { mode: 0o600 });
+      authSession = authSessionNote(authPlan, authFile);
+      plan = authPlan;
       const mcpConfig = { mcpServers: { 'playwright-test': { type: 'stdio', command: process.execPath,
         args: [cli, 'run-test-mcp-server', '--headless', '--config', configPath] } } };
       // Files the person attached: copied from the cache into this task's workspace (the directory the
@@ -52,7 +59,7 @@ export function createPlannerWorker({ runtime = runClaude, command, model, setti
       if (assets.length && !assetCache) throw new Error('This planner has no asset cache configured');
       const staged = [];
       for (const asset of assets) staged.push({ ...asset, path: await assetCache.stage(asset, path.join(workspace, 'assets')) });
-      const promptInput = assets.length ? { ...input, context: { ...input.context, assets: staged } } : input;
+      const promptInput = { ...input, ...(authSession ? { authSession } : {}), ...(assets.length ? { context: { ...input.context, assets: staged } } : {}) };
       const calls = new Map();
       let setupSucceeded = false;
       const output = await runtime({ cwd: workspace, prompt: resumed ? buildContinuationPrompt(promptInput) : buildPrompt(promptInput),
@@ -110,6 +117,9 @@ export function createPlannerWorker({ runtime = runClaude, command, model, setti
       if (!keepWorkspace) checkpoint(null);
       throw error;
     } finally {
+      // Keep what the model saved for the next task, then remove it so a retained workspace never holds a session.
+      if (plan?.capture) { const saved = await readSavedAuthSession(workspace); if (saved) authSessions.put(plan.key, saved); }
+      await clearAuthSession(workspace);
       if (!keepWorkspace) await rm(workspace, { recursive: true, force: true });
     }
   };

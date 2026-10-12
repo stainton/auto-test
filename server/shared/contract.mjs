@@ -14,6 +14,22 @@ export function keys(value, allowed, name) {
   check(Object.keys(value).every(key => allowed.includes(key)), `${name} contains unsupported fields`);
 }
 
+// The exported cookies/origins object Playwright's storageState() produces. Strict on purpose: it is
+// written into a browser configuration, so unknown fields are refused rather than passed along.
+export function validateStorageState(state, name = 'storageState') {
+  keys(state, ['cookies', 'origins'], name);
+  check(Array.isArray(state.cookies) && Array.isArray(state.origins), 'storageState requires cookies and origins arrays; file paths are not accepted');
+  for (const cookie of state.cookies) {
+    check(object(cookie) && ['name', 'value', 'domain', 'path'].every(k => typeof cookie[k] === 'string') &&
+      Number.isFinite(cookie.expires) && typeof cookie.httpOnly === 'boolean' && typeof cookie.secure === 'boolean' &&
+      ['Strict', 'Lax', 'None'].includes(cookie.sameSite), 'invalid storageState cookie');
+  }
+  for (const origin of state.origins) {
+    check(object(origin) && typeof origin.origin === 'string' && Array.isArray(origin.localStorage), 'invalid storageState origin');
+    for (const entry of origin.localStorage) check(object(entry) && typeof entry.name === 'string' && typeof entry.value === 'string', 'invalid localStorage entry');
+  }
+}
+
 // target describes the system under test: where it is and how an already-authenticated session
 // reaches it. storageState is the exported cookies/origins object, never a local file path — the
 // service must not read the caller's filesystem.
@@ -21,20 +37,7 @@ export function validateTarget(target, name = 'target') {
   keys(target, ['baseUrl', 'storageState', 'extraHTTPHeaders'], name);
   const url = new URL(string(target.baseUrl, `${name}.baseUrl`, 4096));
   check(['http:', 'https:'].includes(url.protocol), `${name}.baseUrl must be HTTP(S)`);
-  if (target.storageState !== undefined) {
-    const state = target.storageState;
-    keys(state, ['cookies', 'origins'], `${name}.storageState`);
-    check(Array.isArray(state.cookies) && Array.isArray(state.origins), 'storageState requires cookies and origins arrays; file paths are not accepted');
-    for (const cookie of state.cookies) {
-      check(object(cookie) && ['name', 'value', 'domain', 'path'].every(k => typeof cookie[k] === 'string') &&
-        Number.isFinite(cookie.expires) && typeof cookie.httpOnly === 'boolean' && typeof cookie.secure === 'boolean' &&
-        ['Strict', 'Lax', 'None'].includes(cookie.sameSite), 'invalid storageState cookie');
-    }
-    for (const origin of state.origins) {
-      check(object(origin) && typeof origin.origin === 'string' && Array.isArray(origin.localStorage), 'invalid storageState origin');
-      for (const entry of origin.localStorage) check(object(entry) && typeof entry.name === 'string' && typeof entry.value === 'string', 'invalid localStorage entry');
-    }
-  }
+  if (target.storageState !== undefined) validateStorageState(target.storageState, `${name}.storageState`);
   if (target.extraHTTPHeaders !== undefined) {
     check(object(target.extraHTTPHeaders) && Object.values(target.extraHTTPHeaders).every(v => typeof v === 'string'), 'extraHTTPHeaders must contain string values');
   }

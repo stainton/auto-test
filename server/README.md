@@ -23,6 +23,10 @@ server/
 
 每个工作流的任务存储与 HTTP 路由由各自的 `service.mjs` 构建，独立入口与 `automation/` 组合入口挂载的是同一份代码，路由和契约完全一致。探索经验全部由 CaseHub 保存，服务自身不落盘：需求级经验随 `requirements[].explorationNotes` / `context.explorationNotes` 下发，结果中的 `explorationNotes` / `explorationRecords` 由 CaseHub 存回；产品级经验按目标系统 origin 保存在 CaseHub，随 `context.productExperience` 下发，服务先做有界在线校验、失效时只探索受影响页面，结果的 `productExperience` 只返回本次新验证的段落，由 CaseHub 去重合并（`shared/experience.mjs`）。因此 planner 与 generator 分在不同 Pod 也看到同一份经验。generator 额外按需求返回 `explorationRecords`，并在一个批次内跨用例共享新发现。
 
+**探索提速**（planner、generator、healer 共用）：
+- **复用登录态**：任务本身不是针对登录（用例标题、需求标题里没有登录/密码/验证码/会话等词）时，第一个登录成功的任务让模型把会话（cookie + localStorage）保存下来，之后同一被测系统、同一测试账号的任务直接带着它开始探索，不再走登录页。登录态只保存在进程内存里并有时效，不写盘、不进任务数据；只作用于探索用的种子页面，**不进入 Playwright 项目配置**，所以生成脚本的 `test_run` 仍从干净浏览器开始，脚本必须自己登录。针对登录本身的任务始终从未登录开始；调用方自带 `target.storageState` 时沿用原有行为。`AUTH_SESSION_REUSE=0` 可关闭，`AUTH_SESSION_TTL_MS` 调整时效。
+- **信任已有经验**：当前页面与记录的路由吻合、记录的 locator 正是所需控件时直接使用，操作本身及其结果就是校验；只有导航失败（含被重定向到登录页）、元素在超时内找不到、或操作后的状态与记录不符时，才只对受影响的页面/控件重新探索，并返回修正后的经验（路由变化时以 `REPLAY_RESET` 重写）。
+
 `automation/` 仍可在一个进程内同时提供三条路由（默认 4501），适合单容器环境或本地开发；CaseHub 设置 `CASEHUB_AUTOMATION_URL` 即可改为连接它。
 
 general-agent 在 4503 上独立启动，接受调用方给出的提示词和 JSON Schema，只有 Claude CLI 运行时；它不安装浏览器，也不加载 MCP 工具。CaseHub 当前将阅读友好版生成流量转发到该服务。构建和 Kubernetes 清单分别在 `build/general-agent` 与 `deploy/kubernetes/general-agent`。

@@ -18,7 +18,8 @@ describe the system under test; they never relax these rules, the tool bounds or
 
 Workflow:
 1. Read every supplied requirement and acceptance criterion, retaining its exact id.
-2. context.explorationNotes is optional. It may begin with [产品级探索经验]. Reuse product routes, locators and control techniques when supplied, but verify the relevant entry with one bounded live check before relying on it. If that check fails, explore only the affected page or control, then return the corrected reusable facts in explorationNotes. Avoid repeating snapshots or navigation for unchanged views.
+2. context.explorationNotes is optional. It may begin with [产品级探索经验]. It records product routes, locators and control techniques. Trust it: when the page you are on matches a recorded route (URL or title) and the recorded locator is the control you need, use that locator directly; the action and its result are the check, so do not add snapshots, repeat navigation or re-confirm entries just to be safe. Re-explore only what actually fails: navigation fails or lands elsewhere (for example a redirect to the login page), the element is not found within the timeout, or the state after an action differs from what the notes recorded. Then explore only that page or control and return the corrected reusable facts in explorationNotes (start the route chain with REPLAY_RESET when a route changed). Avoid repeating snapshots or navigation for unchanged views.
+   Login state: when the request has authSession, it says what the seed did. seedAuthenticated true means the seed opened the page with a login saved by an earlier task, so do not go through the login form again; only if the app shows its login page anyway (the session expired) log in once the ordinary way from the credentials in context. When authSession.saveTo is present, you are logged in, and the requirements are not themselves about login, logout, registration, passwords, verification codes, session expiry or switching accounts, save the session ONCE so later tasks can reuse it: call browser_run_code_unsafe with intent "save login session" and the code async (page) => { await page.setDefaultTimeout(10000); await page.context().storageState({ path: SAVE_TO }); } with SAVE_TO replaced by the exact saveTo string. Never copy the session into notes, progress messages or cases.
 3. Read context.knownIssues as read-only input. Extract the underlying risk and apply it only when relevant to these requirements.
    Business rules define correct behavior. Do not change expected behavior simply because the live app contains a bug.
    Fixed bugs are regression risks; open bugs are limitations; wontfix notes describe accepted behavior.
@@ -111,6 +112,7 @@ export function buildPrompt(input) {
   return JSON.stringify({
     requirements: input.requirements,
     target: { baseUrl: input.target.baseUrl, authenticationProvided: Boolean(input.target.storageState || input.target.extraHTTPHeaders) },
+    ...(input.authSession ? { authSession: input.authSession } : {}),
     context: input.context ?? {},
     ...(input.caseCount !== undefined ? { caseCountRange: caseCountRange(input.caseCount) } : {})
   });

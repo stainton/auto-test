@@ -9,6 +9,7 @@ import { resolveClaudeOptions, createReloadingRuntime, createSettingsApplier, se
 import { createRoutedServer } from '../shared/http.mjs';
 import { AssetCache } from '../shared/assets.mjs';
 import { positive } from '../shared/env.mjs';
+import { authSessionsFromEnv } from '../shared/auth-session.mjs';
 import { createPlannerService } from './service.mjs';
 
 export async function main() {
@@ -30,7 +31,7 @@ export async function main() {
   const assetCache = new AssetCache({ dir: process.env.PLANNER_ASSET_DIR ?? path.join(tmpdir(), 'auto-test-planner-assets'),
     maxBytes: positive('PLANNER_ASSET_CACHE_MB', 2048) * 1024 * 1024 });
   const planner = createPlannerService({ command, runtime, applySettings, playwrightPackage, assetCache, jobsDir: dataDir,
-    concurrency: positive('PLANNER_CONCURRENCY', 1) });
+    concurrency: positive('PLANNER_CONCURRENCY', 1), authSessions: authSessionsFromEnv() });
   const server = createRoutedServer([planner]);
   server.listen(positive('PLANNER_PORT', 4501), host, () => console.log(`Planner HTTP service listening on ${host}:${server.address().port}`));
   let stopping = false;

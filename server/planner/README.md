@@ -131,6 +131,8 @@ curl http://localhost:4501/v1/planner/jobs/JOB_ID/result
 | PLANNER_ASSET_CACHE_MB | 2048 | 资产缓存总量上限，超出先淘汰最久未使用的文件 |
 | PLANNER_SIMPLIFY_TIMEOUT_MS | 60000 | `/v1/planner/simplify` 单次改写的最长等待时间 |
 | PLANNER_ESTIMATE_TIMEOUT_MS | 120000 | `/v1/planner/estimate` 单次评估的最长等待时间 |
+| AUTH_SESSION_REUSE | 1 | 设为 `0` 关闭登录态复用 |
+| AUTH_SESSION_TTL_MS | 1800000 | 已保存登录态的复用时长（仅内存），应小于被测系统自身的会话有效期 |
 
 探索经验不保存在服务里：需求级经验通过 `context.explorationNotes`、产品级经验通过 `context.productExperience` 随请求传入，结果的 `explorationNotes` 与 `productExperience`（`{origin, notes}`，仅本次新验证的段落）由 CaseHub 存回。
 
