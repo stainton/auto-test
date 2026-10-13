@@ -28,7 +28,7 @@
         ],
         "operationId": "createGeneratorJob",
         "summary": "Submit a script generation task",
-        "description": "Returns immediately with a queued job. Maximum JSON request size: 2 MiB. Submit 1–50 reviewed test cases; one Playwright spec is generated per case, in submission order. No local file paths or MCP commands are accepted: the browser target, authentication and any prior knowledge come from this request. Human review of the cases happens in the caller before submission. No idempotency key is supported: repeated submissions create separate jobs.",
+        "description": "Returns immediately with a queued job. Maximum JSON request size: 2 MiB. Submit 1–50 reviewed test cases; one Playwright spec is generated per case, in submission order. No local file paths or MCP commands are accepted: the browser target, authentication and any prior knowledge come from this request. Human review of the cases happens in the caller before submission. No idempotency key is supported: repeated submissions create separate jobs. A dispatcher choosing among several nodes passes queue=false: the task then starts on an idle slot or is refused with 429 BUSY instead of queueing, and the dispatcher tries another node.",
         "requestBody": {
           "required": true,
           "content": {
@@ -120,6 +120,16 @@
               }
             }
           },
+          "429": {
+            "description": "queue=false and no idle slot (BUSY)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "500": {
             "description": "Internal service error",
             "content": {
@@ -131,7 +141,7 @@
             }
           },
           "503": {
-            "description": "Server shutting down or retained job capacity reached",
+            "description": "Draining for shutdown (SHUTTING_DOWN), or this node already holds its limit of unfinished tasks (CAPACITY_EXCEEDED)",
             "content": {
               "application/json": {
                 "schema": {
@@ -140,7 +150,23 @@
               }
             }
           }
-        }
+        },
+        "parameters": [
+          {
+            "name": "queue",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ],
+              "default": "true"
+            },
+            "description": "false: accept only if a slot is free right now, otherwise 429 BUSY. Default true: queue behind running work."
+          }
+        ]
       }
     },
     "/v1/generator/jobs/{jobId}": {
@@ -173,7 +199,7 @@
             }
           },
           "404": {
-            "description": "Unknown or expired job",
+            "description": "Unknown job: never submitted here, released, expired, or lost in a restart of this node (jobs live in memory)",
             "content": {
               "application/json": {
                 "schema": {
@@ -200,7 +226,7 @@
         ],
         "operationId": "cancelGeneratorJob",
         "summary": "Cancel a queued or running task",
-        "description": "Idempotent for terminal jobs. A running task can briefly remain running with stage cancelling until its runtime and browser stop. Does not delete retained results.",
+        "description": "Idempotent for terminal jobs. A running task can briefly remain running with stage cancelling until its runtime and browser stop. Does not remove a finished task; release it with POST /v1/generator/jobs/{jobId}/release.",
         "responses": {
           "202": {
             "description": "Current state after cancellation request",
@@ -213,7 +239,7 @@
             }
           },
           "404": {
-            "description": "Unknown or expired job",
+            "description": "Unknown job: never submitted here, released, expired, or lost in a restart of this node (jobs live in memory)",
             "content": {
               "application/json": {
                 "schema": {
@@ -265,7 +291,7 @@
             }
           },
           "404": {
-            "description": "Unknown or expired job",
+            "description": "Unknown job: never submitted here, released, expired, or lost in a restart of this node (jobs live in memory)",
             "content": {
               "application/json": {
                 "schema": {
@@ -361,7 +387,7 @@
             }
           },
           "404": {
-            "description": "Unknown or expired job",
+            "description": "Unknown job: never submitted here, released, expired, or lost in a restart of this node (jobs live in memory)",
             "content": {
               "application/json": {
                 "schema": {
@@ -390,6 +416,163 @@
           },
           "reset": {
             "$ref": "#/components/schemas/EventReset"
+          }
+        }
+      }
+    },
+    "/v1/generator/jobs/{jobId}/release": {
+      "parameters": [
+        {
+          "name": "jobId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "post": {
+        "tags": [
+          "Generator"
+        ],
+        "operationId": "releaseGeneratorJob",
+        "summary": "Release a finished task",
+        "description": "The dispatcher calls this once it has stored the result, events and any checkpoint or diagnostics. The node then forgets the task and deletes the files it kept for it. A finished task nobody releases is dropped after the retention period. While a node drains for shutdown it waits briefly for its finished tasks to be released before exiting.",
+        "responses": {
+          "200": {
+            "description": "Released",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "id",
+                    "released"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "released": {
+                      "type": "boolean",
+                      "const": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown job: never submitted here, released, expired, or lost in a restart of this node (jobs live in memory)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The task has not finished (JOB_ACTIVE); cancel it first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal service error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/generator/jobs/{jobId}/diagnostics": {
+      "parameters": [
+        {
+          "name": "jobId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "get": {
+        "tags": [
+          "Generator"
+        ],
+        "operationId": "getGeneratorDiagnostics",
+        "summary": "Download a failed run's diagnostics",
+        "description": "For a finished task whose status says diagnostics: a tar.gz of the workspace it kept (scripts per attempt, full errors, runtime logs, Playwright output), capped at 50 MiB with an OMITTED.txt listing anything left out. Agent settings, credentials, the Claude configuration and saved logins are never included.",
+        "responses": {
+          "200": {
+            "description": "Diagnostics archive",
+            "headers": {
+              "X-Content-SHA256": {
+                "description": "Lowercase hex SHA-256 of the response body",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                }
+              },
+              "Content-Disposition": {
+                "description": "attachment; filename=\"<jobId>-<kind>.tar.gz\"",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/gzip": {
+                "schema": {
+                  "type": "string",
+                  "contentMediaType": "application/gzip"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown job: never submitted here, released, expired, or lost in a restart of this node (jobs live in memory), or the task kept no diagnostics (DIAGNOSTICS_UNAVAILABLE)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The task has not finished (JOB_ACTIVE)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal service error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           }
         }
       }
@@ -433,7 +616,7 @@
         ],
         "operationId": "readiness",
         "summary": "Service readiness",
-        "description": "CLI and browser prerequisites are checked before listening. This probe does not call the model provider or target site.",
+        "description": "CLI and browser prerequisites are checked before listening. This probe does not call the model provider or target site. Turns 503 as soon as the node starts draining for shutdown; /healthz stays 200 until the process exits.",
         "security": [],
         "responses": {
           "200": {
@@ -457,7 +640,7 @@
             }
           },
           "503": {
-            "description": "Shutting down or unavailable",
+            "description": "Draining for shutdown or unavailable",
             "content": {
               "application/json": {
                 "schema": {
@@ -493,6 +676,28 @@
               "application/json": {
                 "schema": {
                   "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/generator/capacity": {
+      "get": {
+        "tags": [
+          "Operations"
+        ],
+        "operationId": "getGeneratorCapacity",
+        "summary": "Free slots on this node",
+        "description": "What a dispatcher reads to pick an idle node. The authoritative check is still the submission itself with queue=false, which reserves the slot atomically.",
+        "responses": {
+          "200": {
+            "description": "Current load",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Capacity"
                 }
               }
             }
@@ -997,6 +1202,10 @@
                 "type": "string"
               }
             }
+          },
+          "diagnostics": {
+            "type": "boolean",
+            "description": "Present and true on a finished task that kept its workspace for debugging; download it from /v1/generator/jobs/{jobId}/diagnostics until the task is released."
           }
         }
       },
@@ -1107,7 +1316,7 @@
         "properties": {
           "code": {
             "type": "string",
-            "description": "Machine-readable error code; task errors include GENERATOR_FAILED, JOB_TIMEOUT, JOB_CANCELLED and SERVER_RESTARTED; a rejected or unusable agentSettings is INVALID_REQUEST, INVALID_AGENT_SETTINGS or AGENT_SETTINGS_FAILED"
+            "description": "Machine-readable error code; task errors include GENERATOR_FAILED, JOB_TIMEOUT, JOB_CANCELLED and NODE_SHUTDOWN (the node stopped before or while running the task); a dispatcher asking for an idle slot gets BUSY; a rejected or unusable agentSettings is INVALID_REQUEST, INVALID_AGENT_SETTINGS or AGENT_SETTINGS_FAILED"
           },
           "message": {
             "type": "string"
@@ -1123,6 +1332,52 @@
         "properties": {
           "error": {
             "$ref": "#/components/schemas/ErrorDetail"
+          }
+        }
+      },
+      "Capacity": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "concurrency",
+          "running",
+          "queued",
+          "reserved",
+          "available",
+          "accepting"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "generator"
+          },
+          "concurrency": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Tasks this node runs at the same time"
+          },
+          "running": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "queued": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "reserved": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Submissions still being validated; they already hold a slot"
+          },
+          "available": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Slots a new task would start in immediately; 0 while draining"
+          },
+          "accepting": {
+            "type": "boolean",
+            "description": "False once the node is draining for shutdown"
           }
         }
       }

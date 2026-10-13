@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { runClaude } from '../runtime/claude.mjs';
 import { checkPlaywrightRuntime } from '../runtime/preflight.mjs';
 import { resolveClaudeOptions, createReloadingRuntime, createSettingsApplier, settingsPathFor } from '../runtime/settings.mjs';
-import { createRoutedServer } from '../shared/http.mjs';
+import { createRoutedServer, stopOnSignals } from '../shared/http.mjs';
 import { AssetCache } from '../shared/assets.mjs';
 import { positive } from '../shared/env.mjs';
 import { authSessionsFromEnv } from '../shared/auth-session.mjs';
@@ -30,13 +30,13 @@ export async function main() {
   const assetCache=new AssetCache({dir:process.env.AUTOMATION_ASSET_DIR??path.join(dataDir,'assets'),maxBytes:positive('AUTOMATION_ASSET_CACHE_MB',2048)*1024*1024});
   const shared={command,playwrightPackage,assetCache,authSessions:authSessionsFromEnv()};
   const runtimeFor=options=>({runtime:createReloadingRuntime(runClaude,options),applySettings:createSettingsApplier(settingsPathFor(options))});
-  const planner=createPlannerService({...shared,...runtimeFor(plannerSettings),jobsDir:path.join(dataDir,'planner-jobs'),concurrency:positive('AUTOMATION_CONCURRENCY',1)});
-  const generator=createGeneratorService({...shared,...runtimeFor(generatorSettings),jobsDir:path.join(dataDir,'generator-jobs'),workspaceRoot:path.join(dataDir,'generator-workspaces'),concurrency:positive('AUTOMATION_CONCURRENCY',1)});
-  const healer=createHealerService({...shared,...runtimeFor(healerSettings),jobsDir:path.join(dataDir,'healer-jobs'),workspaceRoot:path.join(dataDir,'healer-workspaces')});
+  // Jobs live in memory; dataDir only holds task workspaces (cleared on start), the asset cache and the healer's settings.
+  const planner=createPlannerService({...shared,...runtimeFor(plannerSettings),workspaceRoot:path.join(dataDir,'planner-workspaces'),concurrency:positive('AUTOMATION_CONCURRENCY',1)});
+  const generator=createGeneratorService({...shared,...runtimeFor(generatorSettings),workspaceRoot:path.join(dataDir,'generator-workspaces'),concurrency:positive('AUTOMATION_CONCURRENCY',1)});
+  const healer=createHealerService({...shared,...runtimeFor(healerSettings),workspaceRoot:path.join(dataDir,'healer-workspaces')});
   const server=createRoutedServer([{...healer,prefix:'/v1/healer/'},{...generator,prefix:'/v1/generator/'},planner]);
   server.listen(positive('AUTOMATION_PORT',4501),host,()=>console.log(`Automation HTTP service listening on ${host}:${server.address().port}`));
-  let stopping=false; const shutdown=()=>{if(!stopping){stopping=true;return server.shutdown();}};
-  process.on('SIGTERM',shutdown);process.on('SIGINT',shutdown);
+  stopOnSignals(server,{label:'Automation',drainTimeoutMs:positive('AUTOMATION_DRAIN_TIMEOUT_MS',3600000),holdMs:positive('AUTOMATION_DRAIN_HOLD_MS',60000)});
   return {server,plannerJobs:planner.jobs,generatorJobs:generator.jobs,healerJobs:healer.jobs};
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url))main().catch(error=>{console.error(`Automation startup failed: ${error.message}`);process.exitCode=1});

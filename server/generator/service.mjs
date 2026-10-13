@@ -10,8 +10,10 @@ import { withExperience } from '../shared/experience.mjs';
 import { validateInput } from './contract.mjs';
 import { createGeneratorWorker } from './worker.mjs';
 
-export function createGeneratorService({ command, runtime, applySettings, playwrightPackage, assetCache, jobsDir,
+export function createGeneratorService({ command, runtime, applySettings, playwrightPackage, assetCache,
   workspaceRoot, concurrency, authSessions }) {
+  // Jobs live in memory, so a workspace left by an earlier process belongs to no job any more.
+  rmSync(workspaceRoot, { recursive: true, force: true });
   const worker = withExperience(createGeneratorWorker({ command, runtime, playwrightPackage, assetCache, authSessions, temporaryRoot: workspaceRoot,
     caseTimeoutMs: positive('GENERATOR_CASE_TIMEOUT_MS', 3600000) }));
   const jobs = new Jobs({
@@ -19,10 +21,11 @@ export function createGeneratorService({ command, runtime, applySettings, playwr
     started: { stage: 'reading_cases', message: 'Reading the submitted test cases and context' },
     completion: result => ({ message: `Generated ${result.generated} of ${result.scripts.length} scripts`,
       scriptsGenerated: result.generated, scriptsBlocked: result.blocked }),
-    worker, dataDir: jobsDir,
+    worker,
     discard: state => { if (state?.workspace) rmSync(state.workspace, { recursive: true, force: true }); },
     concurrency, timeoutMs: positive('GENERATOR_TIMEOUT_MS', 3600000),
-    maxJobs: positive('GENERATOR_MAX_JOBS', 100), retentionMs: positive('GENERATOR_RETENTION_MS', 86400000)
+    maxJobs: positive('GENERATOR_MAX_JOBS', 100), retentionMs: positive('GENERATOR_RETENTION_MS', 86400000),
+    maxRetained: positive('GENERATOR_MAX_RETAINED', 200)
   });
   const validate = async payload => { const input = validateInput(payload); await requireCachedAssets(assetCache, input); return input; };
   const handler = createHttpHandler({ jobs, validateInput: validate, applySettings, assetCache, basePath: '/v1/generator',

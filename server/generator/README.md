@@ -28,9 +28,12 @@ node server/generator/main.mjs
 | GET | `/v1/generator/jobs/{jobId}/events` | SSE 进度、重连回放 |
 | GET | `/v1/generator/jobs/{jobId}/result` | 获取已成功完成的脚本 |
 | DELETE | `/v1/generator/jobs/{jobId}` | 取消任务，不删除已有结果 |
+| POST | `/v1/generator/jobs/{jobId}/release` | 下发方取走结果后释放已结束的任务（含保留的失败现场） |
+| GET | `/v1/generator/jobs/{jobId}/diagnostics` | 失败现场的诊断包（tar.gz） |
+| GET | `/v1/generator/capacity` | 本节点空闲槽位，供下发方挑选节点；提交时加 `?queue=false` 则无空闲槽位直接 429 |
 | GET | `/healthz`、`/readyz` | 无鉴权健康检查 |
 
-所有接口直接调用，无需 Token，已开放 CORS，浏览器可直接提交任务并用原生 EventSource 订阅进度。任务生命周期、SSE 重连（`Last-Event-ID` / `?after=N`）、重启后标记 `SERVER_RESTARTED`、保留期与容量上限的语义与 planner 完全一致，见 [planner/README.md](../planner/README.md#进度和任务生命周期)；任务失败码为 `GENERATOR_FAILED`。
+所有接口直接调用，无需 Token，已开放 CORS，浏览器可直接提交任务并用原生 EventSource 订阅进度。任务生命周期、SSE 重连（`Last-Event-ID` / `?after=N`）、内存任务与释放、保留期与容量上限、停机排空的语义与 planner 完全一致，见 [planner/README.md](../planner/README.md#进度和任务生命周期)；任务失败码为 `GENERATOR_FAILED`。
 
 请求示例：
 
@@ -106,18 +109,21 @@ node server/generator/main.mjs
 | GENERATOR_PORT | 4502 | 监听端口 |
 | GENERATOR_MODEL | 不覆盖已有 Claude 模型配置 | 显式指定时优先；完全未配置模型时回退 haiku |
 | GENERATOR_CLAUDE_COMMAND | claude | 受信任的运行时可执行文件，不接受请求指定 |
-| GENERATOR_DATA_DIR | 系统临时目录/auto-test-generator-jobs | 任务状态与结果目录；镜像为 /var/lib/generator |
+| GENERATOR_DATA_DIR | 系统临时目录/auto-test-generator-jobs | 任务工作目录的临时空间（启动时清空）与 healer 配置文件；镜像为 /var/lib/generator |
 | GENERATOR_CONCURRENCY | 1 | 同时运行的浏览器任务数 |
 | GENERATOR_TIMEOUT_MS | 3600000 | 单个任务（含批量全部用例）的最长时间，不含排队 |
 | GENERATOR_CASE_TIMEOUT_MS | 3600000 | 单条用例的最长生成时间；超时该条记为 blocked，任务继续 |
-| GENERATOR_MAX_JOBS | 100 | 包括终态任务在内的保留数量上限 |
-| GENERATOR_RETENTION_MS | 86400000 | 终态任务保留时间 |
+| GENERATOR_MAX_JOBS | 100 | 未完成（排队 + 运行）任务数上限，满时 503 |
+| GENERATOR_RETENTION_MS | 86400000 | 未被释放的终态任务最长保留时间 |
+| GENERATOR_MAX_RETAINED | 200 | 未被释放的终态任务最多保留条数，超出淘汰最旧的 |
+| GENERATOR_DRAIN_TIMEOUT_MS | 同 GENERATOR_TIMEOUT_MS | 停机时等待运行中任务（generator 与 healer）完成的上限 |
+| GENERATOR_DRAIN_HOLD_MS | 60000 | 任务全部结束后，等待下发方取走并释放结果的上限 |
 | GENERATOR_ASSET_DIR | 系统临时目录/auto-test-generator-assets | CaseHub 推送的资产缓存目录（按 SHA-256 命名），generator 与 healer 共用 |
 | GENERATOR_ASSET_CACHE_MB | 2048 | 资产缓存总量上限，超出先淘汰最久未使用的文件 |
 | AUTH_SESSION_REUSE | 1 | 设为 `0` 关闭登录态复用 |
 | AUTH_SESSION_TTL_MS | 1800000 | 已保存登录态的复用时长（仅内存），应小于被测系统自身的会话有效期 |
 
-`GENERATOR_DATA_DIR` 下还保存 healer 的 `healer-jobs/`、`healer-workspaces/` 和 `healer-settings.json`；healer 自己的环境变量见 `server/healer/README.md`。探索经验不保存在服务里：需求级经验随 `requirements[].explorationNotes` / `context.explorationNotes`、产品级经验随 `context.productExperience` 传入，结果的 `explorationRecords` 与 `productExperience`（`{origin, notes}`，仅本次新验证的段落）由 CaseHub 存回。
+`GENERATOR_DATA_DIR` 下还有 healer 的 `healer-workspaces/` 和 `healer-settings.json`；healer 自己的环境变量见 `server/healer/README.md`。探索经验不保存在服务里：需求级经验随 `requirements[].explorationNotes` / `context.explorationNotes`、产品级经验随 `context.productExperience` 传入，结果的 `explorationRecords` 与 `productExperience`（`{origin, notes}`，仅本次新验证的段落）由 CaseHub 存回。
 
 ## 验证
 
@@ -135,12 +141,12 @@ agent 的配置由 CaseHub 存在数据库里，generator 自己不再保存副�
 
 因此本地文件只是 CaseHub 配置的落地结果，被覆盖是预期行为：容器重建、回滚到旧镜像或有人手工改过文件，下一次请求都会把 CaseHub 里的配置重新写回来（不需要先在 CaseHub 那边改一次配置），不需要共享卷，也不需要持久卷。无效 JSON 会以 400 拒绝该请求且不落盘（`INVALID_AGENT_SETTINGS`），写文件失败返回 500（`AGENT_SETTINGS_FAILED`），都不会静默退回旧配置。显式设置的 `GENERATOR_MODEL` 仍优先于文件中的模型设置。
 
-镜像里的 `setting.json` 仍是首次启动、以及 CaseHub 不下发配置时的兜底；该路径需可写（默认镜像可写，若把根文件系统设为只读需单独挂载可写卷）。配置只影响后续 CLI 调用，已经在跑的 Claude 进程不变。
+镜像里的 `setting.json` 仍是首次启动、以及 CaseHub 不下发配置时的兜底；该路径需可写（默认镜像可写，若把根文件系统设为只读需单独挂载可写卷）。每个任务提交时的配置会写进它自己的工作目录，整个任务都用这一份：之后的请求下发了新配置，也不会改变已在运行的任务。
 
 ### 截图校验与失败现场
 
 仅实际测试步骤必须提供截图附件，前置构造 `[setup]` 和清理 `[cleanup]` 不要求。校验解析 TypeScript 语法和本地辅助函数调用，不要求页面/附件变量的固定名称，也不要求截图标题与步骤标题完全一致。清理应在业务步骤之外执行，异常只记日志。
 
-失败现场保存在任务独立目录。合并服务默认位于 `AUTOMATION_DATA_DIR/generator-workspaces/generator-*`，独立 generator 位于 `GENERATOR_DATA_DIR/workspaces/generator-*`。任务状态的 `artifacts.workspace` 和结束进度日志给出位置。目录包含原始返回代码、调试脚本、完整校验错误、runtime.jsonl、Claude 会话和已有测试产物；调试失败时启用兜底截图与 trace，每轮产物单独快照。成功的中间用例也会先写入现场文件，避免后续超时丢失。
+失败现场保存在任务独立目录（合并服务为 `AUTOMATION_DATA_DIR/generator-workspaces/`，独立 generator 为 `GENERATOR_DATA_DIR/workspaces/`）。任务状态带 `diagnostics: true` 时，下发方从 `GET /v1/generator/jobs/{jobId}/diagnostics` 下载 tar.gz 保存。包内有原始返回代码、调试脚本、完整校验错误、每次尝试的 runtime.jsonl（完整模型交互流）和已有测试产物；调试失败时启用兜底截图与 trace，每轮产物单独快照。成功的中间用例也会先写入现场文件，避免后续超时丢失。包上限 50 MiB，超出的文件列在 `OMITTED.txt`。agent 配置、凭证、Claude 配置目录和保存的登录态不进入诊断包。
 
-现场不保持浏览器进程存活。其保留期跟随 `GENERATOR_RETENTION_MS`（默认 24 小时），到期随任务清理；挂载对应数据目录后可跨容器重建保留，否则只保留到容器磁盘被删除。现场文件可能含请求凭据或测试数据，仅在服务端目录以私有权限保存，不经公共进度流发送原始日志。
+现场不保持浏览器进程存活，在本节点只保留到任务被释放或过期（`GENERATOR_RETENTION_MS`，默认 24 小时）；进程重启即清空，需要留存的现场应由下发方及时下载。现场文件可能含请求里的测试数据或 storageState，不经公共进度流发送原始日志。

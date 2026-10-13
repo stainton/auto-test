@@ -1,12 +1,14 @@
 import { seedSpec } from '../shared/seed.mjs';
 import { planAuthSession, stageAuthSession, readSavedAuthSession, clearAuthSession, authSessionNote } from '../shared/auth-session.mjs';
 import { describePlaywrightAction } from '../shared/playwright-progress.mjs';
-import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, rm, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { runClaude } from '../runtime/claude.mjs';
+import { writeTaskSettings } from '../runtime/settings.mjs';
+import { restoreCheckpoint } from './checkpoint.mjs';
 import { outputSchema, formatResult } from './contract.mjs';
 import { SYSTEM_PROMPT, buildPrompt, buildContinuationPrompt } from './prompt.mjs';
 
@@ -19,16 +21,31 @@ const STAGES = new Set(['reading_requirements', 'preparing', 'exploring', 'desig
 // Exploration is the expensive part of a run, so an interrupted one (usually its time limit) is continuable
 // instead of only repeatable: the workspace holds the Claude session (CLAUDE_CONFIG_DIR below), checkpoint()
 // hands its location to the job store, and a later request that carries continueFrom arrives here as
-// input.resume and reopens the same conversation. Nothing but that session lives in the workspace, and it is
-// removed as soon as the run ends in a way nobody can continue (success, cancellation).
+// input.resume and reopens the same conversation — either on this node ({ sessionId, workspace }, the session
+// is still here) or on any node ({ checkpoint: sha256 }, the session archive the dispatcher downloaded from the
+// node that ran it and pushed to this one, see checkpoint.mjs). Nothing but that session lives in the workspace,
+// and it is removed as soon as the run ends in a way nobody can continue (success, cancellation).
 export function createPlannerWorker({ runtime = runClaude, command, model, settingsPath, playwrightPackage, assetCache, authSessions,
   temporaryRoot = tmpdir() } = {}) {
-  return async function planner(input, { signal, emit, checkpoint = () => {} }) {
+  return async function planner(input, { signal, emit, checkpoint = () => {}, settings }) {
     signal.throwIfAborted();
     const resumed = Boolean(input.resume);
+    // The service clears its workspace root on start, so the root itself may not exist yet.
+    if (!input.resume?.workspace) await mkdir(temporaryRoot, { recursive: true, mode: 0o700 });
     const workspace = input.resume?.workspace ?? await mkdtemp(path.join(temporaryRoot, 'planner-'));
-    const sessionId = input.resume?.sessionId ?? randomUUID();
+    let sessionId = input.resume?.sessionId ?? randomUUID();
+    if (input.resume?.checkpoint) {
+      try {
+        if (!assetCache) throw new Error('This planner has no asset cache to receive a checkpoint');
+        let archive;
+        try { archive = await readFile(assetCache.path(input.resume.checkpoint)); }
+        catch { throw new Error('The checkpoint is no longer cached on this node; push it again and resubmit'); }
+        ({ sessionId } = await restoreCheckpoint(archive, workspace));
+      } catch (error) { await rm(workspace, { recursive: true, force: true }); throw error; }
+    }
     checkpoint({ sessionId, workspace });
+    // The configuration this task was submitted with, kept beside its session (never inside a checkpoint).
+    const taskSettingsPath = settings ? await writeTaskSettings(workspace, settings) : settingsPath;
     let keepWorkspace = false, authFile, authSession, plan;
     try {
       emit({ stage: 'preparing', message: resumed ? 'Reopening the interrupted session in a new browser' : 'Preparing an isolated browser session' });
@@ -66,7 +83,7 @@ export function createPlannerWorker({ runtime = runClaude, command, model, setti
         systemPrompt: SYSTEM_PROMPT,
         schema: outputSchema(input), mcpConfig, allowedTools: ['mcp__playwright-test__*'],
         disallowedTools: EXCLUDED_TOOLS.map(t => `mcp__playwright-test__${t}`),
-        signal, command, model, settingsPath,
+        signal, command, model, settingsPath: taskSettingsPath,
         // The conversation is persisted inside the workspace so a continuation can resume it and nothing
         // outlives the directory this worker deletes.
         sessionId, resume: resumed, env: { CLAUDE_CONFIG_DIR: path.join(workspace, 'claude-config') },

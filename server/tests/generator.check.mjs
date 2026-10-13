@@ -175,15 +175,15 @@ test('the OpenAPI document describes this service and only its own routes', () =
   assert.deepEqual(spec.security, []);
   assert.equal(spec.components.securitySchemes, undefined);
   assert.deepEqual(Object.keys(spec.paths).filter(p => p.startsWith('/v1')),
-    ['/v1/generator/jobs', '/v1/generator/jobs/{jobId}', '/v1/generator/jobs/{jobId}/result', '/v1/generator/jobs/{jobId}/events']);
+    ['/v1/generator/jobs', '/v1/generator/jobs/{jobId}', '/v1/generator/jobs/{jobId}/result', '/v1/generator/jobs/{jobId}/events',
+      '/v1/generator/jobs/{jobId}/release', '/v1/generator/jobs/{jobId}/diagnostics', '/v1/generator/capacity']);
   assert.equal(spec.components.schemas.Job.properties.kind.const, 'generator');
   assert.equal(JSON.stringify(spec).includes('planner'), false);
   assert.deepEqual(Object.keys(SCRIPT_OUTPUT_SCHEMA.properties).sort(), ['code', 'deviations', 'explorationNotes', 'missingInputs', 'status', 'summary']);
 });
 
 test('the shared HTTP layer serves this service under its own base path', async t => {
-  const dataDir = await mkdtemp(path.join(tmpdir(), 'generator-http-test-'));
-  const jobs = new Jobs({ dataDir, kind: 'generator', label: 'Generator',
+  const jobs = new Jobs({ kind: 'generator', label: 'Generator',
     completion: result => ({ message: 'done', scriptsGenerated: result.generated }),
     worker: async () => formatResult([formatScript(output, input.cases[0])], { explorationNotes: '' }) });
   const server = createHttpServer({ jobs, validateInput, basePath: '/v1/generator',
@@ -192,7 +192,6 @@ test('the shared HTTP layer serves this service under its own base path', async 
   t.after(async () => {
     await jobs.close(); server.closeStreams(); server.closeAllConnections();
     await new Promise(resolve => server.close(resolve));
-    await rm(dataDir, { recursive: true, force: true });
   });
   const url = p => `http://127.0.0.1:${server.address().port}${p}`;
   assert.equal((await fetch(url('/v1/planner/jobs'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).status, 404);

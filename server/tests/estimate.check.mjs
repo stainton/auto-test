@@ -1,8 +1,5 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Jobs } from '../shared/jobs.mjs';
 import { createHttpServer } from '../shared/http.mjs';
@@ -27,15 +24,13 @@ test('prompt carries the manual-testing constraints', () => {
 });
 
 async function setup(t, estimate) {
-  const dataDir = await mkdtemp(path.join(tmpdir(), 'planner-estimate-test-'));
-  const jobs = new Jobs({ dataDir, worker: async () => { throw new Error('unused'); } });
+  const jobs = new Jobs({ worker: async () => { throw new Error('unused'); } });
   const server = createHttpServer({ jobs, validateInput, validateEstimateInput, estimate,
     openapiPath: fileURLToPath(new URL('../planner/openapi.json', import.meta.url)) });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(async () => {
     await jobs.close(); server.closeStreams(); server.closeAllConnections();
     await new Promise(resolve => server.close(resolve));
-    await rm(dataDir, { recursive: true, force: true });
   });
   return payload => fetch(`http://127.0.0.1:${server.address().port}/v1/planner/estimate`,
     { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
@@ -61,14 +56,12 @@ test('a failing runtime surfaces as 502 ESTIMATE_FAILED; route is 404 without an
   assert.equal(res.status, 502);
   assert.equal((await res.json()).error.code, 'ESTIMATE_FAILED');
 
-  const dataDir = await mkdtemp(path.join(tmpdir(), 'planner-estimate-test-'));
-  const jobs = new Jobs({ dataDir, worker: async () => { throw new Error('unused'); } });
+  const jobs = new Jobs({ worker: async () => { throw new Error('unused'); } });
   const server = createHttpServer({ jobs, validateInput, openapiPath: fileURLToPath(new URL('../planner/openapi.json', import.meta.url)) });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(async () => {
     await jobs.close(); server.closeStreams(); server.closeAllConnections();
     await new Promise(resolve => server.close(resolve));
-    await rm(dataDir, { recursive: true, force: true });
   });
   const missing = await fetch(`http://127.0.0.1:${server.address().port}/v1/planner/estimate`,
     { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(estimateInput) });

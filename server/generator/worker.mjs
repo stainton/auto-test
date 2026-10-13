@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { runClaude } from '../runtime/claude.mjs';
+import { writeTaskSettings } from '../runtime/settings.mjs';
 import { SCRIPT_OUTPUT_SCHEMA, formatScript, formatResult } from './contract.mjs';
 import { SYSTEM_PROMPT, buildPrompt } from './prompt.mjs';
 
@@ -22,12 +23,14 @@ const STAGES = new Set(['reading_cases', 'preparing', 'exploring', 'generating',
 export function createGeneratorWorker({ runtime = runClaude, command, model, settingsPath, playwrightPackage,
   temporaryRoot = tmpdir(), caseTimeoutMs = 3600000, assetCache, authSessions,
   workflow = { kind: 'generator', systemPrompt: SYSTEM_PROMPT, buildPrompt } } = {}) {
-  return async function generator(input, { signal, emit, retain = () => {} }) {
+  return async function generator(input, { signal, emit, retain = () => {}, settings }) {
     signal.throwIfAborted();
     await mkdir(temporaryRoot, { recursive: true, mode: 0o700 });
     const workspace = await mkdtemp(path.join(temporaryRoot, `${workflow.kind}-`));
     let completed = false;
     retain({ workspace });
+    // The configuration this task was submitted with (diagnostics never include it, see shared/archive.mjs).
+    const taskSettingsPath = settings ? await writeTaskSettings(workspace, settings) : settingsPath;
     const progress = emit;
     emit = event => { appendFileSync(path.join(workspace, 'progress.jsonl'), JSON.stringify({ ...event, time: new Date().toISOString() }) + '\n', { mode: 0o600 }); progress(event); };
     try {
@@ -78,7 +81,7 @@ export function createGeneratorWorker({ runtime = runClaude, command, model, set
         let output;
         try {
           output = await runCase({ runtime, input: { ...promptInput, ...(authSession ? { authSession } : {}), context: { ...promptInput.context, explorationNotes: notes } },
-            testCase, workspace, mcpConfig, signal, workflow, command, model, settingsPath, caseTimeoutMs:input.caseTimeoutMs??caseTimeoutMs, emit, position });
+            testCase, workspace, mcpConfig, signal, workflow, command, model, settingsPath: taskSettingsPath, caseTimeoutMs:input.caseTimeoutMs??caseTimeoutMs, emit, position });
         } finally {
           // Keep what the model saved for the next task, then remove it: the retained failure workspace must not hold a session.
           if (authPlan.capture) { const saved = await readSavedAuthSession(workspace); if (saved) authSessions.put(authPlan.key, saved); }
@@ -112,7 +115,8 @@ export function createGeneratorWorker({ runtime = runClaude, command, model, set
       throw error;
     } finally {
       if (completed && !signal.aborted) { await rm(workspace, { recursive: true, force: true }); retain(null); }
-      else emit({ stage: 'finalizing', message: `${workflow.kind === 'healer' ? '修复' : '生成'}现场已保留：${workspace}（原脚本、完整错误、会话日志和调试产物）` });
+      // The workspace stays until the dispatcher downloads it (GET .../jobs/<id>/diagnostics) and releases the job.
+      else emit({ stage: 'finalizing', message: `${workflow.kind === 'healer' ? '修复' : '生成'}现场已保留，可下载诊断包（原脚本、完整错误、会话日志和调试产物）` });
     }
   };
 }

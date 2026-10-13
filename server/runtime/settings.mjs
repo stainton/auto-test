@@ -1,5 +1,6 @@
 import { readFile, writeFile, rename, mkdir, access } from 'node:fs/promises';
 import path from 'node:path';
+import { TASK_SETTINGS_FILE } from '../shared/archive.mjs';
 
 export function parseClaudeSettings(text) {
   let settings;
@@ -75,13 +76,27 @@ export function createSettingsApplier(file) {
   };
 }
 
+// A job keeps the configuration it was submitted with: the worker writes it into the task's own workspace and
+// passes that file as settingsPath, so applying a newer configuration for a later task (which rewrites the
+// service-wide file above) never changes a run already in progress.
+export async function writeTaskSettings(directory, settings) {
+  const file = path.join(directory, TASK_SETTINGS_FILE);
+  await mkdir(directory, { recursive: true, mode: 0o700 });
+  await writeFile(file, settings.content, { mode: 0o600 });
+  return file;
+}
+
 // Resolve again for every CLI invocation, including estimate/simplify and resumed jobs, so a
 // configuration written between two invocations takes effect without a restart. In particular, never
-// retain a startup-time fallback model over a newly applied model.
+// retain a startup-time fallback model over a newly applied model. A settingsPath the caller passes (a
+// task's own file, see writeTaskSettings) is read instead of the service-wide one.
 export function createReloadingRuntime(runtime, settingsOptions) {
   return async options => {
     options.signal?.throwIfAborted();
-    const current = await resolveClaudeOptions(settingsOptions);
+    const prefix = settingsOptions.prefix ?? 'PLANNER';
+    const current = await resolveClaudeOptions(options.settingsPath
+      ? { ...settingsOptions, env: { ...(settingsOptions.env ?? process.env), [`${prefix}_CLAUDE_SETTINGS`]: options.settingsPath } }
+      : settingsOptions);
     options.signal?.throwIfAborted();
     return runtime({ ...options, ...current });
   };

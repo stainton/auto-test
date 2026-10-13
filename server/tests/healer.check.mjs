@@ -57,7 +57,7 @@ test('failed independent verification retries in same session then preserves dia
 });
 test('healer exposes independent jobs/result/SSE lifecycle under its own HTTP prefix',async t=>{
   const {worker,temporaryRoot}=await setup(t,async options=>{reportRun(options);return output});
-  const jobs=new Jobs({kind:'healer',dataDir:path.join(temporaryRoot,'jobs'),worker,completion:r=>({message:'healed',scriptsGenerated:r.generated})});
+  const jobs=new Jobs({kind:'healer',worker,completion:r=>({message:'healed',scriptsGenerated:r.generated})});
   const server=createHttpServer({jobs,validateInput,basePath:'/v1/healer',openapiPath:fileURLToPath(new URL('../healer/openapi.json',import.meta.url))});
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
   t.after(async()=>{await jobs.close();server.closeStreams();server.closeAllConnections();await new Promise(resolve=>server.close(resolve))});

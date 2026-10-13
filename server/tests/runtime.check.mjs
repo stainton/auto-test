@@ -99,3 +99,23 @@ process.stdin.on('end', () => {
   await apply({ revision: '2', content: JSON.stringify(config) });
   assert.equal((await runtime(options)).settings.model, 'another-model');
 });
+
+test('a running task keeps the configuration it was submitted with when a later task applies another', async t => {
+  const { createReloadingRuntime, createSettingsApplier, writeTaskSettings } = await import('../runtime/settings.mjs');
+  const options = await setup(t, `
+const fs = require('node:fs');
+process.stdin.on('data', () => {});
+process.stdin.on('end', () => {
+ const args = process.argv.slice(2), file = args[args.indexOf('--settings') + 1];
+ process.stdout.write(JSON.stringify({type:'result', subtype:'success', structured_output:{file,settings:JSON.parse(fs.readFileSync(file))}})+'\\n');
+});`);
+  const file = path.join(options.cwd, 'config', 'settings.json');
+  const apply = createSettingsApplier(file), runtime = createReloadingRuntime(runClaude, { env: {}, defaultSettingsPath: file });
+  const first = { revision: '1', content: JSON.stringify({ model: 'first-model' }) };
+  await apply(first);
+  const taskFile = await writeTaskSettings(path.join(options.cwd, 'task'), first);
+  await apply({ revision: '2', content: JSON.stringify({ model: 'second-model' }) }); // a later task's request
+  const task = await runtime({ ...options, settingsPath: taskFile });
+  assert.equal(task.file, taskFile); assert.equal(task.settings.model, 'first-model');
+  assert.equal((await runtime(options)).settings.model, 'second-model'); // untied calls follow the service file
+});

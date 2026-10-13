@@ -121,3 +121,13 @@ test('attached assets are copied into the workspace and the model is given their
   assert.equal(seen.name, '头像.png');
   await assert.rejects(createPlannerWorker({ runtime: async () => {} })({ ...input, context: { assets: [asset] } }, { signal: new AbortController().signal, emit() {} }), /no asset cache/);
 });
+
+test('creates its workspace root when the service has just cleared it', async t => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'planner-worker-root-'));
+  t.after(() => rm(parent, { recursive: true, force: true }));
+  const temporaryRoot = path.join(parent, 'workspaces');
+  const worker = createPlannerWorker({ temporaryRoot, playwrightPackage: '/runtime/node_modules/@playwright/test/package.json',
+    runtime: async options => { browserSetup(options); return output; } });
+  assert.equal((await worker(input, { signal: new AbortController().signal, emit() {} })).cases.length, 1);
+  assert.deepEqual(await readdir(temporaryRoot), []);
+});

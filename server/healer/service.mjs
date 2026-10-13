@@ -20,18 +20,21 @@ export async function seedHealerSettings(healerFile, generatorFile) {
   await writeFile(healerFile, generatorFile && existsSync(generatorFile) ? readFileSync(generatorFile) : '{}', { mode: 0o600 });
 }
 
-export function createHealerService({ command, runtime, applySettings, playwrightPackage, assetCache, jobsDir,
+export function createHealerService({ command, runtime, applySettings, playwrightPackage, assetCache,
   workspaceRoot, authSessions }) {
+  // Jobs live in memory, so a workspace left by an earlier process belongs to no job any more.
+  rmSync(workspaceRoot, { recursive: true, force: true });
   const worker = withExperience(createHealerWorker({ command, runtime, playwrightPackage, assetCache, authSessions, temporaryRoot: workspaceRoot,
     caseTimeoutMs: positive('HEALER_CASE_TIMEOUT_MS', 3600000) }));
   const jobs = new Jobs({
     kind: 'healer', label: 'Healer',
     started: { stage: 'reading_cases', message: 'Reading the existing script and failure details' },
     completion: result => ({ message: `Repaired ${result.generated} scripts`, scriptsGenerated: result.generated, scriptsBlocked: result.blocked }),
-    worker, dataDir: jobsDir,
+    worker,
     discard: state => { if (state?.workspace) rmSync(state.workspace, { recursive: true, force: true }); },
     concurrency: positive('HEALER_CONCURRENCY', 1), timeoutMs: positive('HEALER_TIMEOUT_MS', 3600000),
-    maxJobs: positive('HEALER_MAX_JOBS', 100), retentionMs: positive('HEALER_RETENTION_MS', 86400000)
+    maxJobs: positive('HEALER_MAX_JOBS', 100), retentionMs: positive('HEALER_RETENTION_MS', 86400000),
+    maxRetained: positive('HEALER_MAX_RETAINED', 200)
   });
   const validate = async payload => { const input = validateInput(payload); await requireCachedAssets(assetCache, input); return input; };
   const handler = createHttpHandler({ jobs, validateInput: validate, applySettings, assetCache, basePath: '/v1/healer',

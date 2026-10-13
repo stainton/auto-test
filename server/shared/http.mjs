@@ -1,6 +1,8 @@
 import http from 'node:http';
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { ServiceError, TERMINAL } from './jobs.mjs';
+import { packDiagnostics } from './archive.mjs';
 import { takeAgentSettings } from './contract.mjs';
 import { SHA256_RE, MAX_ASSET_BYTES } from './assets.mjs';
 
@@ -20,9 +22,22 @@ async function body(req, maxBytes) {
   try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); }
   catch { throw new ServiceError(400, 'INVALID_JSON', 'Request body must contain valid JSON'); }
 }
+// A tar.gz the dispatcher stores as-is; its hash lets it verify the transfer and later push it back by hash.
+function archive(res, fileName, buffer) {
+  res.writeHead(200, { 'Content-Type': 'application/gzip', 'Content-Length': buffer.length, 'Cache-Control': 'no-store',
+    'Content-Disposition': `attachment; filename="${fileName}"`, 'X-Content-SHA256': createHash('sha256').update(buffer).digest('hex') });
+  res.end(buffer);
+}
+// A failed generator/healer run keeps its workspace (retain) for debugging; this is what leaves the node.
+const defaultDiagnostics = async job => {
+  if (!job.artifacts?.workspace) throw new ServiceError(404, 'DIAGNOSTICS_UNAVAILABLE', 'This task kept no diagnostics');
+  return packDiagnostics(job.artifacts.workspace);
+};
 // basePath is the workflow's route prefix (/v1/planner, /v1/generator); everything below is shared.
 export function createHttpHandler({ jobs, validateInput, openapiPath, maxBodyBytes = 2 * 1024 * 1024,
   basePath = '/v1/planner', applySettings, assetCache,
+  // exportCheckpoint(job) packs an interrupted job's continuation (the planner's session) for the dispatcher.
+  exportCheckpoint, exportDiagnostics = defaultDiagnostics,
   validateSimplifyInput, simplify, simplifyTimeoutMs = 60000,
   validateEstimateInput, estimate, estimateTimeoutMs = 120000 }) {
   const spec = readFileSync(openapiPath, 'utf8');
@@ -43,7 +58,7 @@ export function createHttpHandler({ jobs, validateInput, openapiPath, maxBodyByt
   };
   const streams = new Set();
   const jobsPath = `${basePath}/jobs`;
-  const jobRoute = new RegExp(`^${jobsPath.replace(/[/]/g, '\\/')}\\/([0-9a-f-]{36})(?:\\/(result|events))?$`);
+  const jobRoute = new RegExp(`^${jobsPath.replace(/[/]/g, '\\/')}\\/([0-9a-f-]{36})(?:\\/(result|events|checkpoint|diagnostics|release))?$`);
   // Synchronous (non-job) model calls: validate, run with a hard timeout, map runtime failures to 502.
   const syncRoutes = new Map([
     [`${basePath}/simplify`, { run: simplify, validate: validateSimplifyInput, timeoutMs: simplifyTimeoutMs, code: 'SIMPLIFY_FAILED', label: 'Simplify' }],
@@ -53,12 +68,14 @@ export function createHttpHandler({ jobs, validateInput, openapiPath, maxBodyByt
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, POST, PUT, DELETE, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Last-Event-ID');
-    res.setHeader('Access-Control-Expose-Headers', 'Location');
+    res.setHeader('Access-Control-Expose-Headers', 'Location, X-Content-SHA256');
     if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
     try {
       const url = new URL(req.url, 'http://planner.local');
       if (req.method === 'GET' && url.pathname === '/healthz') return json(res, 200, { status: 'ok' });
+      // Liveness stays green while a draining node finishes its work; only readiness turns it away.
       if (req.method === 'GET' && url.pathname === '/readyz') return json(res, jobs.closing ? 503 : 200, { status: jobs.closing ? 'unavailable' : 'ready' });
+      if (req.method === 'GET' && url.pathname === `${basePath}/capacity`) return json(res, 200, jobs.capacity());
       if (req.method === 'GET' && url.pathname === '/openapi.json') {
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' }); return res.end(spec);
       }
@@ -80,15 +97,19 @@ export function createHttpHandler({ jobs, validateInput, openapiPath, maxBodyByt
       if (req.method === 'POST' && url.pathname === jobsPath) {
         const payload = await body(req, maxBodyBytes);
         const settings = settingsFor(payload);
-        let input;
-        // validateInput may also resolve references the request makes to earlier jobs (continueFrom),
-        // whose own status codes must survive instead of being flattened into a 400.
-        try { input = await validateInput(payload); }
-        catch (error) { throw error instanceof ServiceError ? error : new ServiceError(400, 'INVALID_REQUEST', error.message); }
-        await apply(settings);
-        const job = jobs.submit(input);
-        res.setHeader('Location', `${jobsPath}/${job.id}`);
-        return json(res, 202, job);
+        // ?queue=false: run now on an idle slot or be refused with 429, so a dispatcher can try another node.
+        const reservation = jobs.reserve({ queue: url.searchParams.get('queue') !== 'false' });
+        try {
+          let input;
+          // validateInput may also resolve references the request makes to earlier jobs (continueFrom),
+          // whose own status codes must survive instead of being flattened into a 400.
+          try { input = await validateInput(payload); }
+          catch (error) { throw error instanceof ServiceError ? error : new ServiceError(400, 'INVALID_REQUEST', error.message); }
+          await apply(settings);
+          const job = jobs.submit(input, { reservation, settings });
+          res.setHeader('Location', `${jobsPath}/${job.id}`);
+          return json(res, 202, job);
+        } finally { reservation(); }
       }
       const sync = req.method === 'POST' && syncRoutes.get(url.pathname);
       if (sync && sync.run && sync.validate) {
@@ -111,11 +132,24 @@ export function createHttpHandler({ jobs, validateInput, openapiPath, maxBodyByt
       const [, id, resource] = match;
       const job = jobs.get(id);
       if (req.method === 'DELETE' && !resource) return json(res, 202, jobs.cancel(id));
+      if (resource === 'release') {
+        if (req.method !== 'POST') throw new ServiceError(405, 'METHOD_NOT_ALLOWED', 'Method not allowed');
+        return json(res, 200, jobs.release(id));
+      }
       if (req.method !== 'GET') throw new ServiceError(405, 'METHOD_NOT_ALLOWED', 'Method not allowed');
       if (!resource) return json(res, 200, jobs.summary(job));
       if (resource === 'result') {
         if (job.status !== 'succeeded') throw new ServiceError(409, 'RESULT_UNAVAILABLE', `Result unavailable while job is ${job.status}`);
         return json(res, 200, job.result);
+      }
+      if (resource === 'checkpoint') {
+        if (!exportCheckpoint || !job.continuation || job.status !== 'failed')
+          throw new ServiceError(409, 'NOT_CONTINUABLE', `This ${jobs.kind} task has no session to continue`);
+        return archive(res, `${id}-checkpoint.tar.gz`, await exportCheckpoint(job.continuation));
+      }
+      if (resource === 'diagnostics') {
+        if (!TERMINAL.has(job.status)) throw new ServiceError(409, 'JOB_ACTIVE', `Diagnostics are available once the task has finished`);
+        return archive(res, `${id}-diagnostics.tar.gz`, await exportDiagnostics(job));
       }
       const rawAfter = req.headers['last-event-id'] ?? url.searchParams.get('after') ?? '0';
       if (!/^\d+$/.test(rawAfter) || !Number.isSafeInteger(Number(rawAfter)) || Number(rawAfter) > job.lastEventId)
@@ -163,13 +197,17 @@ export function createHttpServer(options) {
 }
 
 // Several workflows in one process (generator + healer, or the combined automation service): each keeps its
-// own routes under its prefix and the last service takes everything else. Health covers all of them, and
-// shutdown drains every job store before the connections close.
+// own routes under its prefix and the last service takes everything else. Readiness covers all of them.
 export function createRoutedServer(services) {
   const fallback = services[services.length - 1];
   const server = http.createServer((req, res) => {
     const pathname = new URL(req.url, 'http://service.local').pathname;
-    if (req.method === 'GET' && (pathname === '/healthz' || pathname === '/readyz')) {
+    // Alive for as long as the process runs, draining included, so a liveness probe never kills work in progress.
+    if (req.method === 'GET' && pathname === '/healthz') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ status: 'ok' }));
+    }
+    if (req.method === 'GET' && pathname === '/readyz') {
       const ready = services.every(service => !service.jobs.closing);
       res.writeHead(ready ? 200 : 503, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify({ status: ready ? 'ready' : 'unavailable' }));
@@ -178,11 +216,38 @@ export function createRoutedServer(services) {
     return service.handler(req, res);
   });
   server.requestTimeout = Math.max(...services.map(service => service.handler.requestTimeout));
-  server.shutdown = async () => {
+  const close = () => {
     server.close();
-    await Promise.all(services.map(service => service.jobs.close()));
     for (const service of services) service.handler.closeStreams();
     server.closeAllConnections();
   };
+  // Graceful stop, the same for a process and a pod: stop taking work, let running tasks finish (drainTimeoutMs),
+  // keep serving progress/results/checkpoints so the dispatcher can collect them (holdMs), then close.
+  server.drain = async ({ drainTimeoutMs, holdMs }) => {
+    await Promise.all(services.map(service => service.jobs.drain({ timeoutMs: drainTimeoutMs })));
+    await Promise.all(services.map(service => service.jobs.awaitRelease(holdMs)));
+    close();
+  };
+  // Immediate stop: cancel everything now.
+  server.shutdown = async () => {
+    await Promise.all(services.map(service => service.jobs.close()));
+    close();
+  };
   return server;
+}
+
+// SIGTERM/SIGINT drain the node; a second signal (Ctrl-C again, or an operator who will not wait) stops it at once.
+// drainTimeoutMs should not exceed the platform's own patience (Kubernetes terminationGracePeriodSeconds).
+export function stopOnSignals(server, { drainTimeoutMs, holdMs, label }) {
+  let draining = false;
+  const stop = signal => {
+    if (draining) {
+      console.log(`${label}: ${signal} again, cancelling running tasks`);
+      return server.shutdown();
+    }
+    draining = true;
+    console.log(`${label}: ${signal}, finishing running tasks (up to ${Math.round(drainTimeoutMs / 1000)}s) before exiting; signal again to cancel them`);
+    return server.drain({ drainTimeoutMs, holdMs });
+  };
+  process.on('SIGTERM', stop); process.on('SIGINT', stop);
 }

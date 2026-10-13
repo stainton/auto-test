@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { runClaude } from '../runtime/claude.mjs';
 import { checkPlaywrightRuntime } from '../runtime/preflight.mjs';
 import { resolveClaudeOptions, createReloadingRuntime, createSettingsApplier, settingsPathFor } from '../runtime/settings.mjs';
-import { createRoutedServer } from '../shared/http.mjs';
+import { createRoutedServer, stopOnSignals } from '../shared/http.mjs';
 import { AssetCache } from '../shared/assets.mjs';
 import { positive } from '../shared/env.mjs';
 import { authSessionsFromEnv } from '../shared/auth-session.mjs';
@@ -24,19 +24,18 @@ export async function main() {
   const runtime = createReloadingRuntime(runClaude, settingsOptions);
   const command = process.env.PLANNER_CLAUDE_COMMAND ?? 'claude';
   const playwrightPackage = await checkPlaywrightRuntime(command);
-  // Job files sit directly in the data dir (the layout earlier planner images used, so an existing volume
-  // keeps its tasks).
+  // Scratch space only: jobs live in memory and their records belong to the dispatcher. Task workspaces (each
+  // holding a session that may be continued) sit here and are cleared on start.
   const dataDir = process.env.PLANNER_DATA_DIR ?? path.join(tmpdir(), 'auto-test-planner-jobs');
   // Files CaseHub pushes for tasks (see shared/assets.mjs); kept apart from job data so pruning one never touches the other.
   const assetCache = new AssetCache({ dir: process.env.PLANNER_ASSET_DIR ?? path.join(tmpdir(), 'auto-test-planner-assets'),
     maxBytes: positive('PLANNER_ASSET_CACHE_MB', 2048) * 1024 * 1024 });
-  const planner = createPlannerService({ command, runtime, applySettings, playwrightPackage, assetCache, jobsDir: dataDir,
+  const planner = createPlannerService({ command, runtime, applySettings, playwrightPackage, assetCache, workspaceRoot: path.join(dataDir, 'workspaces'),
     concurrency: positive('PLANNER_CONCURRENCY', 1), authSessions: authSessionsFromEnv() });
   const server = createRoutedServer([planner]);
   server.listen(positive('PLANNER_PORT', 4501), host, () => console.log(`Planner HTTP service listening on ${host}:${server.address().port}`));
-  let stopping = false;
-  const shutdown = () => { if (!stopping) { stopping = true; return server.shutdown(); } };
-  process.on('SIGTERM', shutdown); process.on('SIGINT', shutdown);
+  stopOnSignals(server, { label: 'Planner', drainTimeoutMs: positive('PLANNER_DRAIN_TIMEOUT_MS', positive('PLANNER_TIMEOUT_MS', 900000)),
+    holdMs: positive('PLANNER_DRAIN_HOLD_MS', 60000) });
   return { server, jobs: planner.jobs };
 }
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

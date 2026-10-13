@@ -5,6 +5,10 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createPlannerWorker } from '../planner/worker.mjs';
+import { exportCheckpoint } from '../planner/checkpoint.mjs';
+import { AssetCache } from '../shared/assets.mjs';
+import { createHash } from 'node:crypto';
+import { Readable } from 'node:stream';
 import { resolveClaudeOptions } from '../runtime/settings.mjs';
 import { installSettings } from '../../build/planner/install-settings.mjs';
 import { output } from './fixtures.mjs';
@@ -13,6 +17,8 @@ const runtimeRequire = createRequire(path.join(process.env.PLANNER_SMOKE_RUNTIME
 // Continuing an interrupted task is the one path that depends on the real CLI keeping a session on disk:
 // the first run is killed mid-exploration (as its time limit would), the second reopens that session with
 // --resume and must see the first run's turns. Same local model stub as runtime-smoke.mjs — no paid call.
+// It runs twice: continuing on the same node (the session is still in its workspace), then on another node from
+// an exported checkpoint restored into a workspace at a different path, which is what a dispatcher does.
 let phase = 'interrupt', turns = 0, resumedHistory = 0;
 const provider = http.createServer(async (req, res) => {
  try {
@@ -56,20 +62,44 @@ await installSettings(temporaryRoot, settingsPath);
 for (const key of ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_BASE_URL', 'ANTHROPIC_MODEL']) delete process.env[key];
 process.env.CLAUDE_CONFIG_DIR = path.join(temporaryRoot, 'claude-config'); // the worker overrides this per run
 const input = { requirements: [{ id: 'REQ-001', title: 'Login', content: 'Design a login test' }], target: { baseUrl: `http://127.0.0.1:${target.address().port}` } };
-const worker = createPlannerWorker({ command: process.env.PLANNER_CLAUDE_COMMAND ?? 'claude',
+const options = { command: process.env.PLANNER_CLAUDE_COMMAND ?? 'claude',
   ...await resolveClaudeOptions({ env: { PLANNER_CLAUDE_SETTINGS: settingsPath } }),
-  playwrightPackage: runtimeRequire.resolve('@playwright/test/package.json'), temporaryRoot });
-try {
+  playwrightPackage: runtimeRequire.resolve('@playwright/test/package.json') };
+const worker = createPlannerWorker({ ...options, temporaryRoot });
+const log = e => console.log('Progress', JSON.stringify(e));
+// Interrupts a fresh run mid-exploration (as its time limit would) and returns the session it kept.
+async function interrupt() {
+  phase = 'interrupt'; turns = 0; resumedHistory = 0;
   const interrupted = new AbortController();
   const timer = setTimeout(() => interrupted.abort(Object.assign(new Error('Planner task exceeded its time limit'), { code: 'JOB_TIMEOUT' })), 60000);
   let checkpoint;
-  await worker(input, { signal: interrupted.signal, emit: e => console.log('Progress', JSON.stringify(e)), checkpoint: state => { checkpoint = state ?? checkpoint; } })
+  await worker(input, { signal: interrupted.signal, emit: log, checkpoint: state => { checkpoint = state ?? checkpoint; } })
     .then(() => { throw new Error('The interrupted run was expected to fail'); }, error => console.log('Interrupted as expected:', error.message));
   clearTimeout(timer);
   console.log('Checkpoint kept:', checkpoint.sessionId, await readdir(checkpoint.workspace));
   phase = 'continue';
-  const result = await worker({ ...input, resume: checkpoint }, { signal: new AbortController().signal, emit: e => console.log('Progress', JSON.stringify(e)), checkpoint() {} });
-  if (resumedHistory < 3) throw new Error(`The continued run did not reopen the interrupted conversation (${resumedHistory} messages)`);
-  console.log('Continue smoke succeeded:', result.cases.length, 'case(s), resumed with', resumedHistory, 'messages, workspaces left:', await readdir(temporaryRoot).then(x => x.filter(n => n.startsWith('planner-'))));
+  return checkpoint;
+}
+const reopened = label => {
+  if (resumedHistory < 3) throw new Error(`${label}: the continued run did not reopen the interrupted conversation (${resumedHistory} messages)`);
+};
+try {
+  const local = await interrupt();
+  const result = await worker({ ...input, resume: local }, { signal: new AbortController().signal, emit: log, checkpoint() {} });
+  reopened('Same node');
+  console.log('Same-node continue succeeded:', result.cases.length, 'case(s), resumed with', resumedHistory, 'messages, workspaces left:', await readdir(temporaryRoot).then(x => x.filter(n => n.startsWith('planner-'))));
+
+  // Another node: the archive is all that crosses over; the original workspace is gone before the continuation runs.
+  const remote = await interrupt();
+  const archive = await exportCheckpoint(remote);
+  await rm(remote.workspace, { recursive: true, force: true });
+  const sha256 = createHash('sha256').update(archive).digest('hex');
+  const nodeB = path.join(temporaryRoot, 'node-b', 'a', 'deeper', 'workspace-root');
+  const assetCache = new AssetCache({ dir: path.join(temporaryRoot, 'node-b', 'assets') });
+  await assetCache.put(sha256, Readable.from([archive]), archive.length);
+  const elsewhere = createPlannerWorker({ ...options, assetCache, temporaryRoot: nodeB });
+  const moved = await elsewhere({ ...input, resume: { checkpoint: sha256 } }, { signal: new AbortController().signal, emit: log, checkpoint() {} });
+  reopened('Other node');
+  console.log('Checkpoint continue succeeded:', moved.cases.length, 'case(s), archive', archive.length, 'bytes, resumed with', resumedHistory, 'messages, workspaces left:', await readdir(nodeB));
 } catch (error) { console.error(error); process.exitCode = 1; }
 finally { provider.closeAllConnections(); target.closeAllConnections(); provider.close(); target.close(); await rm(temporaryRoot, { recursive: true, force: true }); }

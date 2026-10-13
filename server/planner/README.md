@@ -28,6 +28,9 @@ node server/planner/main.mjs
 | GET | `/v1/planner/jobs/{jobId}/events` | SSE 进度、重连回放 |
 | GET | `/v1/planner/jobs/{jobId}/result` | 获取已成功完成的草稿 |
 | DELETE | `/v1/planner/jobs/{jobId}` | 取消任务，不删除已有结果 |
+| POST | `/v1/planner/jobs/{jobId}/release` | 下发方取走结果后释放已结束的任务（含保留的会话） |
+| GET | `/v1/planner/jobs/{jobId}/checkpoint` | 中断任务的会话包（tar.gz），供在任意节点继续 |
+| GET | `/v1/planner/capacity` | 本节点空闲槽位，供下发方挑选节点；提交时加 `?queue=false` 则无空闲槽位直接 429 |
 | POST | `/v1/planner/simplify` | 同步接口（非任务队列）：把已设计用例的前置条件/步骤/预期结果改写成非技术人员可读的精简版，不调用浏览器/工具，保留原有步骤数与含义，只去掉选择器、testid、属性值等自动化实现细节 |
 | POST | `/v1/planner/estimate` | 同步接口（非任务队列）：只根据需求文本（不调用浏览器/工具）评估"建议覆盖用例数量"，考虑约 30% 需求因鉴权等原因无法自动化、手工测试至多单人 2 天。结果供人确认/修改后作为任务的 `caseCount` 提交；`rationale` 是一句不超过 40 字的中文说明（覆盖了哪些业务范围），不是推理过程 |
 | GET | `/healthz`、`/readyz` | 无鉴权健康检查 |
@@ -93,7 +96,12 @@ curl http://localhost:4501/v1/planner/jobs/JOB_ID/result
 
 请求可带可选的 `timeoutMs`：整个设计任务的时限（毫秒，1 分钟–4 小时），由发起任务的人在界面上选择——探索耗时取决于被测系统和用例预算，固定的服务端默认值对大需求经常不够。不传时使用 `PLANNER_TIMEOUT_MS`；服务端再按 `PLANNER_MAX_TIMEOUT_MS` 封顶，单个调用方不会长期占住唯一的浏览器槽位。超时任务以 `JOB_TIMEOUT` 失败，实际生效的时限会写在任务状态的 `timeoutMs` 上。
 
-请求可带可选的 `continueFrom`：某个失败任务的 ID（状态里带 `continuable: true`，通常是 `JOB_TIMEOUT`）。此时新任务不会从零开始探索，而是用 `claude --resume` 接着那次会话继续——浏览器是新的（继续的第一件事仍是 `planner_setup_page`），但模型此前探索到的内容还在。请求其余字段仍须完整提供并按提交值生效，因此继续时可以调大 `timeoutMs` 或更正测试账号。一次中断只能被继续一次（继续本身若再失败，新任务同样可继续）；该任务未失败、已被继续或会话已清理时返回 409 `NOT_CONTINUABLE`。
+请求可带可选的 `continueFrom`，指向一次中断的设计（状态里带 `continuable: true`，通常是 `JOB_TIMEOUT` 或停机时的 `NODE_SHUTDOWN`）。此时新任务不会从零开始探索，而是用 `claude --resume` 接着那次会话继续——浏览器是新的（继续的第一件事仍是 `planner_setup_page`），但模型此前探索到的内容还在。两种写法：
+
+- `{ "checkpoint": "<sha256>" }`：下发方先从原节点下载 `GET /v1/planner/jobs/{jobId}/checkpoint`（只含 Claude 会话，不含配置、凭证或登录态），再推到要继续的节点 `PUT /v1/planner/assets/<sha256>`。任意节点、原节点重启后都能继续；会话包未推到本节点时返回 409 `CHECKPOINT_NOT_CACHED`。
+- 原任务 ID：会话仍在本节点时直接继续。
+
+请求其余字段仍须完整提供并按提交值生效，因此继续时可以调大 `timeoutMs` 或更正测试账号。一次中断只能被继续一次（继续本身若再失败，新任务同样可继续）；该任务未失败、已被继续或会话已清理时返回 409 `NOT_CONTINUABLE`。
 
 `context.instructions` 是发起人填写的约束，planner 按硬性限制执行：可以限定覆盖范围、禁止某些操作（例如"不要等待后台任务运行完成"）、规定等待上限、说明登录方式。被约束挡住的验证不会绕道进行，而是作为 limitations 返回。`/v1/planner/estimate` 读取同一段文字，被排除的范围不计入建议用例数。
 
@@ -107,9 +115,11 @@ curl http://localhost:4501/v1/planner/jobs/JOB_ID/result
 
 状态为 queued → running → succeeded / failed / cancelled。阶段和工具开始/完成事件来自运行过程，不使用虚构百分比。SSE 首先发送 snapshot，然后回放游标之后的 progress；使用 `Last-Event-ID` 或 `?after=N` 重连。最多保留最近 500 条，较旧记录丢失时先发送 reset。snapshot 表示当前任务状态，回放的旧 progress 用于过程记录，不应覆盖较新的状态。每 15 秒有心跳；终态关闭连接。抽屉关闭不影响任务，重新打开按 ID 查看即可。
 
-取消后阶段先变为 cancelling，等待 Agent/MCP/浏览器进程终止再进入 cancelled。整任务默认 15 分钟超时，可由请求的 `timeoutMs` 覆盖。重启后未完成任务标记 SERVER_RESTARTED；如果它的会话还在（进程被强杀而非正常关闭），状态里会带 `continuable: true`，可以继续，否则重新提交。当前没有幂等提交或自动续跑；重复 POST 会创建新任务。
+取消后阶段先变为 cancelling，等待 Agent/MCP/浏览器进程终止再进入 cancelled。整任务默认 15 分钟超时，可由请求的 `timeoutMs` 覆盖。当前没有幂等提交或自动续跑；重复 POST 会创建新任务。
 
-任务文件保存状态、进度和结果，不保存请求正文、storageState、headers 或队列输入。浏览器配置临时写入每任务独立目录，任务退出后清理，不从仓库 docs/specs 读取。中断的任务是例外：它的工作目录会保留，里面除了浏览器配置只有 Claude 会话（`CLAUDE_CONFIG_DIR` 指向该目录），供 `continueFrom` 继续；成功、被取消或任务过期清理时一并删除，`continuable` 只对外表示"能否继续"，不暴露会话位置。调用方可按需归档结果。结果默认保留 24 小时；超期在下一次访问/提交/启动时清理，返回 404。最多保留 100 个任务，满时新请求返回 503。
+任务只存在内存里（见 [server/README.md](../README.md) 的"无状态执行节点"）：状态、进度和结果保留到下发方释放（`POST .../release`）为止，未释放的终态任务 24 小时后或超过 200 条时淘汰最旧的，之后返回 404；进程重启后所有任务都查不到，中断的会话只能靠下发方事先取走的 checkpoint 继续。未完成（排队 + 运行）的任务最多 100 个，满时新请求返回 503；已结束的任务不占这个名额。正常停机时运行中的任务先跑完（`PLANNER_DRAIN_TIMEOUT_MS`），超时的以 `NODE_SHUTDOWN` 失败并保留会话，下发方仍可取走 checkpoint。
+
+浏览器配置临时写入每任务独立目录（`PLANNER_DATA_DIR/workspaces`，启动时清空），任务退出后清理，不从仓库 docs/specs 读取。中断的任务是例外：它的工作目录会保留，里面除了浏览器配置只有 Claude 会话（`CLAUDE_CONFIG_DIR` 指向该目录），供 `continueFrom` 继续或导出 checkpoint；成功、被取消、被释放或过期时一并删除，`continuable` 只对外表示"能否继续"，不暴露会话位置。请求正文、storageState、headers 不进入任务记录。
 
 ## 配置
 
@@ -121,12 +131,15 @@ curl http://localhost:4501/v1/planner/jobs/JOB_ID/result
 | PLANNER_PORT | 4501 | 监听端口 |
 | PLANNER_MODEL | 不覆盖已有 Claude 模型配置 | 显式指定时优先；完全未配置模型时回退 haiku |
 | PLANNER_CLAUDE_COMMAND | claude | 受信任的运行时可执行文件，不接受请求指定 |
-| PLANNER_DATA_DIR | 系统临时目录/auto-test-planner-jobs | 任务状态与结果目录；镜像为 /var/lib/planner |
+| PLANNER_DATA_DIR | 系统临时目录/auto-test-planner-jobs | 任务工作目录的临时空间（`workspaces/`，启动时清空）；镜像为 /var/lib/planner |
 | PLANNER_CONCURRENCY | 1 | 同时运行的浏览器任务数 |
 | PLANNER_TIMEOUT_MS | 900000 | 单个执行任务的默认最长时间，不含排队；请求里的 `timeoutMs` 优先 |
 | PLANNER_MAX_TIMEOUT_MS | 14400000 | 请求 `timeoutMs` 的上限，超出按此封顶 |
-| PLANNER_MAX_JOBS | 100 | 包括终态任务在内的保留数量上限 |
-| PLANNER_RETENTION_MS | 86400000 | 终态任务保留时间 |
+| PLANNER_MAX_JOBS | 100 | 未完成（排队 + 运行）任务数上限，满时 503 |
+| PLANNER_RETENTION_MS | 86400000 | 未被释放的终态任务最长保留时间 |
+| PLANNER_MAX_RETAINED | 200 | 未被释放的终态任务最多保留条数，超出淘汰最旧的 |
+| PLANNER_DRAIN_TIMEOUT_MS | 同 PLANNER_TIMEOUT_MS | 停机时等待运行中任务完成的上限 |
+| PLANNER_DRAIN_HOLD_MS | 60000 | 任务全部结束后，等待下发方取走并释放结果的上限 |
 | PLANNER_ASSET_DIR | 系统临时目录/auto-test-planner-assets | CaseHub 推送的资产缓存目录（按 SHA-256 命名） |
 | PLANNER_ASSET_CACHE_MB | 2048 | 资产缓存总量上限，超出先淘汰最久未使用的文件 |
 | PLANNER_SIMPLIFY_TIMEOUT_MS | 60000 | `/v1/planner/simplify` 单次改写的最长等待时间 |

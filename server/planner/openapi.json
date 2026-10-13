@@ -28,7 +28,7 @@
         ],
         "operationId": "createPlannerJob",
         "summary": "Submit a planner task",
-        "description": "Returns immediately with a queued job. Maximum JSON request size: 2 MiB. No local file paths or MCP commands are accepted. Supply requirements, browser target/authentication and any prior knowledge in this request. No idempotency key is supported: repeated submissions create separate jobs. To continue an interrupted task, repeat the whole request and add continueFrom.",
+        "description": "Returns immediately with a queued job. Maximum JSON request size: 2 MiB. No local file paths or MCP commands are accepted. Supply requirements, browser target/authentication and any prior knowledge in this request. No idempotency key is supported: repeated submissions create separate jobs. To continue an interrupted task, repeat the whole request and add continueFrom. A dispatcher choosing among several nodes passes queue=false: the task then starts on an idle slot or is refused with 429 BUSY instead of queueing, and the dispatcher tries another node.",
         "requestBody": {
           "required": true,
           "content": {
@@ -89,7 +89,7 @@
             }
           },
           "409": {
-            "description": "continueFrom names a task that cannot be continued (NOT_CONTINUABLE): it did not fail, was already continued, or its session is gone",
+            "description": "continueFrom cannot be used: the named task cannot be continued (NOT_CONTINUABLE: it did not fail, was already continued, or its session is gone), or the checkpoint has not been pushed to this node (CHECKPOINT_NOT_CACHED)",
             "content": {
               "application/json": {
                 "schema": {
@@ -118,6 +118,16 @@
               }
             }
           },
+          "429": {
+            "description": "queue=false and no idle slot (BUSY)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "500": {
             "description": "Internal service error",
             "content": {
@@ -129,7 +139,7 @@
             }
           },
           "503": {
-            "description": "Server shutting down or retained job capacity reached",
+            "description": "Draining for shutdown (SHUTTING_DOWN), or this node already holds its limit of unfinished tasks (CAPACITY_EXCEEDED)",
             "content": {
               "application/json": {
                 "schema": {
@@ -138,7 +148,23 @@
               }
             }
           }
-        }
+        },
+        "parameters": [
+          {
+            "name": "queue",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ],
+              "default": "true"
+            },
+            "description": "false: accept only if a slot is free right now, otherwise 429 BUSY. Default true: queue behind running work."
+          }
+        ]
       }
     },
     "/v1/planner/jobs/{jobId}": {
@@ -171,7 +197,7 @@
             }
           },
           "404": {
-            "description": "Unknown or expired job",
+            "description": "Unknown job: never submitted here, released, expired, or lost in a restart of this node (jobs live in memory)",
             "content": {
               "application/json": {
                 "schema": {
@@ -198,7 +224,7 @@
         ],
         "operationId": "cancelPlannerJob",
         "summary": "Cancel a queued or running task",
-        "description": "Idempotent for terminal jobs. A running task can briefly remain running with stage cancelling until its runtime and browser stop. Does not delete retained results.",
+        "description": "Idempotent for terminal jobs. A running task can briefly remain running with stage cancelling until its runtime and browser stop. Does not remove a finished task; release it with POST /v1/planner/jobs/{jobId}/release.",
         "responses": {
           "202": {
             "description": "Current state after cancellation request",
@@ -211,7 +237,7 @@
             }
           },
           "404": {
-            "description": "Unknown or expired job",
+            "description": "Unknown job: never submitted here, released, expired, or lost in a restart of this node (jobs live in memory)",
             "content": {
               "application/json": {
                 "schema": {
@@ -263,7 +289,7 @@
             }
           },
           "404": {
-            "description": "Unknown or expired job",
+            "description": "Unknown job: never submitted here, released, expired, or lost in a restart of this node (jobs live in memory)",
             "content": {
               "application/json": {
                 "schema": {
@@ -358,7 +384,7 @@
             }
           },
           "404": {
-            "description": "Unknown or expired job",
+            "description": "Unknown job: never submitted here, released, expired, or lost in a restart of this node (jobs live in memory)",
             "content": {
               "application/json": {
                 "schema": {
@@ -387,6 +413,163 @@
           },
           "reset": {
             "$ref": "#/components/schemas/EventReset"
+          }
+        }
+      }
+    },
+    "/v1/planner/jobs/{jobId}/release": {
+      "parameters": [
+        {
+          "name": "jobId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "post": {
+        "tags": [
+          "Planner"
+        ],
+        "operationId": "releasePlannerJob",
+        "summary": "Release a finished task",
+        "description": "The dispatcher calls this once it has stored the result, events and any checkpoint or diagnostics. The node then forgets the task and deletes the files it kept for it. A finished task nobody releases is dropped after the retention period. While a node drains for shutdown it waits briefly for its finished tasks to be released before exiting.",
+        "responses": {
+          "200": {
+            "description": "Released",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "id",
+                    "released"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "released": {
+                      "type": "boolean",
+                      "const": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown job: never submitted here, released, expired, or lost in a restart of this node (jobs live in memory)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The task has not finished (JOB_ACTIVE); cancel it first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal service error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/planner/jobs/{jobId}/checkpoint": {
+      "parameters": [
+        {
+          "name": "jobId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "get": {
+        "tags": [
+          "Planner"
+        ],
+        "operationId": "getPlannerCheckpoint",
+        "summary": "Download the interrupted session",
+        "description": "For a failed task whose status says continuable: a tar.gz of the exploration session it kept. Store it, push it to any planner node with PUT /v1/planner/assets/<sha256>, and submit continueFrom: { checkpoint: <sha256> } there. Credentials, settings and saved logins are never included.",
+        "responses": {
+          "200": {
+            "description": "Session archive",
+            "headers": {
+              "X-Content-SHA256": {
+                "description": "Lowercase hex SHA-256 of the response body",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                }
+              },
+              "Content-Disposition": {
+                "description": "attachment; filename=\"<jobId>-<kind>.tar.gz\"",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/gzip": {
+                "schema": {
+                  "type": "string",
+                  "contentMediaType": "application/gzip"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown job: never submitted here, released, expired, or lost in a restart of this node (jobs live in memory)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Nothing to continue (NOT_CONTINUABLE): the task did not fail, was already continued, or is still running",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal service error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           }
         }
       }
@@ -592,7 +775,7 @@
         ],
         "operationId": "readiness",
         "summary": "Service readiness",
-        "description": "CLI and browser prerequisites are checked before listening. This probe does not call the model provider or target site.",
+        "description": "CLI and browser prerequisites are checked before listening. This probe does not call the model provider or target site. Turns 503 as soon as the node starts draining for shutdown; /healthz stays 200 until the process exits.",
         "security": [],
         "responses": {
           "200": {
@@ -616,7 +799,7 @@
             }
           },
           "503": {
-            "description": "Shutting down or unavailable",
+            "description": "Draining for shutdown or unavailable",
             "content": {
               "application/json": {
                 "schema": {
@@ -719,6 +902,28 @@
           },
           "413": {
             "description": "Too large"
+          }
+        }
+      }
+    },
+    "/v1/planner/capacity": {
+      "get": {
+        "tags": [
+          "Operations"
+        ],
+        "operationId": "getPlannerCapacity",
+        "summary": "Free slots on this node",
+        "description": "What a dispatcher reads to pick an idle node. The authoritative check is still the submission itself with queue=false, which reserves the slot atomically.",
+        "responses": {
+          "200": {
+            "description": "Current load",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Capacity"
+                }
+              }
+            }
           }
         }
       }
@@ -900,9 +1105,28 @@
             "description": "Time limit for the whole planning task, in milliseconds (1 minute to 4 hours). Chosen by the person starting the run, since exploration time depends on the application and the case budget. Omit to use the server default (PLANNER_TIMEOUT_MS, 15 minutes). The service clamps the value to PLANNER_MAX_TIMEOUT_MS. On expiry the task fails with JOB_TIMEOUT."
           },
           "continueFrom": {
-            "type": "string",
-            "format": "uuid",
-            "description": "Id of a failed task of this service whose status says continuable (typically one that hit JOB_TIMEOUT). The new task reopens that task's exploration session instead of exploring from scratch: the browser is new, the model's earlier findings are not. Every other field must still be supplied and is applied as given, so the continuation may raise timeoutMs or correct the test data. One interrupted task can be continued once; the continuation itself becomes continuable if it also fails."
+            "description": "Id of a failed task of this service whose status says continuable (typically one that hit JOB_TIMEOUT). The new task reopens that task's exploration session instead of exploring from scratch: the browser is new, the model's earlier findings are not. Every other field must still be supplied and is applied as given, so the continuation may raise timeoutMs or correct the test data. One interrupted task can be continued once; the continuation itself becomes continuable if it also fails. Two forms: a checkpoint pushed to this node (works on any node and after restarts), or the id of a failed task on this same node.",
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "checkpoint"
+                ],
+                "properties": {
+                  "checkpoint": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$",
+                    "description": "SHA-256 of an archive from GET /v1/planner/jobs/{jobId}/checkpoint, already pushed here with PUT /v1/planner/assets/<sha256>"
+                  }
+                }
+              },
+              {
+                "type": "string",
+                "format": "uuid",
+                "description": "Id of a continuable failed task on this node"
+              }
+            ]
           },
           "agentSettings": {
             "$ref": "#/components/schemas/AgentSettings"
@@ -1306,7 +1530,7 @@
           },
           "continuable": {
             "type": "boolean",
-            "description": "Present and true while this failed task can be continued: its exploration session is still on the server. Submit a new task with continueFrom set to this id. Absent once it has been continued, after retention expiry, or for tasks that succeeded or were cancelled."
+            "description": "Present and true while this failed task can be continued. On this node: submit continueFrom set to this id. On any node: download /v1/planner/jobs/{jobId}/checkpoint and continue from it. Absent once it has been continued, released, after retention expiry, or for tasks that succeeded or were cancelled."
           },
           "continuedAt": {
             "type": "string",
@@ -1558,7 +1782,7 @@
         "properties": {
           "code": {
             "type": "string",
-            "description": "Machine-readable error code; task errors include PLANNER_FAILED, JOB_TIMEOUT, JOB_CANCELLED and SERVER_RESTARTED; a rejected continueFrom is NOT_CONTINUABLE; a rejected or unusable agentSettings is INVALID_REQUEST, INVALID_AGENT_SETTINGS or AGENT_SETTINGS_FAILED"
+            "description": "Machine-readable error code; task errors include PLANNER_FAILED, JOB_TIMEOUT, JOB_CANCELLED and NODE_SHUTDOWN (the node stopped before or while running the task); a rejected continueFrom is NOT_CONTINUABLE or CHECKPOINT_NOT_CACHED; a dispatcher asking for an idle slot gets BUSY; a rejected or unusable agentSettings is INVALID_REQUEST, INVALID_AGENT_SETTINGS or AGENT_SETTINGS_FAILED"
           },
           "message": {
             "type": "string"
@@ -1574,6 +1798,52 @@
         "properties": {
           "error": {
             "$ref": "#/components/schemas/ErrorDetail"
+          }
+        }
+      },
+      "Capacity": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "concurrency",
+          "running",
+          "queued",
+          "reserved",
+          "available",
+          "accepting"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "planner"
+          },
+          "concurrency": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Tasks this node runs at the same time"
+          },
+          "running": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "queued": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "reserved": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Submissions still being validated; they already hold a slot"
+          },
+          "available": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Slots a new task would start in immediately; 0 while draining"
+          },
+          "accepting": {
+            "type": "boolean",
+            "description": "False once the node is draining for shutdown"
           }
         }
       }

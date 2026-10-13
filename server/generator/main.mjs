@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { runClaude } from '../runtime/claude.mjs';
 import { checkPlaywrightRuntime } from '../runtime/preflight.mjs';
 import { resolveClaudeOptions, createReloadingRuntime, createSettingsApplier, settingsPathFor } from '../runtime/settings.mjs';
-import { createRoutedServer } from '../shared/http.mjs';
+import { createRoutedServer, stopOnSignals } from '../shared/http.mjs';
 import { AssetCache } from '../shared/assets.mjs';
 import { positive } from '../shared/env.mjs';
 import { authSessionsFromEnv } from '../shared/auth-session.mjs';
@@ -16,8 +16,9 @@ import { createHealerService, seedHealerSettings } from '../healer/service.mjs';
 
 export async function main() {
   const host = process.env.GENERATOR_HOST ?? '0.0.0.0';
-  // Job files sit directly in the data dir (the layout earlier generator images used, so an existing volume
-  // keeps its tasks); healer jobs and workspaces sit in named entries beside them.
+  // Scratch space only: jobs live in memory and their records belong to the dispatcher. Task workspaces (a failed
+  // one is kept for its diagnostics until released) sit here and are cleared on start; the healer's settings file
+  // sits beside them and is kept.
   const dataDir = process.env.GENERATOR_DATA_DIR ?? path.join(tmpdir(), 'auto-test-generator-jobs');
   // The runtime reads the same Claude configuration shape as the planner; GENERATOR_* / HEALER_* variables
   // select each workflow's own settings file, model and limits.
@@ -36,15 +37,14 @@ export async function main() {
   // settings file when the content changes and the reloading runtime re-reads it per CLI invocation.
   const generator = createGeneratorService({ ...shared, runtime: createReloadingRuntime(runClaude, generatorSettings),
     applySettings: createSettingsApplier(settingsPathFor(generatorSettings)),
-    jobsDir: dataDir, workspaceRoot: path.join(dataDir, 'workspaces'), concurrency: positive('GENERATOR_CONCURRENCY', 1) });
+    workspaceRoot: path.join(dataDir, 'workspaces'), concurrency: positive('GENERATOR_CONCURRENCY', 1) });
   const healer = createHealerService({ ...shared, runtime: createReloadingRuntime(runClaude, healerSettings),
     applySettings: createSettingsApplier(settingsPathFor(healerSettings)),
-    jobsDir: path.join(dataDir, 'healer-jobs'), workspaceRoot: path.join(dataDir, 'healer-workspaces') });
+    workspaceRoot: path.join(dataDir, 'healer-workspaces') });
   const server = createRoutedServer([{ ...healer, prefix: '/v1/healer/' }, generator]);
   server.listen(positive('GENERATOR_PORT', 4502), host, () => console.log(`Generator HTTP service listening on ${host}:${server.address().port}`));
-  let stopping = false;
-  const shutdown = () => { if (!stopping) { stopping = true; return server.shutdown(); } };
-  process.on('SIGTERM', shutdown); process.on('SIGINT', shutdown);
+  stopOnSignals(server, { label: 'Generator', drainTimeoutMs: positive('GENERATOR_DRAIN_TIMEOUT_MS', positive('GENERATOR_TIMEOUT_MS', 3600000)),
+    holdMs: positive('GENERATOR_DRAIN_HOLD_MS', 60000) });
   return { server, jobs: generator.jobs, healerJobs: healer.jobs };
 }
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

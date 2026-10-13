@@ -61,12 +61,19 @@ export function validateTimeoutMs(value, name = 'timeoutMs') {
   return value;
 }
 
-// continueFrom names an interrupted job of this service whose session is still around (its summary says
-// continuable). The request repeats every other field, so nothing about the task is read from that job:
-// it only decides whether this run starts fresh or reopens that conversation.
+// continueFrom says which interrupted run to reopen. The request repeats every other field, so nothing about
+// the task is read from it: it only decides whether this run starts fresh or reopens that conversation.
+//  - { checkpoint: <sha256> }: a session archive (GET .../jobs/<id>/checkpoint on the node that ran it) the
+//    dispatcher pushed to this node with PUT .../assets/<sha256>. Works on any node, after any restart.
+//  - "<job id>": a failed job of this same node whose session is still here (its summary says continuable).
 export const JOB_ID_RE = /^[0-9a-f-]{36}$/;
 export function validateContinueFrom(value, name = 'continueFrom') {
-  check(typeof value === 'string' && JOB_ID_RE.test(value), `${name} must be a job id`);
+  if (object(value)) {
+    keys(value, ['checkpoint'], name);
+    check(typeof value.checkpoint === 'string' && SHA256_RE.test(value.checkpoint), `${name}.checkpoint must be a lowercase hex SHA-256`);
+    return value;
+  }
+  check(typeof value === 'string' && JOB_ID_RE.test(value), `${name} must be a job id or { checkpoint: <sha256> }`);
   return value;
 }
 
