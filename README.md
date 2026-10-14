@@ -41,7 +41,9 @@ drive the workflow from their own UI instead of this repository's files (CaseHub
 | [executor](server/executor/main.mjs) | 4504 | `/v1/executor/*` runs reviewed specs and writes the test record |
 | [general-agent](server/general-agent/README.md) | 4503 | general structured Claude CLI generation, without Playwright or MCP |
 
-In production each runs in its own pod with its own image and volume (`kubectl apply -k deploy/kubernetes`).
+They are stateless nodes: CaseHub owns every task and hands it to an idle node, so each kind can run as many
+processes or pods as needed. In production each kind runs as its own pool of pods (`kubectl apply -k deploy/kubernetes`),
+optionally autoscaled to CaseHub's queue. **Deploying, scaling and upgrading: [DEPLOYMENT.md](DEPLOYMENT.md).**
 [automation](server/automation/main.mjs) still serves planner, generator and healer from one process on 4501
 for single-container or local use. They do not touch `docs/`, `specs/`, `.claude/agents/` or the file-based flow above — the human
 review gate is `specs/approved/` here, and the calling application there. See [server/README.md](server/README.md).
