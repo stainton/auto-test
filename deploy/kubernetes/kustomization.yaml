@@ -8,3 +8,6 @@ resources:
   - generator
   - executor
   - general-agent
+# Optional: size the planner/generator/executor pools to CaseHub's queue with KEDA (see components/autoscaling).
+# components:
+#   - components/autoscaling

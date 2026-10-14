@@ -1,22 +1,17 @@
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: generator-data
-spec:
-  accessModes: [ReadWriteOnce]
-  resources:
-    requests:
-      storage: 5Gi
----
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: generator
 spec:
-  # File task storage has one owner. Recreate avoids overlapping writers.
+  # A generator pod (script generation and, in the same process, script repair /v1/healer) is a stateless node:
+  # CaseHub owns every task's record and hands tasks to idle pods, so any number of replicas can run and roll over
+  # side by side. Fixed here; components/autoscaling sizes it to the generator + healer queue.
   replicas: 1
   strategy:
-    type: Recreate
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
   selector:
     matchLabels:
       app: auto-test-generator
@@ -25,7 +20,11 @@ spec:
       labels:
         app: auto-test-generator
     spec:
-      terminationGracePeriodSeconds: 30
+      # On SIGTERM the node stops taking tasks (readiness turns 503, so it leaves generator-nodes), lets running
+      # generator and healer tasks finish for up to GENERATOR_DRAIN_TIMEOUT_MS, then waits up to
+      # GENERATOR_DRAIN_HOLD_MS for CaseHub to collect them; a task cut off by the drain limit is run again
+      # elsewhere by CaseHub. Keep this above the sum.
+      terminationGracePeriodSeconds: 3690
       containers:
         - name: generator
           image: auto-test-generator:local
@@ -44,6 +43,14 @@ spec:
               value: '100'
             - name: GENERATOR_RETENTION_MS
               value: '86400000'
+            - name: GENERATOR_DRAIN_TIMEOUT_MS
+              value: '3600000'
+            - name: GENERATOR_DRAIN_HOLD_MS
+              value: '60000'
+            # Scratch only: task workspaces (cleared on start; a failed one kept until CaseHub has its diagnostics),
+            # the asset cache, and the healer's seeded settings file.
+            - name: GENERATOR_ASSET_DIR
+              value: /var/lib/generator/assets
           readinessProbe:
             httpGet:
               path: /readyz
@@ -68,7 +75,7 @@ spec:
             limits:
               cpu: '2'
               memory: 3Gi
-              ephemeral-storage: 4Gi
+              ephemeral-storage: 6Gi
           volumeMounts:
             - name: data
               mountPath: /var/lib/generator
@@ -76,13 +83,14 @@ spec:
               mountPath: /dev/shm
       volumes:
         - name: data
-          persistentVolumeClaim:
-            claimName: generator-data
+          emptyDir:
+            sizeLimit: 4Gi
         - name: shared-memory
           emptyDir:
             medium: Memory
             sizeLimit: 512Mi
 ---
+# One address for the generator (debugging, port-forward, a CaseHub with a fixed URL).
 apiVersion: v1
 kind: Service
 metadata:
@@ -95,3 +103,18 @@ spec:
       port: 4502
       targetPort: http
   type: ClusterIP
+---
+# Every ready generator pod: CaseHub resolves this name (CASEHUB_GENERATOR_URL=dns+http://generator-nodes:4502) to pick
+# an idle node itself. A draining pod is not ready, so it drops out before it stops.
+apiVersion: v1
+kind: Service
+metadata:
+  name: generator-nodes
+spec:
+  clusterIP: None
+  selector:
+    app: auto-test-generator
+  ports:
+    - name: http
+      port: 4502
+      targetPort: http

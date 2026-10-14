@@ -1,0 +1,99 @@
+# Each pool is sized to CaseHub's demand for it (GET /api/queue: queued + running tasks of that kind), one node
+# per task, between minReplicaCount and maxReplicaCount. Replace casehub.default.svc.cluster.local with CaseHub's
+# Service in its namespace (port 80 in CaseHub's own manifest).
+#
+# minReplicaCount 0 lets a pool scale to zero when idle: CaseHub queues tasks until a node is ready (up to
+# CASEHUB_TASK_QUEUE_TIMEOUT). Keep the planner at 1 or more: CaseHub's synchronous planner calls (case-count
+# estimate, readable rewrite) need a live planner node and are not queued.
+#
+# Scale-in is safe: a pod being removed stops taking tasks and finishes the one it runs (see the Deployment's
+# terminationGracePeriodSeconds) before it exits. The slow scale-down below avoids stopping a pod that CaseHub is
+# about to give the next queued task.
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: planner
+spec:
+  scaleTargetRef:
+    name: planner
+  minReplicaCount: 1
+  maxReplicaCount: 4
+  pollingInterval: 15
+  cooldownPeriod: 300
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleDown:
+          stabilizationWindowSeconds: 300
+          policies:
+            - { type: Pods, value: 1, periodSeconds: 120 }
+  triggers:
+    - type: metrics-api
+      metricType: AverageValue
+      metadata:
+        url: http://casehub.default.svc.cluster.local/api/queue
+        valueLocation: planner.demand
+        targetValue: '1'
+---
+# Generator pods also run the healer (/v1/healer), so they are sized to both queues together.
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: generator
+spec:
+  scaleTargetRef:
+    name: generator
+  minReplicaCount: 1
+  maxReplicaCount: 4
+  pollingInterval: 15
+  cooldownPeriod: 300
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleDown:
+          stabilizationWindowSeconds: 300
+          policies:
+            - { type: Pods, value: 1, periodSeconds: 120 }
+    scalingModifiers:
+      formula: generator + healer
+      target: '1'
+      metricType: AverageValue
+  triggers:
+    - type: metrics-api
+      name: generator
+      metadata:
+        url: http://casehub.default.svc.cluster.local/api/queue
+        valueLocation: generator.demand
+        targetValue: '1'
+    - type: metrics-api
+      name: healer
+      metadata:
+        url: http://casehub.default.svc.cluster.local/api/queue
+        valueLocation: healer.demand
+        targetValue: '1'
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: executor
+spec:
+  scaleTargetRef:
+    name: executor
+  minReplicaCount: 1
+  maxReplicaCount: 4
+  pollingInterval: 15
+  cooldownPeriod: 300
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleDown:
+          stabilizationWindowSeconds: 300
+          policies:
+            - { type: Pods, value: 1, periodSeconds: 120 }
+  triggers:
+    - type: metrics-api
+      metricType: AverageValue
+      metadata:
+        url: http://casehub.default.svc.cluster.local/api/queue
+        valueLocation: executor.demand
+        targetValue: '1'

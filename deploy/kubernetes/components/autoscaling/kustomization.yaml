@@ -1,0 +1,26 @@
+# Optional: size the planner, generator and executor pools to CaseHub's task queue with KEDA (https://keda.sh,
+# installed in the cluster beforehand). Leave it out and every pool keeps the fixed replica count of its manifest —
+# the plain process deployment and a fixed-size cluster need none of this. Enable it in deploy/kubernetes/kustomization.yaml:
+#
+#   components:
+#     - components/autoscaling
+#
+# Then set the CaseHub address in scaledobjects.yaml (KEDA runs in its own namespace, so it needs the full name).
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+resources:
+  - scaledobjects.yaml
+# KEDA owns the replica count from now on; a fixed one in the Deployment would fight it on every apply.
+patches:
+  - target: { kind: Deployment, name: planner }
+    patch: |-
+      - op: remove
+        path: /spec/replicas
+  - target: { kind: Deployment, name: generator }
+    patch: |-
+      - op: remove
+        path: /spec/replicas
+  - target: { kind: Deployment, name: executor }
+    patch: |-
+      - op: remove
+        path: /spec/replicas

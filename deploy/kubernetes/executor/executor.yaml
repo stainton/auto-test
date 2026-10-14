@@ -1,39 +1,37 @@
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: executor-data
-spec:
-  accessModes: [ReadWriteOnce]
-  resources:
-    requests:
-      storage: 2Gi
----
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: executor
 spec:
+  # Stateless node (CaseHub owns the tasks): scale freely; components/autoscaling sizes it to the queue.
   replicas: 1
-  strategy: { type: Recreate }
+  strategy: { type: RollingUpdate, rollingUpdate: { maxUnavailable: 0, maxSurge: 1 } }
   selector: { matchLabels: { app: auto-test-executor } }
   template:
     metadata: { labels: { app: auto-test-executor } }
     spec:
+      # SIGTERM: finish the running script (EXECUTOR_DRAIN_TIMEOUT_MS), let CaseHub collect it (EXECUTOR_DRAIN_HOLD_MS).
+      terminationGracePeriodSeconds: 990
       containers:
         - name: executor
           image: auto-test-executor:local
           ports: [{ name: http, containerPort: 4504 }]
-          readinessProbe: { httpGet: { path: /readyz, port: http } }
+          env:
+            - { name: EXECUTOR_TIMEOUT_MS, value: '900000' }
+            - { name: EXECUTOR_DRAIN_TIMEOUT_MS, value: '900000' }
+            - { name: EXECUTOR_DRAIN_HOLD_MS, value: '60000' }
+          readinessProbe: { httpGet: { path: /readyz, port: http }, periodSeconds: 5 }
           livenessProbe: { httpGet: { path: /healthz, port: http } }
           resources:
             requests: { cpu: '1', memory: 1Gi }
             limits: { cpu: '2', memory: 3Gi }
           volumeMounts:
-            - { name: data, mountPath: /var/lib/executor }
+            - { name: tmp, mountPath: /tmp }
             - { name: shared-memory, mountPath: /dev/shm }
       volumes:
-        - name: data
-          persistentVolumeClaim: { claimName: executor-data }
+        # Each run's workspace is a temporary directory removed when it ends.
+        - name: tmp
+          emptyDir: { sizeLimit: 2Gi }
         - name: shared-memory
           emptyDir: { medium: Memory, sizeLimit: 512Mi }
 ---
@@ -41,5 +39,14 @@ apiVersion: v1
 kind: Service
 metadata: { name: executor }
 spec:
+  selector: { app: auto-test-executor }
+  ports: [{ name: http, port: 4504, targetPort: http }]
+---
+# Every ready executor pod, for CASEHUB_EXECUTOR_URL=dns+http://executor-nodes:4504.
+apiVersion: v1
+kind: Service
+metadata: { name: executor-nodes }
+spec:
+  clusterIP: None
   selector: { app: auto-test-executor }
   ports: [{ name: http, port: 4504, targetPort: http }]

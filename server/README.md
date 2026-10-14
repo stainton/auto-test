@@ -46,6 +46,16 @@ planner、generator（含 healer）、executor 都是**无状态执行节点**�
 
 导出的会话包和诊断包都不含 agent 配置、凭证、Claude 配置目录或保存的登录态。每个任务的 agent 配置写在它自己的工作目录里，之后的请求下发新配置不会影响已在运行的任务。
 
+**进程部署多开节点**：同一类节点启动多个进程即可，各用自己的端口和临时目录，然后把地址列表交给 CaseHub：
+
+```sh
+PLANNER_PORT=4501 PLANNER_DATA_DIR=/tmp/planner-a PLANNER_ASSET_DIR=/tmp/planner-a/assets node server/planner/main.mjs &
+PLANNER_PORT=4511 PLANNER_DATA_DIR=/tmp/planner-b PLANNER_ASSET_DIR=/tmp/planner-b/assets node server/planner/main.mjs &
+# CaseHub：CASEHUB_PLANNER_URL=http://127.0.0.1:4501,http://127.0.0.1:4511
+```
+
+节点可以分布在不同机器上（地址写成各机器的 IP），CaseHub 把任务交给其中空闲的那个；进程部署没有自动扩缩，节点数就是启动的进程数，随时增减后改 CaseHub 的地址列表并重启 CaseHub 即可（重启时还在排队的任务需重新提交，已在节点上运行的不受影响）。Kubernetes 部署见 `deploy/kubernetes/README.md`（headless Service + 可选的 KEDA 自动扩缩）。
+
 **停机与缩容**（进程部署与 Kubernetes 相同）：收到 SIGTERM/SIGINT 后 `/readyz` 立即变 503（`/healthz` 保持 200），不再接新任务，排队中的任务以 `NODE_SHUTDOWN` 失败交还下发方；运行中的任务最多再跑 `*_DRAIN_TIMEOUT_MS`（默认等于该服务的任务时限），超时的同样以 `NODE_SHUTDOWN` 失败——planner 会话因此仍可继续；之后最多再等 `*_DRAIN_HOLD_MS`（默认 60 秒）让下发方取走并释放结果，然后退出。再发一次信号立即取消全部任务。Kubernetes 的 `terminationGracePeriodSeconds` 应不小于两者之和。
 
 `automation/` 仍可在一个进程内同时提供三条路由（默认 4501），适合单容器环境或本地开发；CaseHub 设置 `CASEHUB_AUTOMATION_URL` 即可改为连接它。

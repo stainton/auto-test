@@ -14,10 +14,10 @@
 
 同一进程还提供脚本修复 `/v1/healer/*`（与生成共用浏览器运行时，见 `server/healer/README.md`），无需单独部署 healer。healer 首次启动时把 generator 的配置复制到 `/var/lib/generator/healer-settings.json`，之后由 CaseHub「脚本修复」的 agent 设置随请求下发。
 
-集群内地址为 `http://generator:4502`。CaseHub 的 Kubernetes 清单已经使用此地址；跨 namespace 时改成 `http://generator.<namespace>.svc.cluster.local:4502`。外部调试可以运行 `kubectl port-forward --address 0.0.0.0 service/generator 4502:4502`，随后直接访问，无需鉴权。服务开放 CORS，浏览器可直接调用接口和订阅 SSE。
+集群内地址为 `http://generator:4502`（任意一个 Pod）和 headless Service `generator-nodes`（全部就绪 Pod）。CaseHub 的 Kubernetes 清单对 generator 和 healer 都使用 `dns+http://generator-nodes:4502`；跨 namespace 时改成 `dns+http://generator-nodes.<namespace>.svc.cluster.local:4502`。外部调试可以运行 `kubectl port-forward --address 0.0.0.0 service/generator 4502:4502`，随后直接访问，无需鉴权。服务开放 CORS，浏览器可直接调用接口和订阅 SSE。
 
 OpenAPI 文档在 `server/generator/openapi.json`，运行时可直接请求 `GET /openapi.json`。
 
-保留单副本和 Recreate 更新策略，避免多个进程同时写任务文件。默认需要 StorageClass 提供 5Gi RWO PVC，用于保存任务状态、进度和结果（探索经验由 CaseHub 保存并随请求下发）；没有默认存储类时在 PVC 中填写 storageClassName。重启后未完成任务标记失败，调用方重新提交；已完成结果在保留期内仍可读取。任务默认保留 24 小时，最多保留 100 个，可调整环境变量。
+Pod 是无状态节点，不需要 PVC：任务记录、进度、结果和失败现场的诊断包都由 CaseHub 取走保存，Pod 内只有 `emptyDir`（`/var/lib/generator`：任务工作目录、资产缓存和 healer 的配置文件，重建即清空）。副本数可固定、可随时调整，也可按 generator + healer 的排队数自动扩缩（见 `deploy/kubernetes/README.md`）。停机时运行中的任务最多再跑 `GENERATOR_DRAIN_TIMEOUT_MS`（默认 60 分钟），仍未结束的由 CaseHub 重新排队到其他 Pod。
 
 清单保留浏览器资源预算、共享内存和健康检查；容器文件系统可写，不设置额外的容器安全策略。Pod 需要能够访问模型 API 和被测系统。

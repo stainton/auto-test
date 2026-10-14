@@ -12,12 +12,12 @@
 
 无需创建 Secret 或配置服务 Token。setting.json 在构建时自动归位到 `/app/config/claude/settings.json`，启动时显式传给 Claude CLI。部署默认不覆盖文件中的模型；需要覆盖时可以增加 `PLANNER_MODEL` 环境变量。
 
-集群内地址为 `http://planner:4501`。CaseHub 的 Kubernetes 清单已经使用此地址；跨 namespace 时改成 `http://planner.<namespace>.svc.cluster.local:4501`。外部调试可以运行 `kubectl port-forward --address 0.0.0.0 service/planner 4501:4501`，随后直接访问，无需鉴权。服务开放 CORS，浏览器可直接调用接口和订阅 SSE。
+集群内地址为 `http://planner:4501`（任意一个 Pod）和 headless Service `planner-nodes`（全部就绪 Pod）。CaseHub 的 Kubernetes 清单使用 `dns+http://planner-nodes:4501`，自己挑空闲 Pod 派发任务；跨 namespace 时改成 `dns+http://planner-nodes.<namespace>.svc.cluster.local:4501`。外部调试可以运行 `kubectl port-forward --address 0.0.0.0 service/planner 4501:4501`，随后直接访问，无需鉴权。服务开放 CORS，浏览器可直接调用接口和订阅 SSE。
 
 OpenAPI 文档在 `server/planner/openapi.json`，运行时可直接请求 `GET /openapi.json`。
 
-保留单副本和 Recreate 更新策略，避免多个进程同时写任务文件。默认需要 StorageClass 提供 5Gi RWO PVC，用于保存任务状态、进度和结果（探索经验由 CaseHub 保存并随请求下发）；没有默认存储类时在 PVC 中填写 storageClassName。重启后未完成任务标记失败，调用方重新提交；已完成结果在保留期内仍可读取。任务默认保留 24 小时，最多保留 100 个，可调整环境变量。
+Pod 是无状态节点，不需要 PVC：任务记录、进度和结果由 CaseHub 保存，Pod 内只有 `emptyDir`（`/var/lib/planner`：任务工作目录与资产缓存，启动时清空）。副本数可固定、可随时调整，也可按排队数自动扩缩（见 `deploy/kubernetes/README.md`）；滚动更新时新 Pod 先就绪，旧 Pod 跑完手上的任务再退出。
 
-被中断的任务会在容器的 `/tmp` 下保留自己的工作目录（浏览器配置 + Claude 会话），供调用方"继续"，任务过期清理时一起删除，占用的是 ephemeral-storage 而不是 PVC。Pod 重建后 `/tmp` 是空的，此时任务状态里虽然仍标着 `continuable`，继续请求会得到 409 `NOT_CONTINUABLE`，改为重新提交即可。
+被中断的任务（超时、停机排空到时限）会保留 Claude 会话；CaseHub 随即下载会话包（`GET /v1/planner/jobs/{id}/checkpoint`）保存，人点"继续"时推给任意一个 planner Pod 接着做，原 Pod 是否还在都不影响。
 
 清单保留浏览器资源预算、共享内存和健康检查；容器文件系统可写，不设置额外的容器安全策略。Pod 需要能够访问模型 API 和被测系统。
