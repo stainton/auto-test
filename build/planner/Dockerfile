@@ -3,8 +3,8 @@ FROM ${BROWSER_BASE}
 
 WORKDIR /app
 COPY build/planner/package.json build/planner/package-lock.json ./
-RUN npm ci --omit=dev --no-audit --no-fund \
-    && rm -rf /root/.npm \
+RUN --mount=type=cache,target=/root/.npm,sharing=locked \
+    npm ci --omit=dev --no-audit --no-fund \
     && node -e "require('node:fs').accessSync(require('playwright').chromium.executablePath())" \
     && mkdir -p /var/lib/planner
 COPY server ./server
