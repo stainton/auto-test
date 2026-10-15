@@ -1,12 +1,10 @@
-FROM node:24-bookworm-slim
+ARG BROWSER_BASE
+FROM ${BROWSER_BASE}
 WORKDIR /app
 COPY build/executor/package.json build/executor/package-lock.json ./
 RUN npm ci --omit=dev --no-audit --no-fund \
-    && npx playwright install --with-deps chromium \
-    && apt-get update && apt-get install -y --no-install-recommends tini \
-    && rm -rf /var/lib/apt/lists/* /root/.npm \
-    && mv /root/.cache/ms-playwright /opt/ms-playwright \
-    && chmod -R a+rX /opt/ms-playwright \
+    && rm -rf /root/.npm \
+    && node -e "require('node:fs').accessSync(require('playwright').chromium.executablePath())" \
     && mkdir -p /var/lib/executor
 COPY server ./server
 COPY build/planner/setting*.json /tmp/planner-settings/
