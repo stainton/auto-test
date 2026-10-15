@@ -87,6 +87,16 @@ test('caseCount bounds the planner to [caseCount-5, caseCount] cases', () => {
   assert.equal(formatResult(many(1), { ...input, caseCount: 1 }).cases.length, 1);
 });
 
+test('limitations covered by a designed case are dropped, the rest keep the wire shape', () => {
+  const lim = (risk, summary, covered) => ({ risk, summary, ...(covered === undefined ? {} : { covered }) });
+  const result = formatResult({ ...output, limitations: [lim('high', '未验证短信验证码登录', true), lim('medium', '未验证单点登录跳转', false), lim('low', '未验证深色模式显示')] }, input);
+  assert.deepEqual(result.limitations, [{ risk: 'medium', summary: '未验证单点登录跳转' }, { risk: 'low', summary: '未验证深色模式显示' }]);
+  assert.equal(formatResult({ ...output, limitations: [lim('high', '已覆盖项', true)] }, input).limitations.length, 0);
+  const item = OUTPUT_SCHEMA.properties.limitations.items;
+  assert.deepEqual(item.properties.covered, { type: 'boolean' });
+  assert.ok(item.required.includes('covered'));
+});
+
 test('limitations are short risk-tagged summaries ordered from high to low risk', () => {
   const lim = (risk, summary) => ({ risk, summary });
   const result = formatResult({ ...output, limitations: [lim('low', '未验证深色模式显示'), lim('high', '未验证短信验证码登录：缺少测试手机号'),

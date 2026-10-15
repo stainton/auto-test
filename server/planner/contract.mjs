@@ -131,7 +131,10 @@ export const MODULE_NAME_MAX_CHARS = 20;
 // by a non-technical reviewer right after the draft is imported, so the model writes each as short
 // plain-language text with a risk level (hard caps below, not prose limits the model can drift past), and
 // formatResult orders both from highest to lowest risk.
-const LIMITATION = riskEntry('summary');
+// `covered` exists only on the model-facing schema: the model must say, per entry, whether a case it designed
+// asserts that function. formatResult drops covered entries, so the wire format stays {risk, summary} and the
+// reviewer only sees what no designed case checks.
+const LIMITATION = (entry => ({ ...entry, required: [...entry.required, 'covered'], properties: { ...entry.properties, covered: { type: 'boolean' } } }))(riskEntry('summary'));
 // An issue names the scenario it showed up in and what the app actually did, so a reviewer can reproduce it
 // without reading the exploration notes.
 const ISSUE = riskEntry('scenario', 'symptom');
@@ -209,7 +212,10 @@ export function formatResult(output, input) {
       : item[field]]));
   });
   check(typeof output.explorationNotes === 'string', 'explorationNotes must be a string');
-  const limitations = riskList(output.limitations, ['summary'], 'limitations');
+  // Tolerant of a missing flag (older callers/fixtures); the model schema requires it.
+  const limitations = riskList(Array.isArray(output.limitations)
+    ? output.limitations.filter(l => !(object(l) && l.covered === true)).map(l => object(l) ? Object.fromEntries(Object.entries(l).filter(([k]) => k !== 'covered')) : l)
+    : output.limitations, ['summary'], 'limitations');
   const issues = riskList(output.issues, ['scenario', 'symptom'], 'issues');
   const casesMarkdown = [
     `| ${CASE_FIELDS.join(' | ')} |`,

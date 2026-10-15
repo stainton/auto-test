@@ -68,8 +68,11 @@ Workflow:
      Describe the user-facing function, not UI mechanics; no selectors, URLs, tool names, error text or a narration
      of what was attempted. Cut detail rather than exceed the limit. Merge entries about the same area into one.
    - risk: high = a core acceptance criterion, main user flow, data integrity or security behaviour is unverified;
-     medium = a secondary flow, boundary or error handling is unverified; low = cosmetic, rare edge, or already
-     covered indirectly by another case.
+     medium = a secondary flow, boundary or error handling is unverified; low = cosmetic or rare edge.
+   - covered: true when at least one case you are returning asserts that function (the case is written from the
+     requirement even though you could not exercise it live); false when no returned case checks it. Decide this
+     against your final case list. The server drops covered entries, so the reviewer only sees what the cases
+     leave unchecked.
    The server orders limitations from high to low risk.
    Return real defects you actually observed while exploring in issues: the app did something that
    contradicts the requirement, an acceptance criterion or its own visible rules. Only what you saw
