@@ -11,6 +11,7 @@ import { writeTaskSettings } from '../runtime/settings.mjs';
 import { restoreCheckpoint } from './checkpoint.mjs';
 import { outputSchema, formatResult } from './contract.mjs';
 import { SYSTEM_PROMPT, buildPrompt, buildContinuationPrompt } from './prompt.mjs';
+import { isOrganize, ORGANIZE_SYSTEM_PROMPT, buildOrganizePrompt, buildOrganizeContinuationPrompt, organizeSchema, formatOrganizeResult } from './organize.mjs';
 
 const require = createRequire(import.meta.url);
 // Keep generator/test execution out of the planner workflow using native CLI configuration.
@@ -62,7 +63,9 @@ export function createPlannerWorker({ runtime = runClaude, command, model, setti
       await writeFile(configPath, `module.exports = ${JSON.stringify(config)};\n`, { mode: 0o600 });
       // Exploration may start from a login an earlier task saved, unless the requirements are about authentication
       // themselves. Only the seed carries it (see shared/auth-session.mjs).
-      const authPlan = planAuthSession(authSessions, input, (input.requirements ?? []).flatMap(r => [r.id, r.title]));
+      const organize = isOrganize(input);
+      const authPlan = planAuthSession(authSessions, input, organize ? input.organize.products.map(p => p.name)
+        : (input.requirements ?? []).flatMap(r => [r.id, r.title]));
       authFile = authPlan.capture ? await stageAuthSession(workspace, authPlan.preload) : undefined;
       await writeFile(path.join(workspace, 'seed.spec.ts'), seedSpec({ testEntry, name: 'planner seed', baseUrl: input.target.baseUrl,
         replay: input.productReplay, storageStatePath: authPlan.preload ? authFile : undefined }), { mode: 0o600 });
@@ -79,9 +82,11 @@ export function createPlannerWorker({ runtime = runClaude, command, model, setti
       const promptInput = { ...input, ...(authSession ? { authSession } : {}), ...(assets.length ? { context: { ...input.context, assets: staged } } : {}) };
       const calls = new Map();
       let setupSucceeded = false;
-      const output = await runtime({ cwd: workspace, prompt: resumed ? buildContinuationPrompt(promptInput) : buildPrompt(promptInput),
-        systemPrompt: SYSTEM_PROMPT,
-        schema: outputSchema(input), mcpConfig, allowedTools: ['mcp__playwright-test__*'],
+      const prompt = organize ? (resumed ? buildOrganizeContinuationPrompt(promptInput) : buildOrganizePrompt(promptInput))
+        : resumed ? buildContinuationPrompt(promptInput) : buildPrompt(promptInput);
+      const output = await runtime({ cwd: workspace, prompt,
+        systemPrompt: organize ? ORGANIZE_SYSTEM_PROMPT : SYSTEM_PROMPT,
+        schema: organize ? organizeSchema(input) : outputSchema(input), mcpConfig, allowedTools: ['mcp__playwright-test__*'],
         disallowedTools: EXCLUDED_TOOLS.map(t => `mcp__playwright-test__${t}`),
         signal, command, model, settingsPath: taskSettingsPath,
         // The conversation is persisted inside the workspace so a continuation can resume it and nothing
@@ -123,8 +128,8 @@ export function createPlannerWorker({ runtime = runClaude, command, model, setti
       signal.throwIfAborted();
       // A continued run may finish from what it already explored, so only a fresh run must have opened the browser.
       if (!setupSucceeded && !resumed) throw new Error('Planner did not successfully initialize the target browser');
-      emit({ stage: 'finalizing', message: 'Validating test cases and formatting the draft' });
-      const result = formatResult(output, input);
+      emit({ stage: 'finalizing', message: organize ? 'Validating the case classification' : 'Validating test cases and formatting the draft' });
+      const result = organize ? formatOrganizeResult(output, input) : formatResult(output, input);
       checkpoint(null);
       return result;
     } catch (error) {

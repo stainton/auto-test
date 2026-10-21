@@ -1,5 +1,6 @@
 import { SHA256_RE, MAX_ASSET_BYTES } from '../shared/assets.mjs';
 import { object, check, string, keys, validateTarget, LIMITATION_MAX_CHARS, RISK_LEVELS, riskEntry, riskList } from '../shared/contract.mjs';
+import { validateOrganize } from './organize.mjs';
 
 export { LIMITATION_MAX_CHARS, RISK_LEVELS };
 
@@ -97,8 +98,12 @@ export function validateAssets(assets) {
   return assets;
 }
 export function validateInput(input) {
-  keys(input, ['requirements', 'target', 'context', 'caseCount', 'timeoutMs', 'continueFrom'], 'request');
-  validateRequirements(input.requirements);
+  keys(input, ['requirements', 'target', 'context', 'caseCount', 'timeoutMs', 'continueFrom', 'organize'], 'request');
+  // Organize mode (organize.mjs, temporary) classifies existing cases instead of designing from requirements.
+  if (input.organize !== undefined) {
+    check(input.requirements === undefined && input.caseCount === undefined, 'an organize request takes no requirements or caseCount');
+    validateOrganize(input.organize);
+  } else validateRequirements(input.requirements);
   if (input.caseCount !== undefined) validateCaseCount(input.caseCount);
   if (input.timeoutMs !== undefined) validateTimeoutMs(input.timeoutMs);
   if (input.continueFrom !== undefined) validateContinueFrom(input.continueFrom);

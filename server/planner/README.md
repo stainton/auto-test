@@ -111,6 +111,14 @@ curl http://localhost:4501/v1/planner/jobs/JOB_ID/result
 
 结果还包含 `reviewStatus: draft`、`casesMarkdown`、`planMarkdown`、合并后的 `explorationNotes`、`limitations` 和 `issues`。`limitations` 是未验证/受限范围，每条为 `{risk: high|medium|low, summary}`；模型对每条还要标注 `covered`（所返回的用例里是否有用例断言了该功能），已被用例覆盖的条目由服务端丢弃，不出现在结果里，评审人只看到用例没有检查的部分；`issues` 是探索时实际观察到的问题（没有则为空数组），每条为 `{risk: high|medium|low, scenario, symptom}`，scenario 是出问题的业务场景、symptom 是当时应用的实际表现。两者的文本都是给非技术评审人看的中文、每项不超过 40 字，均按风险从高到低排序。用例仍按需求要求的正确行为编写，发现的缺陷只登记在 `issues`，不会写进 expects。单次模型结构化结果限制 2 MiB。JSON 的步骤使用换行，Markdown 表格使用 `<br>`，列顺序保持不变。服务不自动批准草稿，不生成执行脚本。成功状态表示产出了合规草稿，查看 limitations 判断尚未验证的范围、查看 issues 判断已发现的问题。
 
+### 用例重整模式（功能 AM，临时）
+
+请求带 `organize`（且不带 `requirements` / `caseCount`）时，任务不设计用例，而是探索产品、把给定的基线用例按 `产品 / 模块 / 按需的子级` 归类，代码在 [organize.mjs](organize.mjs)。用例结构问题修复后整体 revert。
+
+- 输入：`organize.products`（1–20 个 `{code, name, baseUrl, notes?}`，`target.baseUrl` 一般取第一个产品）、`organize.cases`（1–1000 条 `{id, title, folder?, excerpt?}`，一批，不必是全部基线）、可选的 `organize.modules`（前几批已经定下的 `{product, code, name}`，本批沿用）。
+- 探索是只读的：不提交表单、不增删改数据。
+- 结果：`{mode: "organize", products, modules, assignments: [{caseId, product, moduleCode, folders, category}], unassigned, explorationNotes, limitations}`。同一产品内一个模块名只对应一个缩写，缩写被别的模块占用时自动加数字（`AUTH` → `AUTH2`）。新编号 `TC-<产品>-<模块>-<类别>-NNN` 和目录重建都由 CaseHub 完成，本服务不碰数据。
+
 ## 进度和任务生命周期
 
 状态为 queued → running → succeeded / failed / cancelled。阶段和工具开始/完成事件来自运行过程，不使用虚构百分比。SSE 首先发送 snapshot，然后回放游标之后的 progress；使用 `Last-Event-ID` 或 `?after=N` 重连。最多保留最近 500 条，较旧记录丢失时先发送 reset。snapshot 表示当前任务状态，回放的旧 progress 用于过程记录，不应覆盖较新的状态。每 15 秒有心跳；终态关闭连接。抽屉关闭不影响任务，重新打开按 ID 查看即可。
