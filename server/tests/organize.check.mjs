@@ -125,7 +125,7 @@ test('a scoped run stays in the scope product and folder and returns paths relat
   const schema = organizeSchema(scoped).properties.groups.items.properties;
   assert.deepEqual(schema.product.enum, ['AIGC']);
   assert.equal(schema.path.minItems, 0);
-  assert.equal(schema.path.maxItems, 4);
+  assert.equal(schema.path.maxItems, 2, 'default depth limit');
   assert.equal(JSON.parse(buildOrganizePrompt(scoped)).scope.product, 'AIGC');
   // A product-level scope still needs a module.
   assert.equal(organizeSchema({ ...input, organize: { ...input.organize, scope: { product: 'AIGC', path: [] } } }).properties.groups.items.properties.path.minItems, 1);
@@ -140,4 +140,37 @@ test('a scoped run stays in the scope product and folder and returns paths relat
     ['TC-SYNC2-ENTRY-FUNC-001', '资产区/一键同步', 'ASYNC'], // the scope folder itself keeps its settled code
     ['CASE-AB12CD', '资产区/一键同步/批量入口', 'SYNCBATCH']]);
   assert.throws(() => formatOrganizeResult({ ...output, groups: [{ ...output.groups[1], path: [] }] }, scoped), /scope product/);
+});
+
+test('a scoped run holds the sub-folder count and depth limits whatever the model returns', () => {
+  const ids = Array.from({ length: 9 }, (_, i) => `TC-AIGC-ASRCH-REL-00${i + 1}`);
+  const scoped = { ...input, organize: { products: input.organize.products, functions: [{ product: 'AIGC', code: 'ASRCH', path: ['资产区', '搜索'] }],
+    cases: [...ids.map(id => ({ id, title: id })), { id: 'CASE-LEFT', title: '没被归类' }],
+    scope: { product: 'AIGC', path: ['资产区', '搜索'], maxChildren: 2, maxDepth: 1 } } };
+  assert.deepEqual(validateInput(scoped), scoped);
+  for (const limits of [{ maxChildren: 0 }, { maxChildren: 31 }, { maxDepth: 0 }, { maxDepth: 5 }, { maxChildren: 1.5 }])
+    assert.throws(() => validateInput({ ...scoped, organize: { ...scoped.organize, scope: { ...scoped.organize.scope, ...limits } } }));
+  assert.equal(organizeSchema(scoped).properties.groups.items.properties.path.maxItems, 1);
+  const group = (path, code, cases) => ({ product: 'AIGC', path, function_code: code, category: 'FUNC', cases });
+  const result = formatOrganizeResult({ ...output, groups: [
+    group(['关键词', '精确匹配'], 'AKEY', ids.slice(0, 3)), // deeper than maxDepth 1: trimmed to 关键词
+    group(['标签'], 'ATAG', ids.slice(3, 5)),
+    group(['分页'], 'APAGE', ids.slice(5, 6)),              // third sub-folder over maxChildren 2: the smallest moves up
+    group([], 'ASRCH', ids.slice(6, 9))
+  ] }, scoped);
+  const where = Object.fromEntries(result.assignments.map(a => [a.caseId, `${a.path.join('/')} ${a.functionCode} ${a.category}`]));
+  assert.equal(where[ids[0]], '资产区/搜索/关键词 AKEY FUNC');
+  assert.equal(where[ids[3]], '资产区/搜索/标签 ATAG FUNC');
+  assert.equal(where[ids[5]], '资产区/搜索 ASRCH FUNC');
+  assert.equal(where['CASE-LEFT'], '资产区/搜索 ASRCH FUNC', 'a case the model left out stays in the folder itself');
+  assert.deepEqual(result.leftInScope, ['CASE-LEFT']);
+  assert.deepEqual(result.unassigned, []);
+  assert.deepEqual(result.capped, [{ path: ['资产区', '搜索'], merged: ['分页'] }]);
+  const children = new Set(result.assignments.filter(a => a.path.length > 2).map(a => a.path[2]));
+  assert.ok(children.size <= 2 && result.assignments.every(a => a.path.length <= 3));
+  // Defaults: 8 sub-folders, 2 levels.
+  const wide = { ...scoped, organize: { ...scoped.organize, scope: { product: 'AIGC', path: ['资产区'] } } };
+  const many = formatOrganizeResult({ ...output, groups: ids.map((id, i) => group([`功能${i}`, '子', '孙'], `F${i}X`, [id])) }, wide);
+  assert.equal(new Set(many.assignments.filter(a => a.path.length > 1).map(a => a.path[1])).size, 8);
+  assert.ok(many.assignments.every(a => a.path.length <= 3));
 });

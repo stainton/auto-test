@@ -117,7 +117,9 @@ curl http://localhost:4501/v1/planner/jobs/JOB_ID/result
 
 - 输入：`organize.products`（1–20 个 `{code, name, baseUrl, notes?}`，`target.baseUrl` 一般取第一个产品）、`organize.cases`（1–1000 条 `{id, title, folder?, excerpt?}`，excerpt 是前置条件/步骤/预期的摘录；一批，不必是全部基线）、可选的 `organize.functions`（前几批已经定下的叶子功能 `{product, code, path}`，本批沿用）。
 - 模块按用例实际测的功能拆成子功能（如 资产区 / 文件夹操作、搜索、排序），子功能用例很多时再细分一级；路径 1–6 级，不含测试类别。
-- 可选的 `organize.scope`（`{product, path}`）用于对一个已有目录做更深的划分：用例都留在该产品、该路径之下，模型只返回 scope 以下的相对路径（可以为空，表示直接留在 scope 目录），结果里的 `path` 已拼回完整路径。
+- 可选的 `organize.scope`（`{product, path, maxChildren?, maxDepth?}`）用于对一个已有目录做更深的划分：用例都留在该产品、该路径之下，模型只返回 scope 以下的相对路径（可以为空，表示直接留在 scope 目录），结果里的 `path` 已拼回完整路径。
+  - `maxChildren`（1–30，默认 8）：任何一个目录（含 scope 目录本身）下的子目录数上限；`maxDepth`（默认 2，不超过总深度 6）：scope 以下最多几层。测试类别目录不计。
+  - 服务端保证结果守住这两个上限：超出深度的层级截掉；某个目录的子目录超过上限时保留用例最多的那几个，其余子目录的用例上移到该目录（结果的 `capped` 列出被合并的子目录）；模型漏掉的用例留在 scope 目录本身（`leftInScope`）。
 - 探索是只读的：不提交表单、不增删改数据。
 - 结果：`{mode: "organize", products, functions, assignments: [{caseId, product, functionCode, path, category}], unassigned, explorationNotes, limitations}`。`functionCode` 是叶子功能的缩写，同一产品内一条路径只对应一个缩写，缩写被别的路径占用时自动加数字（`ASRCH` → `ASRCH2`）。测试类别目录、`TC-<产品>-<功能>-<类别>-NNN` 编号和目录重建都由 CaseHub 完成，本服务不碰数据。
 

@@ -23,6 +23,11 @@ const folderName = (value, name) => {
   string(value, name, 200);
   check([...value.trim()].length <= FOLDER_NAME_MAX_CHARS && !value.includes('/'), `${name} must be at most ${FOLDER_NAME_MAX_CHARS} characters without "/"`);
 };
+// A folder being divided further (organize.scope) is bounded by the person's limits: at most maxChildren sub-folders
+// under any folder and at most maxDepth levels below the scope folder (test-category folders not counted).
+export const MAX_SCOPE_CHILDREN = 30, DEFAULT_SCOPE_CHILDREN = 8, DEFAULT_SCOPE_DEPTH = 2;
+export const scopeLimits = scope => ({ maxChildren: scope.maxChildren ?? DEFAULT_SCOPE_CHILDREN,
+  maxDepth: Math.min(scope.maxDepth ?? DEFAULT_SCOPE_DEPTH, MAX_PATH_DEPTH - scope.path.length) });
 const pathKey = (product, path) => [product, ...path.map(p => p.trim())].join('\u0000');
 
 // organize: { products: [{code, name, baseUrl, notes?}], cases: [{id, title, folder?, excerpt?}],
@@ -54,10 +59,15 @@ export function validateOrganize(value) {
     for (const k of ['folder', 'excerpt']) if (c[k] !== undefined) check(typeof c[k] === 'string' && c[k].length <= EXCERPT_MAX_CHARS, `organize.cases.${k} must be a string (max ${EXCERPT_MAX_CHARS} characters)`);
   }
   if (value.scope !== undefined) {
-    keys(value.scope, ['product', 'path'], 'organize.scope');
+    keys(value.scope, ['product', 'path', 'maxChildren', 'maxDepth'], 'organize.scope');
     check(codes.has(value.scope.product), 'organize.scope.product must be a supplied product code');
     check(Array.isArray(value.scope.path) && value.scope.path.length < MAX_PATH_DEPTH, `organize.scope.path must have 0–${MAX_PATH_DEPTH - 1} levels`);
     value.scope.path.forEach((p, i) => folderName(p, `organize.scope.path[${i}]`));
+    const room = MAX_PATH_DEPTH - value.scope.path.length;
+    if (value.scope.maxChildren !== undefined) check(Number.isSafeInteger(value.scope.maxChildren) && value.scope.maxChildren >= 1 && value.scope.maxChildren <= MAX_SCOPE_CHILDREN,
+      `organize.scope.maxChildren must be an integer between 1 and ${MAX_SCOPE_CHILDREN}`);
+    if (value.scope.maxDepth !== undefined) check(Number.isSafeInteger(value.scope.maxDepth) && value.scope.maxDepth >= 1 && value.scope.maxDepth <= room,
+      `organize.scope.maxDepth must be an integer between 1 and ${room} for this folder`);
   }
   if (value.functions !== undefined) {
     check(Array.isArray(value.functions) && value.functions.length <= 1000, 'organize.functions must contain at most 1000 entries');
@@ -127,7 +137,12 @@ Scoped runs: when organize.scope is present, the person is dividing ONE existing
 to product scope.product and stays beneath scope.path (module / sub-function … already settled). Explore that part
 of the product closely and split the cases into finer functions beneath it, by what each case operates and asserts
 (e.g. 资产区 / 搜索 → 关键词搜索, 按标签筛选, 搜索结果分页). Return path RELATIVE to scope.path: only the new levels
-below it, at most ${MAX_PATH_DEPTH} levels in total together with scope.path. An empty path keeps a case directly in the
+below it. Two hard limits bind the structure you create (test-category folders are not counted):
+scope.maxChildren (default ${DEFAULT_SCOPE_CHILDREN}) — no folder, the scope folder included, may get more sub-folders than that;
+scope.maxDepth (default ${DEFAULT_SCOPE_DEPTH}) — the relative path has at most that many levels.
+Plan to them: group related features into one sub-folder rather than open a folder per feature, and stop dividing
+when the limits are reached. The server enforces them: extra levels are dropped, and beyond maxChildren the smallest
+sub-folders are dissolved into their parent. An empty path keeps a case directly in the
 scope folder; use that only for a case that tests the scope's function as a whole. function_code still names the
 full path's leaf: for an empty path, use scope's own code from organize.functions when it is listed there.
 
@@ -164,7 +179,7 @@ export function organizeSchema(input) {
   const { products, cases, scope } = input.organize;
   const folder = { type: 'string', minLength: 1, maxLength: FOLDER_NAME_MAX_CHARS };
   // A scoped run returns only the levels below the scope folder, possibly none.
-  const path = scope ? { type: 'array', minItems: scope.path.length ? 0 : 1, maxItems: MAX_PATH_DEPTH - scope.path.length, items: folder }
+  const path = scope ? { type: 'array', minItems: scope.path.length ? 0 : 1, maxItems: scopeLimits(scope).maxDepth, items: folder }
     : { type: 'array', minItems: 1, maxItems: MAX_PATH_DEPTH, items: folder };
   return {
     type: 'object', additionalProperties: false, required: ['groups', 'explorationNotes', 'limitations'],
@@ -211,27 +226,70 @@ export function formatOrganizeResult(output, input) {
     return candidate;
   };
   check(Array.isArray(output.groups), 'organize output groups must be an array');
-  const assigned = new Map();
-  for (let g of output.groups) {
+  // 1. Every case's placement as the model gave it; a scoped run's path is relative to the scope folder.
+  const placed = new Map();
+  for (const g of output.groups) {
     keys(g, ['product', 'path', 'function_code', 'category', 'cases'], 'organize group');
     check(productCodes.has(g.product), 'organize group product must be a supplied product code');
     check(!scope || g.product === scope.product, 'a scoped organize group must stay in the scope product');
-    check(Array.isArray(g.path), 'organize group path must be an array');
-    // A scoped run's path is relative to the scope folder; from here on it is the full function path.
-    if (scope) g = { ...g, path: [...scope.path, ...g.path] };
     check(typeof g.function_code === 'string' && CODE_RE.test(g.function_code), `organize group function_code must match ${CODE_PATTERN}`);
     check(TEST_CATEGORIES.includes(g.category), 'invalid organize group category');
-    check(Array.isArray(g.path) && g.path.length >= 1 && g.path.length <= MAX_PATH_DEPTH, `organize group path must have 1–${MAX_PATH_DEPTH} levels`);
+    check(Array.isArray(g.path) && g.path.length <= MAX_PATH_DEPTH && (scope ? scope.path.length + g.path.length : g.path.length) >= 1 &&
+      (scope ? scope.path.length + g.path.length : g.path.length) <= MAX_PATH_DEPTH, `organize group path must have 1–${MAX_PATH_DEPTH} levels in total`);
     g.path.forEach((f, i) => folderName(f, `organize group path[${i}]`));
     check(Array.isArray(g.cases), 'organize group cases must be an array');
-    const path = g.path.map(f => f.trim());
-    const code = functionCode(g.product, g.function_code, path);
     for (const id of g.cases) {
-      if (!caseIds.has(id) || assigned.has(id)) continue; // unknown or already placed: the first placement wins
-      assigned.set(id, { caseId: id, product: g.product, functionCode: code, path, category: g.category });
+      if (!caseIds.has(id) || placed.has(id)) continue; // unknown or already placed: the first placement wins
+      placed.set(id, { caseId: id, product: g.product, path: g.path.map(f => f.trim()), code: g.function_code, category: g.category });
     }
   }
-  check(assigned.size > 0, 'organize output classified none of the supplied cases');
+  check(placed.size > 0, 'organize output classified none of the supplied cases');
+  // 2. A scoped run holds the person's limits whatever the model returned: levels below maxDepth are dropped, and
+  //    where a folder would get more than maxChildren sub-folders the ones with most cases stay and the cases of
+  //    the rest move up into that folder (they test its function, just without a sub-folder of their own). A case
+  //    the model left out stays in the scope folder itself, so the whole folder ends up within the limits.
+  const capped = [];
+  if (scope) {
+    const { maxChildren, maxDepth } = scopeLimits(scope);
+    if (scope.path.length) {
+      for (const c of cases) {
+        if (placed.has(c.id)) continue;
+        const category = /^TC-[A-Z0-9]+-[A-Z0-9]+-(FUNC|REL|PERF|SEC|COMPAT|UX)-\d{3,}$/.exec(c.id)?.[1] ?? 'FUNC'; // keep its current category
+        placed.set(c.id, { caseId: c.id, product: scope.product, path: [], code: undefined, category, leftInScope: true });
+      }
+    }
+    for (const p of placed.values()) p.path = p.path.slice(0, maxDepth);
+    for (let depth = 0; depth < maxDepth; depth++) {
+      const children = new Map(); // parent key -> Map(child name -> case count), in first-seen order
+      for (const p of placed.values()) {
+        if (p.path.length <= depth) continue;
+        const parent = p.path.slice(0, depth).join('\u0000');
+        if (!children.has(parent)) children.set(parent, new Map());
+        const counts = children.get(parent);
+        counts.set(p.path[depth], (counts.get(p.path[depth]) ?? 0) + 1);
+      }
+      for (const [parent, counts] of children) {
+        if (counts.size <= maxChildren) continue;
+        const kept = new Set([...counts].sort((x, y) => y[1] - x[1]).slice(0, maxChildren).map(([name]) => name)); // stable: ties keep model order
+        const merged = [...counts.keys()].filter(name => !kept.has(name));
+        for (const p of placed.values()) {
+          if (p.path.length > depth && p.path.slice(0, depth).join('\u0000') === parent && !kept.has(p.path[depth])) p.path = p.path.slice(0, depth);
+        }
+        capped.push({ path: [...scope.path, ...(parent ? parent.split('\u0000') : [])], merged });
+      }
+    }
+  }
+  // 3. Codes per full path, now that the paths are final. A path that only exists because cases moved up (or were
+  //    left in the scope folder) takes the code of whichever case reaches it first.
+  const fallback = [...placed.values()].find(p => p.code)?.code;
+  const assigned = new Map();
+  for (const c of cases) {
+    const p = placed.get(c.id);
+    if (!p) continue;
+    const path = scope ? [...scope.path, ...p.path] : p.path;
+    const code = functionCode(p.product, p.code ?? byPath.get(pathKey(p.product, path)) ?? fallback, path);
+    assigned.set(c.id, { caseId: c.id, product: p.product, functionCode: code, path, category: p.category });
+  }
   check(typeof output.explorationNotes === 'string', 'explorationNotes must be a string');
   const functions = [...byCode].map(([key, path]) => { const [product, code] = key.split('\u0000'); return { product, code, path }; });
   return {
@@ -240,6 +298,7 @@ export function formatOrganizeResult(output, input) {
     functions,
     assignments: cases.filter(c => assigned.has(c.id)).map(c => assigned.get(c.id)),
     unassigned: cases.filter(c => !assigned.has(c.id)).map(c => c.id),
+    ...(scope ? { leftInScope: [...placed.values()].filter(p => p.leftInScope).map(p => p.caseId), capped } : {}),
     explorationNotes: output.explorationNotes,
     limitations: riskList(output.limitations, ['summary'], 'limitations')
   };
