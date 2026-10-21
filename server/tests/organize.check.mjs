@@ -6,6 +6,7 @@ import path from 'node:path';
 import { validateInput } from '../planner/contract.mjs';
 import { organizeSchema, formatOrganizeResult, buildOrganizePrompt, MAX_ORGANIZE_CASES } from '../planner/organize.mjs';
 import { createPlannerWorker } from '../planner/worker.mjs';
+import { createPlannerService } from '../planner/service.mjs';
 
 const input = {
   target: { baseUrl: 'https://aigc.example.test/' },
@@ -90,4 +91,25 @@ test('the worker runs organize with its own prompt, schema and result', async t 
   const result = await worker(validateInput(input), { signal: new AbortController().signal, emit() {} });
   assert.equal(result.mode, 'organize');
   assert.equal(result.assignments.length, 3);
+});
+
+// The job store reports a finished run in its completion event; an organize result has no cases to count.
+test('an organize job succeeds through the planner service and keeps its result', async t => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), 'planner-organize-service-'));
+  t.after(() => rm(workspaceRoot, { recursive: true, force: true }));
+  const { jobs } = createPlannerService({ command: 'claude', concurrency: 1, workspaceRoot,
+    playwrightPackage: '/runtime/node_modules/@playwright/test/package.json',
+    runtime: async options => {
+      options.onMessage({ type: 'system', subtype: 'init', mcp_servers: [{ name: 'playwright-test', status: 'connected' }] });
+      options.onMessage({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 's', name: 'mcp__playwright-test__planner_setup_page', input: {} }] } });
+      options.onMessage({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 's', content: 'Ready' }] } });
+      return output;
+    } });
+  t.after(() => jobs.close());
+  const { id } = jobs.submit(validateInput(input));
+  let job;
+  for (let i = 0; i < 200 && !['succeeded', 'failed', 'cancelled'].includes((job = jobs.get(id)).status); i++) await new Promise(r => setTimeout(r, 10));
+  assert.equal(job.status, 'succeeded', JSON.stringify(job.error));
+  assert.equal(job.result.assignments.length, 3);
+  assert.equal(job.events.at(-1).casesClassified, 3);
 });
