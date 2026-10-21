@@ -16,13 +16,13 @@ const input = {
     cases: [{ id: 'TC-SYNC-ENTRY-FUNC-001', title: '资产操作菜单中同步至JoyData', folder: 'V1/一键同步', excerpt: '打开资产区' },
       { id: 'TC-SYNC2-ENTRY-FUNC-001', title: '批量同步至JoyData', folder: 'V2/同步' },
       { id: 'CASE-AB12CD', title: 'JoyData 接收同步文件' }],
-    modules: [{ product: 'AIGC', code: 'ASSET', name: '资产区' }]
+    functions: [{ product: 'AIGC', code: 'ASYNC', path: ['资产区', '一键同步'] }]
   }
 };
 const output = {
   groups: [
-    { product: 'AIGC', module_code: 'ASSET', folders: ['资产区', '同步至JoyData'], category: 'FUNC', cases: ['TC-SYNC-ENTRY-FUNC-001', 'TC-SYNC2-ENTRY-FUNC-001'] },
-    { product: 'JOY', module_code: 'ASSET', folders: ['资产接收'], category: 'FUNC', cases: ['CASE-AB12CD'] }
+    { product: 'AIGC', path: ['资产区', '一键同步'], function_code: 'SYNC', category: 'FUNC', cases: ['TC-SYNC-ENTRY-FUNC-001', 'TC-SYNC2-ENTRY-FUNC-001'] },
+    { product: 'JOY', path: ['资产接收'], function_code: 'ASYNC', category: 'REL', cases: ['CASE-AB12CD'] }
   ],
   explorationNotes: '',
   limitations: []
@@ -39,7 +39,8 @@ test('an organize request takes products and cases instead of requirements', () 
     { ...input, organize: { ...input.organize, products: [{ ...input.organize.products[0], baseUrl: 'file:///etc' }] } },
     { ...input, organize: { ...input.organize, cases: [...input.organize.cases, input.organize.cases[0]] } },
     { ...input, organize: { ...input.organize, cases: Array.from({ length: MAX_ORGANIZE_CASES + 1 }, (_, i) => ({ id: `C${i}`, title: 't' })) } },
-    { ...input, organize: { ...input.organize, modules: [{ product: 'NOPE', code: 'ASSET', name: '资产区' }] } },
+    { ...input, organize: { ...input.organize, functions: [{ product: 'NOPE', code: 'ASSET', path: ['资产区'] }] } },
+    { ...input, organize: { ...input.organize, functions: [{ product: 'AIGC', code: 'ASSET', path: ['a', 'b', 'c', 'd', 'e'] }] } },
     { ...input, organize: { ...input.organize, extra: true } }
   ]) assert.throws(() => validateInput(invalid));
 });
@@ -52,27 +53,28 @@ test('the schema only admits supplied products and case ids', () => {
   assert.equal(JSON.parse(buildOrganizePrompt(input)).mode, 'organize');
 });
 
-test('assignments follow the supplied order; module codes are per product and settled modules keep theirs', () => {
+test('assignments follow the supplied order; function codes are per product and settled functions keep theirs', () => {
   const result = formatOrganizeResult(output, input);
-  assert.deepEqual(result.assignments.map(a => [a.caseId, a.product, a.moduleCode, a.folders.join('/')]), [
-    ['TC-SYNC-ENTRY-FUNC-001', 'AIGC', 'ASSET', '资产区/同步至JoyData'],
-    ['TC-SYNC2-ENTRY-FUNC-001', 'AIGC', 'ASSET', '资产区/同步至JoyData'],
-    ['CASE-AB12CD', 'JOY', 'ASSET', '资产接收']]);
+  // 资产区/一键同步 was settled as ASYNC, so the model's SYNC is overridden; JOY may reuse ASYNC for its own path.
+  assert.deepEqual(result.assignments.map(a => [a.caseId, a.product, a.functionCode, a.path.join('/'), a.category]), [
+    ['TC-SYNC-ENTRY-FUNC-001', 'AIGC', 'ASYNC', '资产区/一键同步', 'FUNC'],
+    ['TC-SYNC2-ENTRY-FUNC-001', 'AIGC', 'ASYNC', '资产区/一键同步', 'FUNC'],
+    ['CASE-AB12CD', 'JOY', 'ASYNC', '资产接收', 'REL']]);
   assert.deepEqual(result.unassigned, []);
   assert.deepEqual(result.products, [{ code: 'AIGC', name: 'AIGC 平台' }, { code: 'JOY', name: 'JoyData' }]);
 });
 
-test('a code reused for another module gets a digit, a name given two codes keeps the first, leftovers are unassigned', () => {
+test('a code reused for another path gets a digit, a path given two codes keeps the first, leftovers are unassigned', () => {
   const result = formatOrganizeResult({ ...output, groups: [
-    { product: 'AIGC', module_code: 'ASSET', folders: ['素材库'], category: 'FUNC', cases: ['TC-SYNC-ENTRY-FUNC-001'] },
-    { product: 'AIGC', module_code: 'SYNC', folders: ['资产区'], category: 'UX', cases: ['TC-SYNC2-ENTRY-FUNC-001', 'TC-SYNC-ENTRY-FUNC-001'] }
+    { product: 'AIGC', path: ['资产区', '搜索'], function_code: 'ASYNC', category: 'FUNC', cases: ['TC-SYNC-ENTRY-FUNC-001'] },
+    { product: 'AIGC', path: ['资产区', '一键同步'], function_code: 'OTHER', category: 'UX', cases: ['TC-SYNC2-ENTRY-FUNC-001', 'TC-SYNC-ENTRY-FUNC-001'] }
   ] }, input);
-  assert.deepEqual(result.assignments.map(a => [a.caseId, a.moduleCode, a.folders[0], a.category]), [
-    ['TC-SYNC-ENTRY-FUNC-001', 'ASSET2', '素材库', 'FUNC'],
-    ['TC-SYNC2-ENTRY-FUNC-001', 'ASSET', '资产区', 'UX']]);
+  assert.deepEqual(result.assignments.map(a => [a.caseId, a.functionCode, a.path.join('/'), a.category]), [
+    ['TC-SYNC-ENTRY-FUNC-001', 'ASYNC2', '资产区/搜索', 'FUNC'],
+    ['TC-SYNC2-ENTRY-FUNC-001', 'ASYNC', '资产区/一键同步', 'UX']]);
   assert.deepEqual(result.unassigned, ['CASE-AB12CD']);
   assert.throws(() => formatOrganizeResult({ ...output, groups: [] }, input), /none/);
-  assert.throws(() => formatOrganizeResult({ ...output, groups: [{ ...output.groups[0], folders: ['a/b'] }] }, input));
+  assert.throws(() => formatOrganizeResult({ ...output, groups: [{ ...output.groups[0], path: ['a/b'] }] }, input));
 });
 
 test('the worker runs organize with its own prompt, schema and result', async t => {

@@ -113,11 +113,12 @@ curl http://localhost:4501/v1/planner/jobs/JOB_ID/result
 
 ### 用例重整模式（功能 AM，临时）
 
-请求带 `organize`（且不带 `requirements` / `caseCount`）时，任务不设计用例，而是探索产品、把给定的基线用例按 `产品 / 模块 / 按需的子级` 归类，代码在 [organize.mjs](organize.mjs)。用例结构问题修复后整体 revert。
+请求带 `organize`（且不带 `requirements` / `caseCount`）时，任务不设计用例，而是探索产品、读每条用例测的是什么，把给定的基线用例按 `产品 / 模块 / 子功能… / 测试类别` 归类，代码在 [organize.mjs](organize.mjs)。用例结构问题修复后整体 revert。
 
-- 输入：`organize.products`（1–20 个 `{code, name, baseUrl, notes?}`，`target.baseUrl` 一般取第一个产品）、`organize.cases`（1–1000 条 `{id, title, folder?, excerpt?}`，一批，不必是全部基线）、可选的 `organize.modules`（前几批已经定下的 `{product, code, name}`，本批沿用）。
+- 输入：`organize.products`（1–20 个 `{code, name, baseUrl, notes?}`，`target.baseUrl` 一般取第一个产品）、`organize.cases`（1–1000 条 `{id, title, folder?, excerpt?}`，excerpt 是前置条件/步骤/预期的摘录；一批，不必是全部基线）、可选的 `organize.functions`（前几批已经定下的叶子功能 `{product, code, path}`，本批沿用）。
+- 模块按用例实际测的功能拆成子功能（如 资产区 / 文件夹操作、搜索、排序），子功能用例很多时再细分一级；路径 1–4 级，不含测试类别。
 - 探索是只读的：不提交表单、不增删改数据。
-- 结果：`{mode: "organize", products, modules, assignments: [{caseId, product, moduleCode, folders, category}], unassigned, explorationNotes, limitations}`。同一产品内一个模块名只对应一个缩写，缩写被别的模块占用时自动加数字（`AUTH` → `AUTH2`）。新编号 `TC-<产品>-<模块>-<类别>-NNN` 和目录重建都由 CaseHub 完成，本服务不碰数据。
+- 结果：`{mode: "organize", products, functions, assignments: [{caseId, product, functionCode, path, category}], unassigned, explorationNotes, limitations}`。`functionCode` 是叶子功能的缩写，同一产品内一条路径只对应一个缩写，缩写被别的路径占用时自动加数字（`ASRCH` → `ASRCH2`）。测试类别目录、`TC-<产品>-<功能>-<类别>-NNN` 编号和目录重建都由 CaseHub 完成，本服务不碰数据。
 
 ## 进度和任务生命周期
 
