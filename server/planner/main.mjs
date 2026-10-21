@@ -11,6 +11,7 @@ import { AssetCache } from '../shared/assets.mjs';
 import { positive } from '../shared/env.mjs';
 import { authSessionsFromEnv } from '../shared/auth-session.mjs';
 import { createPlannerService } from './service.mjs';
+import { createOrganizerService } from '../organizer/service.mjs';
 
 export async function main() {
   const host = process.env.PLANNER_HOST ?? '0.0.0.0';
@@ -30,13 +31,17 @@ export async function main() {
   // Files CaseHub pushes for tasks (see shared/assets.mjs); kept apart from job data so pruning one never touches the other.
   const assetCache = new AssetCache({ dir: process.env.PLANNER_ASSET_DIR ?? path.join(tmpdir(), 'auto-test-planner-assets'),
     maxBytes: positive('PLANNER_ASSET_CACHE_MB', 2048) * 1024 * 1024 });
+  const authSessions = authSessionsFromEnv(); // shared with the organizer: a login either one saved serves both
   const planner = createPlannerService({ command, runtime, applySettings, playwrightPackage, assetCache, workspaceRoot: path.join(dataDir, 'workspaces'),
-    concurrency: positive('PLANNER_CONCURRENCY', 1), authSessions: authSessionsFromEnv() });
-  const server = createRoutedServer([planner]);
+    concurrency: positive('PLANNER_CONCURRENCY', 1), authSessions });
+  // The organizer (功能 AM, temporary) runs beside the planner: same pod, runtime and configuration, its own routes and tasks.
+  const organizer = createOrganizerService({ command, runtime, applySettings, playwrightPackage, assetCache, workspaceRoot: path.join(dataDir, 'organizer-workspaces'),
+    concurrency: positive('ORGANIZER_CONCURRENCY', 1), authSessions });
+  const server = createRoutedServer([organizer, planner]);
   server.listen(positive('PLANNER_PORT', 4501), host, () => console.log(`Planner HTTP service listening on ${host}:${server.address().port}`));
   stopOnSignals(server, { label: 'Planner', drainTimeoutMs: positive('PLANNER_DRAIN_TIMEOUT_MS', positive('PLANNER_TIMEOUT_MS', 900000)),
     holdMs: positive('PLANNER_DRAIN_HOLD_MS', 60000) });
-  return { server, jobs: planner.jobs };
+  return { server, jobs: planner.jobs, organizerJobs: organizer.jobs };
 }
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   main().catch(error => { console.error(`Planner startup failed: ${error.message}`); process.exitCode = 1; });

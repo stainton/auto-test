@@ -20,10 +20,6 @@ export function createPlannerService({ command, runtime, applySettings, playwrig
   const worker = withExperience(createPlannerWorker({ command, runtime, playwrightPackage, assetCache, authSessions, temporaryRoot: workspaceRoot }));
   const jobs = new Jobs({
     worker, concurrency, timeoutMs: positive('PLANNER_TIMEOUT_MS', 900000),
-    // An organize run (organize.mjs, temporary) classifies cases instead of designing them, so its result has no cases.
-    completion: result => result.mode === 'organize'
-      ? { message: `Classified ${result.assignments.length} cases`, casesClassified: result.assignments.length, casesUnassigned: result.unassigned.length }
-      : { message: 'Draft test cases ready for review', casesGenerated: result.cases.length },
     // A request may raise or lower its own limit; the deployment keeps the last word through
     // PLANNER_MAX_TIMEOUT_MS, so one caller cannot occupy the single browser slot indefinitely.
     timeoutFor: input => input.timeoutMs && Math.min(input.timeoutMs, positive('PLANNER_MAX_TIMEOUT_MS', MAX_TIMEOUT_MS)),

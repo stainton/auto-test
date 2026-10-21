@@ -5,6 +5,7 @@ server/
   shared/       HTTP、任务生命周期（内存）、进度事件、归档打包和跨服务共用的契约基元
   runtime/      Claude CLI 非交互执行与配置加载，直接连接 Playwright MCP
   planner/      测试设计：输入/输出契约、提示词、流程实现、service.mjs（任务与路由）、服务入口（planner Pod）、OpenAPI
+  organizer/    用例重整（临时，功能 AM）：只做已有用例的结构优化，不设计用例；挂在 planner Pod 和 automation 服务里，见 organizer/README.md
   generator/    脚本生成：同样的结构，一条已评审用例产出一个 Playwright spec；入口同时挂载 healer（generator Pod）
   healer/       脚本修复：契约、提示词、流程与 service.mjs，由 generator 或 automation 进程挂载
   executor/     脚本执行：运行已审核 spec 并生成测试记录（executor Pod）
@@ -17,7 +18,7 @@ server/
 
 | Pod | 入口 | 端口 | 路由 |
 | --- | --- | --- | --- |
-| planner | `planner/main.mjs` | 4501 | `/v1/planner/*`（设计、评估、阅读友好版改写） |
+| planner | `planner/main.mjs` | 4501 | `/v1/planner/*`（设计、评估、阅读友好版改写）；同一进程还提供 `/v1/organizer/*`（用例重整，临时） |
 | generator | `generator/main.mjs` | 4502 | `/v1/generator/*` 与 `/v1/healer/*`（生成与修复共用浏览器运行时） |
 | executor | `executor/main.mjs` | 4504 | `/v1/executor/*`（执行已审核脚本） |
 

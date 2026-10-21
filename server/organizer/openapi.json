@@ -1,0 +1,13 @@
+{
+  "openapi": "3.1.0",
+  "info": { "title": "auto-test organizer", "version": "1", "description": "Temporary (功能 AM): classifies existing test cases into 产品 / 模块 / 子功能… / 测试类别 by exploring the products. Designs no cases and never touches the caller's data. Request and result shapes: see server/organizer/README.md." },
+  "paths": {
+    "/v1/organizer/jobs": { "post": { "summary": "Submit a classification task", "responses": { "202": { "description": "Accepted" } } } },
+    "/v1/organizer/jobs/{jobId}": { "get": { "summary": "Task status" }, "delete": { "summary": "Cancel" } },
+    "/v1/organizer/jobs/{jobId}/events": { "get": { "summary": "SSE progress" } },
+    "/v1/organizer/jobs/{jobId}/result": { "get": { "summary": "Classification result" } },
+    "/v1/organizer/jobs/{jobId}/release": { "post": { "summary": "Release a finished task" } },
+    "/v1/organizer/jobs/{jobId}/checkpoint": { "get": { "summary": "Session archive of an interrupted task" } },
+    "/v1/organizer/capacity": { "get": { "summary": "Free slots on this node" } }
+  }
+}
