@@ -15,7 +15,7 @@ export const TEST_CATEGORIES = ['FUNC', 'REL', 'PERF', 'SEC', 'COMPAT', 'UX'];
 export const MAX_PRODUCTS = 20;
 // A batch, not the whole baseline: every case's text is part of the prompt. CaseHub sends the rest in later runs.
 export const MAX_ORGANIZE_CASES = 1000;
-export const MAX_PATH_DEPTH = 4; // module + up to three function levels; CaseHub adds the category folder below
+export const MAX_PATH_DEPTH = 6; // module + up to five function levels; CaseHub adds the category folder below
 export const FOLDER_NAME_MAX_CHARS = 20;
 const EXCERPT_MAX_CHARS = 2000;
 
@@ -26,9 +26,11 @@ const folderName = (value, name) => {
 const pathKey = (product, path) => [product, ...path.map(p => p.trim())].join('\u0000');
 
 // organize: { products: [{code, name, baseUrl, notes?}], cases: [{id, title, folder?, excerpt?}],
-//             functions?: [{product, code, path}] } — functions are the leaf functions earlier batches already settled.
+//             functions?: [{product, code, path}], scope?: {product, path} } — functions are the leaf functions earlier
+// batches already settled; scope, when present, is one folder being divided further: every case stays in that product
+// and beneath that path, and the model only returns the levels below it.
 export function validateOrganize(value) {
-  keys(value, ['products', 'cases', 'functions'], 'organize');
+  keys(value, ['products', 'cases', 'functions', 'scope'], 'organize');
   check(Array.isArray(value.products) && value.products.length >= 1 && value.products.length <= MAX_PRODUCTS, `organize.products must contain 1–${MAX_PRODUCTS} entries`);
   const codes = new Set(), names = new Set();
   for (const p of value.products) {
@@ -50,6 +52,12 @@ export function validateOrganize(value) {
     ids.add(c.id);
     string(c.title, 'organize.cases.title', 500);
     for (const k of ['folder', 'excerpt']) if (c[k] !== undefined) check(typeof c[k] === 'string' && c[k].length <= EXCERPT_MAX_CHARS, `organize.cases.${k} must be a string (max ${EXCERPT_MAX_CHARS} characters)`);
+  }
+  if (value.scope !== undefined) {
+    keys(value.scope, ['product', 'path'], 'organize.scope');
+    check(codes.has(value.scope.product), 'organize.scope.product must be a supplied product code');
+    check(Array.isArray(value.scope.path) && value.scope.path.length < MAX_PATH_DEPTH, `organize.scope.path must have 0–${MAX_PATH_DEPTH - 1} levels`);
+    value.scope.path.forEach((p, i) => folderName(p, `organize.scope.path[${i}]`));
   }
   if (value.functions !== undefined) {
     check(Array.isArray(value.functions) && value.functions.length <= 1000, 'organize.functions must contain at most 1000 entries');
@@ -115,6 +123,14 @@ Workflow:
    limitations: what stayed unverified, for a non-technical reader — {risk, summary}, summary in Simplified Chinese
    of at most 40 characters (e.g. "未能进入素材管理页：缺少权限"). Empty when nothing was blocked.
 
+Scoped runs: when organize.scope is present, the person is dividing ONE existing folder further. Every case belongs
+to product scope.product and stays beneath scope.path (module / sub-function … already settled). Explore that part
+of the product closely and split the cases into finer functions beneath it, by what each case operates and asserts
+(e.g. 资产区 / 搜索 → 关键词搜索, 按标签筛选, 搜索结果分页). Return path RELATIVE to scope.path: only the new levels
+below it, at most ${MAX_PATH_DEPTH} levels in total together with scope.path. An empty path keeps a case directly in the
+scope folder; use that only for a case that tests the scope's function as a whole. function_code still names the
+full path's leaf: for an empty path, use scope's own code from organize.functions when it is listed there.
+
 Progress: before each phase and after useful findings, emit a standalone text line starting with PLANNER_PROGRESS
 followed by JSON, e.g. PLANNER_PROGRESS {"stage":"exploring","message":"打开资产区工具栏，记录到 搜索/排序/筛选 三个入口"}.
 Allowed stages: reading_requirements, preparing, exploring, designing, finalizing (designing = classifying).
@@ -126,6 +142,7 @@ export function buildOrganizePrompt(input) {
     mode: 'organize',
     products: input.organize.products,
     functions: input.organize.functions ?? [],
+    ...(input.organize.scope ? { scope: input.organize.scope } : {}),
     cases: input.organize.cases,
     target: { baseUrl: input.target.baseUrl, authenticationProvided: Boolean(input.target.storageState || input.target.extraHTTPHeaders) },
     ...(input.authSession ? { authSession: input.authSession } : {}),
@@ -144,16 +161,19 @@ ${buildOrganizePrompt(input)}`;
 // Enums make an unknown product or case id structurally impossible; "every id exactly once" and one-code-per-path
 // cannot be expressed in JSON Schema, so formatOrganizeResult settles those without failing the (expensive) run.
 export function organizeSchema(input) {
-  const { products, cases } = input.organize;
+  const { products, cases, scope } = input.organize;
   const folder = { type: 'string', minLength: 1, maxLength: FOLDER_NAME_MAX_CHARS };
+  // A scoped run returns only the levels below the scope folder, possibly none.
+  const path = scope ? { type: 'array', minItems: scope.path.length ? 0 : 1, maxItems: MAX_PATH_DEPTH - scope.path.length, items: folder }
+    : { type: 'array', minItems: 1, maxItems: MAX_PATH_DEPTH, items: folder };
   return {
     type: 'object', additionalProperties: false, required: ['groups', 'explorationNotes', 'limitations'],
     properties: {
       groups: { type: 'array', minItems: 1, items: {
         type: 'object', additionalProperties: false, required: ['product', 'path', 'function_code', 'category', 'cases'],
         properties: {
-          product: { type: 'string', enum: products.map(p => p.code) },
-          path: { type: 'array', minItems: 1, maxItems: MAX_PATH_DEPTH, items: folder },
+          product: { type: 'string', enum: scope ? [scope.product] : products.map(p => p.code) },
+          path,
           function_code: { type: 'string', pattern: CODE_PATTERN },
           category: { type: 'string', enum: TEST_CATEGORIES },
           cases: { type: 'array', minItems: 1, items: { type: 'string', enum: cases.map(c => c.id) } }
@@ -171,7 +191,7 @@ export function organizeSchema(input) {
 export function formatOrganizeResult(output, input) {
   check(Buffer.byteLength(JSON.stringify(output) ?? '') <= 2 * 1024 * 1024, 'planner structured output exceeds 2 MiB');
   keys(output, ['groups', 'explorationNotes', 'limitations'], 'organize output');
-  const { products, cases, functions: settled = [] } = input.organize;
+  const { products, cases, functions: settled = [], scope } = input.organize;
   const productCodes = new Set(products.map(p => p.code)), caseIds = new Set(cases.map(c => c.id));
   const byPath = new Map(), byCode = new Map(); // pathKey -> code, `${product}\0${code}` -> path
   const claim = (product, code, path) => { byPath.set(pathKey(product, path), code); byCode.set(`${product}\u0000${code}`, path); };
@@ -192,9 +212,13 @@ export function formatOrganizeResult(output, input) {
   };
   check(Array.isArray(output.groups), 'organize output groups must be an array');
   const assigned = new Map();
-  for (const g of output.groups) {
+  for (let g of output.groups) {
     keys(g, ['product', 'path', 'function_code', 'category', 'cases'], 'organize group');
     check(productCodes.has(g.product), 'organize group product must be a supplied product code');
+    check(!scope || g.product === scope.product, 'a scoped organize group must stay in the scope product');
+    check(Array.isArray(g.path), 'organize group path must be an array');
+    // A scoped run's path is relative to the scope folder; from here on it is the full function path.
+    if (scope) g = { ...g, path: [...scope.path, ...g.path] };
     check(typeof g.function_code === 'string' && CODE_RE.test(g.function_code), `organize group function_code must match ${CODE_PATTERN}`);
     check(TEST_CATEGORIES.includes(g.category), 'invalid organize group category');
     check(Array.isArray(g.path) && g.path.length >= 1 && g.path.length <= MAX_PATH_DEPTH, `organize group path must have 1–${MAX_PATH_DEPTH} levels`);

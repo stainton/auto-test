@@ -40,7 +40,7 @@ test('an organize request takes products and cases instead of requirements', () 
     { ...input, organize: { ...input.organize, cases: [...input.organize.cases, input.organize.cases[0]] } },
     { ...input, organize: { ...input.organize, cases: Array.from({ length: MAX_ORGANIZE_CASES + 1 }, (_, i) => ({ id: `C${i}`, title: 't' })) } },
     { ...input, organize: { ...input.organize, functions: [{ product: 'NOPE', code: 'ASSET', path: ['资产区'] }] } },
-    { ...input, organize: { ...input.organize, functions: [{ product: 'AIGC', code: 'ASSET', path: ['a', 'b', 'c', 'd', 'e'] }] } },
+    { ...input, organize: { ...input.organize, functions: [{ product: 'AIGC', code: 'ASSET', path: ['a', 'b', 'c', 'd', 'e', 'f', 'g'] }] } },
     { ...input, organize: { ...input.organize, extra: true } }
   ]) assert.throws(() => validateInput(invalid));
 });
@@ -114,4 +114,30 @@ test('an organize job succeeds through the planner service and keeps its result'
   assert.equal(job.status, 'succeeded', JSON.stringify(job.error));
   assert.equal(job.result.assignments.length, 3);
   assert.equal(job.events.at(-1).casesClassified, 3);
+});
+
+// Dividing one existing folder further: the model returns only the levels below it.
+test('a scoped run stays in the scope product and folder and returns paths relative to it', () => {
+  const scoped = { ...input, organize: { ...input.organize, scope: { product: 'AIGC', path: ['资产区', '一键同步'] } } };
+  assert.deepEqual(validateInput(scoped), scoped);
+  for (const scope of [{ product: 'NOPE', path: [] }, { product: 'AIGC', path: ['a', 'b', 'c', 'd', 'e', 'f'] }, { product: 'AIGC', path: ['a/b'] }])
+    assert.throws(() => validateInput({ ...input, organize: { ...input.organize, scope } }));
+  const schema = organizeSchema(scoped).properties.groups.items.properties;
+  assert.deepEqual(schema.product.enum, ['AIGC']);
+  assert.equal(schema.path.minItems, 0);
+  assert.equal(schema.path.maxItems, 4);
+  assert.equal(JSON.parse(buildOrganizePrompt(scoped)).scope.product, 'AIGC');
+  // A product-level scope still needs a module.
+  assert.equal(organizeSchema({ ...input, organize: { ...input.organize, scope: { product: 'AIGC', path: [] } } }).properties.groups.items.properties.path.minItems, 1);
+
+  const result = formatOrganizeResult({ ...output, groups: [
+    { product: 'AIGC', path: ['菜单入口'], function_code: 'SYNCMENU', category: 'FUNC', cases: ['TC-SYNC-ENTRY-FUNC-001'] },
+    { product: 'AIGC', path: [], function_code: 'WHATEVER', category: 'REL', cases: ['TC-SYNC2-ENTRY-FUNC-001'] },
+    { product: 'AIGC', path: ['批量入口'], function_code: 'SYNCBATCH', category: 'FUNC', cases: ['CASE-AB12CD'] }
+  ] }, scoped);
+  assert.deepEqual(result.assignments.map(a => [a.caseId, a.path.join('/'), a.functionCode]), [
+    ['TC-SYNC-ENTRY-FUNC-001', '资产区/一键同步/菜单入口', 'SYNCMENU'],
+    ['TC-SYNC2-ENTRY-FUNC-001', '资产区/一键同步', 'ASYNC'], // the scope folder itself keeps its settled code
+    ['CASE-AB12CD', '资产区/一键同步/批量入口', 'SYNCBATCH']]);
+  assert.throws(() => formatOrganizeResult({ ...output, groups: [{ ...output.groups[1], path: [] }] }, scoped), /scope product/);
 });
