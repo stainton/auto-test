@@ -1029,6 +1029,11 @@
                 "description": "Business rules/historical bugs; read-only for planner",
                 "maxLength": 200000
               },
+              "caseLibrary": {
+                "type": "string",
+                "description": "The product's existing case library from the CaseHub knowledge base: a nested Markdown list of the product's mainline folders and cases. The planner reads it to decide how to organize its output (reuse an existing module or add a new one); omission means no library",
+                "maxLength": 200000
+              },
               "instructions": {
                 "type": "string",
                 "description": "Constraints from the person starting the run, obeyed as hard limits: scope to cover or skip, actions forbidden during exploration (e.g. 不要等待任务运行完成), how long to wait for anything, login instructions and environment prerequisites. What a constraint leaves unverified comes back as a limitation instead of being explored anyway.",

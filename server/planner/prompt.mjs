@@ -29,6 +29,10 @@ Workflow:
    already on local disk at that path, so use it directly (e.g. browser_file_upload with the path) and never try
    to download or fetch it. Only use one when a scenario you are actually exploring needs that kind of file, and
    never claim to have used an asset you did not.
+   context.caseLibrary, when present, is the product's existing case library (a nested list of its folders, then the cases filed in them)
+   and is read-only. Read its folder structure before designing: it shows how this product's cases are organized.
+   Use it only to decide how the output is organized (step 6 module_code/module_name). Never copy its cases,
+   and never skip a case because a similar one is listed.
 4. Call planner_setup_page once, passing seedFile "seed.spec.ts". The server has prepared the requested URL and storage state.
    If login still requires interaction, use only credentials/instructions provided in context. Report missing prerequisites.
    Explore breadth-first; prefer accessibility snapshots. Do not take screenshots unless necessary.
@@ -48,6 +52,12 @@ Workflow:
    of the same module exactly the same code. module_name is that module's short Simplified Chinese name (at most 20
    characters, e.g. 登录认证, 找回密码), identical for every case sharing the module_code.
    category is the test category: FUNC (功能), REL (可靠性), PERF (性能), SEC (安全), COMPAT (兼容性) or UX (易用性).
+   When context.caseLibrary is supplied, organize by it. Where one of its existing folders already covers a case's
+   function, reuse that folder: take module_name from the folder name (keep its wording exactly) and give the same
+   module_code to every case filed there; if you cannot tell a folder's code, derive a short uppercase abbreviation
+   of its name and use it consistently. Where no existing folder fits, add a new module with a name in the same
+   style and granularity as its siblings; do not force a case into an unrelated folder, and do not create a
+   near-duplicate of a folder that already exists.
    Do not write a case id: the server assigns TC-<requirement code>-<module_code>-<category>-<NNN> from these fields.
    Do not write a description/summary of the case; that field is reserved for the human reviewer.
    steps is an ordered array of {step, expect} pairs, one entry per test step, in execution order; do not

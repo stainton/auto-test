@@ -58,6 +58,7 @@ node server/planner/main.mjs
     "testData": { "username": "test-user", "password": "caller-supplied-password" },
     "explorationNotes": "",
     "knownIssues": "",
+    "caseLibrary": "",
     "assets": [
       { "id": "a1b2c3", "name": "上传测试图.png", "type": "image", "mimeType": "image/png",
         "sha256": "<文件的 SHA-256 小写十六进制>", "size": 68 }
