@@ -125,8 +125,12 @@ const STEP_LIST = { type: 'array', minItems: 1, maxItems: 50, items: {
   type: 'object', additionalProperties: false, required: ['step', 'expect'],
   properties: { step: { type: 'string', minLength: 1 }, expect: { type: 'string', minLength: 1 } } } };
 const MODEL_CASE_FIELDS = [...CASE_FIELDS.filter(field => !['expects', 'case_id'].includes(field) && !HUMAN_CASE_FIELDS.includes(field)),
-  'module_code', 'module_name', 'category'];
+  'module_code', 'module_name', 'module_path', 'category'];
 export const MODULE_NAME_MAX_CHARS = 20;
+// module_path is the module's folder path in the product's case library, from the folder directly below the product
+// down to the module itself (its last entry is module_name), so a caller can file the cases in the same tree for every
+// requirement. Without a case library it is just [module_name].
+export const MODULE_PATH_MAX_DEPTH = 6;
 // limitations (what stayed unverified) and issues (defects actually observed while exploring) are both read
 // by a non-technical reviewer right after the draft is imported, so the model writes each as short
 // plain-language text with a risk level (hard caps below, not prose limits the model can drift past), and
@@ -149,6 +153,7 @@ export const OUTPUT_SCHEMA = {
         : field === 'steps' ? STEP_LIST
         : field === 'module_code' ? { type: 'string', pattern: CODE_PATTERN }
         : field === 'module_name' ? { type: 'string', minLength: 1, maxLength: MODULE_NAME_MAX_CHARS }
+        : field === 'module_path' ? { type: 'array', minItems: 1, maxItems: MODULE_PATH_MAX_DEPTH, items: { type: 'string', minLength: 1, maxLength: MODULE_NAME_MAX_CHARS } }
         : field === 'category' ? { type: 'string', enum: Object.keys(TEST_CATEGORIES) }
         : { type: 'string', minLength: 1 }]))
     } },
@@ -182,14 +187,21 @@ export function formatResult(output, input) {
   // Chinese module names travel beside the cases (not as a case field, test-model.md keeps its eight columns) so a
   // caller can label module folders; the first name given for a requirement's module code wins.
   const modules = new Map();
-  const cases = output.cases.map(item => {
+  const cases = output.cases.map(rawItem => {
+    let item = rawItem;
     keys(item, MODEL_CASE_FIELDS, 'case');
+    if (item.module_path === undefined) item = { ...item, module_path: [String(item.module_name ?? '').trim()] };
     for (const field of MODEL_CASE_FIELDS) {
       if (field === 'steps') {
         check(Array.isArray(item.steps) && item.steps.length >= 1 && item.steps.length <= 50 &&
           item.steps.every(s => object(s) && typeof s.step === 'string' && s.step.trim().length > 0 &&
             typeof s.expect === 'string' && s.expect.trim().length > 0),
           'case.steps must be a non-empty array of {step, expect} entries with non-empty text');
+      } else if (field === 'module_path') {
+        // Tolerant of a missing path (older callers/fixtures): the module then sits directly under the requirement.
+        check(item.module_path === undefined || Array.isArray(item.module_path) && item.module_path.length >= 1 && item.module_path.length <= MODULE_PATH_MAX_DEPTH &&
+          item.module_path.every(n => typeof n === 'string' && n.trim().length > 0 && [...n.trim()].length <= MODULE_NAME_MAX_CHARS),
+          `case.module_path must be 1–${MODULE_PATH_MAX_DEPTH} non-empty folder names of at most ${MODULE_NAME_MAX_CHARS} characters`);
       } else {
         string(item[field], `case.${field}`);
       }
@@ -199,8 +211,10 @@ export function formatResult(output, input) {
     check(CODE_RE.test(item.module_code), `case.module_code must match ${CODE_PATTERN}`);
     check(Object.hasOwn(TEST_CATEGORIES, item.category), 'invalid case.category');
     check([...item.module_name.trim()].length <= MODULE_NAME_MAX_CHARS, `case.module_name must be at most ${MODULE_NAME_MAX_CHARS} characters`);
+    const path = item.module_path.map(n => n.trim());
+    check(path.at(-1) === item.module_name.trim(), 'case.module_path must end with case.module_name');
     const moduleKey = `${item.request}\u0000${item.module_code}`;
-    if (!modules.has(moduleKey)) modules.set(moduleKey, { requirement: item.request, code: item.module_code, name: item.module_name.trim() });
+    if (!modules.has(moduleKey)) modules.set(moduleKey, { requirement: item.request, code: item.module_code, name: item.module_name.trim(), path });
     const prefix = `TC-${requirements.get(item.request)}-${item.module_code}-${item.category}`;
     const n = (sequence.get(prefix) ?? 0) + 1; sequence.set(prefix, n);
     const caseId = `${prefix}-${String(n).padStart(3, '0')}`;

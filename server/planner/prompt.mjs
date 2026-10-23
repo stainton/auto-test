@@ -45,18 +45,24 @@ Workflow:
    Cases must be independently understandable and repeatable; describe starting state, authentication, data and cleanup constraints.
    Preserve known hazards, shared-fixture reuse rules and reliable interaction techniques in the preconditions/steps.
 6. Return structured output matching the supplied schema. Do not save plans to local files.
-   Each case has exactly: request, name, priority, precondition, module_code, module_name, category, steps.
+   Each case has exactly: request, name, priority, precondition, module_code, module_name, module_path, category, steps.
    request is an exact supplied requirement id; name is a descriptive scenario title; priority is P0/P1/P2/P3.
    module_code is a short uppercase ASCII abbreviation (2–12 letters/digits, no "-") of the functional module the
    case exercises, e.g. AUTH, RESET, LIST. Group the requirement into a few meaningful modules and give every case
    of the same module exactly the same code. module_name is that module's short Simplified Chinese name (at most 20
    characters, e.g. 登录认证, 找回密码), identical for every case sharing the module_code.
+   module_path is the module's folder path as an array of folder names, from the folder directly below the product
+   down to the module itself; its last entry is exactly module_name. Without context.caseLibrary it is just [module_name].
+   Every case sharing a module_code has the same module_path.
    category is the test category: FUNC (功能), REL (可靠性), PERF (性能), SEC (安全), COMPAT (兼容性) or UX (易用性).
-   When context.caseLibrary is supplied, organize by it. Where one of its existing folders already covers a case's
-   function, reuse that folder: take module_name from the folder name (keep its wording exactly) and give the same
-   module_code to every case filed there; if you cannot tell a folder's code, derive a short uppercase abbreviation
+   When context.caseLibrary is supplied, organize by it, because every requirement of the same product must end up with
+   the same folder tree. Where one of its existing folders already covers a case's function, reuse that folder: take
+   module_name from the folder name (keep its wording exactly), set module_path to that folder's full path in the library
+   (every ancestor folder name from directly below the product, wording exactly as listed, then the folder itself),
+   and give the same module_code to every case filed there; if you cannot tell a folder's code, derive a short uppercase abbreviation
    of its name and use it consistently. Where no existing folder fits, add a new module with a name in the same
-   style and granularity as its siblings; do not force a case into an unrelated folder, and do not create a
+   style and granularity as its siblings, placed under the existing parent folder it belongs to (module_path = that
+   parent's path plus the new name); do not force a case into an unrelated folder, and do not create a
    near-duplicate of a folder that already exists.
    Do not write a case id: the server assigns TC-<requirement code>-<module_code>-<category>-<NNN> from these fields.
    Do not write a description/summary of the case; that field is reserved for the human reviewer.

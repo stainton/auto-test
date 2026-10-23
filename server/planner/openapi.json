@@ -1357,12 +1357,24 @@
               "required": [
                 "requirement",
                 "code",
-                "name"
+                "name",
+                "path"
               ],
               "properties": {
                 "requirement": {
                   "type": "string",
                   "description": "Requirement id the module belongs to"
+                },
+                "path": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 6,
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 20
+                  },
+                  "description": "Folder path of the module in the product case library, from the folder directly below the product down to the module itself (the last entry equals name); just [name] when no case library was supplied"
                 },
                 "code": {
                   "type": "string",
