@@ -39,28 +39,40 @@ function entry(name, options, data) {
 
 // skip(relative, isDirectory) leaves an entry (and everything under a skipped directory) out. Past maxBytes of
 // file content the archive either fails (a checkpoint must be complete) or, with truncate, notes what it left out.
-export async function packDirectory(root, { skip = () => false, maxBytes = 100 * 1024 * 1024, truncate = false } = {}) {
-  const parts = [], omitted = [];
-  let total = 0;
+// When truncating, what fits is chosen by value rather than name order: deprioritize(relative) files go last, and
+// within each group smaller files first, so a few small logs are never crowded out by thousands of large frames.
+export async function packDirectory(root, { skip = () => false, maxBytes = 100 * 1024 * 1024, truncate = false, deprioritize = () => false } = {}) {
+  const parts = [], omitted = [], items = [];
   async function walk(relative) {
     const entries = await readdir(path.join(root, relative), { withFileTypes: true });
     for (const item of entries.sort((a, b) => a.name.localeCompare(b.name))) {
       const name = relative ? `${relative}/${item.name}` : item.name, full = path.join(root, name);
       const info = await lstat(full);
       if (info.isSymbolicLink() || skip(name, info.isDirectory())) continue;
-      if (info.isDirectory()) { parts.push(...entry(`${name}/`, { type: '5', mode: 0o700, mtime: info.mtimeMs })); await walk(name); continue; }
-      if (!info.isFile()) continue;
-      if (total + info.size > maxBytes) {
-        if (!truncate) throw new Error(`Archive of ${root} exceeds ${maxBytes} bytes`);
-        omitted.push(`${name} (${info.size} bytes)`); continue;
-      }
-      total += info.size;
-      parts.push(...entry(name, { mode: 0o600, mtime: info.mtimeMs }, await readFile(full)));
+      if (info.isDirectory()) { items.push({ name, info, directory: true }); await walk(name); continue; }
+      if (info.isFile()) items.push({ name, full, info });
     }
   }
   await walk('');
+  const files = items.filter(item => !item.directory);
+  const order = truncate ? [...files].sort((a, b) => Number(deprioritize(a.name)) - Number(deprioritize(b.name)) || a.info.size - b.info.size) : files;
+  const kept = new Set();
+  let total = 0;
+  for (const file of order) {
+    if (total + file.info.size > maxBytes) {
+      if (!truncate) throw new Error(`Archive of ${root} exceeds ${maxBytes} bytes`);
+      omitted.push(file); continue;
+    }
+    total += file.info.size;
+    kept.add(file);
+  }
+  for (const item of items) {
+    if (item.directory) parts.push(...entry(`${item.name}/`, { type: '5', mode: 0o700, mtime: item.info.mtimeMs }));
+    else if (kept.has(item)) parts.push(...entry(item.name, { mode: 0o600, mtime: item.info.mtimeMs }, await readFile(item.full)));
+  }
   if (omitted.length) {
-    const note = Buffer.from(`Left out to stay within ${maxBytes} bytes:\n${omitted.join('\n')}\n`);
+    const lines = omitted.sort((a, b) => a.name.localeCompare(b.name)).map(file => `${file.name} (${file.info.size} bytes)`);
+    const note = Buffer.from(`Left out to stay within ${maxBytes} bytes:\n${lines.join('\n')}\n`);
     parts.push(...entry('OMITTED.txt', { mtime: Date.now() }, note));
   }
   parts.push(Buffer.alloc(BLOCK * 2));
@@ -76,7 +88,8 @@ export const isSecret = name => SECRET.has(path.posix.basename(name));
 // A failed run's workspace as the dispatcher downloads it: scripts, errors, runtime logs and Playwright output,
 // trimmed to a size a database row can hold rather than refused.
 export function packDiagnostics(workspace, { maxBytes = 50 * 1024 * 1024 } = {}) {
-  return packDirectory(workspace, { maxBytes, truncate: true,
+  // Trace screencast frames (traces/resources/*.jpeg) run to thousands of files; they go in only after the logs fit.
+  return packDirectory(workspace, { maxBytes, truncate: true, deprioritize: name => /(^|\/)traces\/resources\//.test(name),
     skip: name => isSecret(name) || ['claude-config', 'auth', 'node_modules'].includes(path.posix.basename(name)) });
 }
 

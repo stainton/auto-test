@@ -243,8 +243,10 @@ application behavior.
       small-window layout, so a too-small window hides/clips/truncates controls and the screenshots
       lose credibility. The browser starts at the config default 1920×1080. With `browser_evaluate`,
       probe every control the scenario uses: non-zero size, not `display:none`/`visibility:hidden`/
-      `opacity:0`, `getBoundingClientRect` inside the window, not clipped by an ancestor's
-      `overflow`, text not truncated (`scrollWidth > clientWidth`), no horizontal page scroll. If
+      `opacity:0`, `getBoundingClientRect` inside the window horizontally, not clipped by an ancestor's
+      `overflow` (horizontally, or vertically only when that ancestor's `overflow-y` is `hidden`/`clip` —
+      a control below the fold or inside an `auto`/`scroll` container is reached by scrolling and passes),
+      text not truncated (`scrollWidth > clientWidth`), no horizontal page scroll. If
       anything fails, `browser_resize` up (2560×1440, then 3200×1800) and re-probe; if all pass, you
       may try one smaller size (1600×900 / 1440×900) and keep it only if everything still passes
       (smaller window = more legible shots). At most 4 resizes, then settle. Declare the result once

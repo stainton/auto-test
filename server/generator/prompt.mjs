@@ -63,6 +63,12 @@ Workflow:
    session into notes, progress messages or the spec. A saved session serves your exploration only: the spec
    runs in a clean browser and must log in by itself.
    Prefer accessibility snapshots over screenshots, and reuse a snapshot you already have.
+   Find, read and drive controls with Playwright locators (getByRole, getByLabel, getByText) in
+   browser_run_code_unsafe, using the roles and names the snapshot shows; they are also what the spec will use.
+   Keep browser_evaluate for the geometry batch below and for a bounded workaround after a locator interaction
+   failed or hung (sliders, drags, popovers). Inside page scripts never select a control by tag name alone: what
+   the snapshot shows as a button, switch or checkbox may be any element carrying that role, so match [role=...],
+   aria-label or text.
    For switches, checkboxes and radio controls, read checked, aria-checked or aria-pressed to determine state;
    never infer it from a screenshot or visual styling. If styling contradicts the DOM state, trust the DOM state,
    record the discrepancy in explorationNotes and do not take repeated screenshots to decide it.
@@ -98,7 +104,10 @@ Workflow:
      and expected results together. Never split the batch into per-control calls or repeat it at the same size.
      Return an array of { name, selector, visible, rectInWindow, clippedByAncestor, textTruncated,
      pageScrollsHorizontally } for those controls. Compute visible from non-zero size and display/visibility/opacity;
-     rectInWindow from getBoundingClientRect; clippedByAncestor from overflow hidden/auto/scroll ancestors;
+     rectInWindow from getBoundingClientRect on the horizontal axis only (left >= 0 and right <= innerWidth), because a
+     control above or below the fold is reached by vertical scrolling; clippedByAncestor true only when an overflow
+     ancestor cuts the control horizontally, or cuts it vertically while that ancestor's overflow-y is hidden or clip
+     (an overflow-y auto/scroll container scrolls the control into view, so it is not clipping);
      textTruncated from scrollWidth > clientWidth; and pageScrollsHorizontally from
      document.documentElement.scrollWidth > innerWidth. Do not judge a switch's state from this geometry or a screenshot:
      use checked/aria-checked/aria-pressed as above. Use ONLY the returned batch array to choose the viewport.

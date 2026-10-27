@@ -6,7 +6,7 @@ import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { Readable } from 'node:stream';
-import { packDirectory, unpackArchive } from '../shared/archive.mjs';
+import { packDirectory, packDiagnostics, unpackArchive } from '../shared/archive.mjs';
 import { AssetCache } from '../shared/assets.mjs';
 import { exportCheckpoint, restoreCheckpoint, projectDirName } from '../planner/checkpoint.mjs';
 import { createPlannerWorker } from '../planner/worker.mjs';
@@ -46,6 +46,16 @@ test('an archive round-trips nested, long and non-ASCII names and leaves out wha
   const truncated = await dir(t, 'archive-trunc-');
   await unpackArchive(await packDirectory(source, { maxBytes: 2, truncate: true }), truncated);
   assert.match(await readFile(path.join(truncated, 'OMITTED.txt'), 'utf8'), /Left out/);
+});
+
+test('diagnostics keep small logs ahead of alphabetically earlier trace frames', async t => {
+  const workspace = await dir(t, 'diag-src-'), target = await dir(t, 'diag-out-');
+  const frames = Object.fromEntries(Array.from({ length: 5 }, (_, i) => [`diagnostics/c/traces/resources/f${i}.jpeg`, 'j'.repeat(10)]));
+  await put(workspace, { ...frames, 'diagnostics/c/huge.trace': 't'.repeat(40), 'progress.jsonl': 'p'.repeat(20) });
+  const files = await unpackArchive(await packDiagnostics(workspace, { maxBytes: 80 }), target);
+  assert.ok(files.includes('progress.jsonl') && files.includes('diagnostics/c/huge.trace'));
+  assert.equal(files.filter(name => name.endsWith('.jpeg')).length, 2);
+  assert.match(await readFile(path.join(target, 'OMITTED.txt'), 'utf8'), /f2\.jpeg/);
 });
 
 test('an archive entry that escapes the destination is refused', async t => {
