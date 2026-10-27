@@ -3,7 +3,7 @@
   "info": {
     "title": "Auto Test Generator HTTP API",
     "version": "1.0.0",
-    "description": "Asynchronous Playwright script generation from reviewed test cases. One spec file per case, in submission order. All business input is supplied in the request; the service reads no repository files and keeps no approval state — human review happens in the caller. Jobs persist status, events and results; unfinished jobs fail after a server restart and must be resubmitted. Request inputs and credentials are not persisted. Default retention is 24 hours. This is an HTTP API, not an MCP endpoint. No service token is required. Cross-origin browser requests are supported."
+    "description": "Asynchronous Playwright script generation from reviewed test cases. One spec file per case, in submission order. All business input is supplied in the request; the service reads no repository files and keeps no approval state — human review happens in the caller. Jobs persist status, events and results; unfinished jobs fail after a server restart; a failed single-case task with a retained checkpoint can be continued. Request inputs and credentials are not persisted. Default retention is 24 hours. This is an HTTP API, not an MCP endpoint. No service token is required. Cross-origin browser requests are supported."
   },
   "servers": [
     {
@@ -498,6 +498,85 @@
         }
       }
     },
+    "/v1/generator/jobs/{jobId}/checkpoint": {
+      "parameters": [
+        {
+          "name": "jobId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "get": {
+        "tags": [
+          "Generator"
+        ],
+        "operationId": "getGeneratorCheckpoint",
+        "summary": "Download the interrupted session",
+        "description": "For a failed task whose status says continuable: a tar.gz of the generation session it kept. Store it, push it to any generator node with PUT /v1/generator/assets/<sha256>, and submit continueFrom: { checkpoint: <sha256> } there. Credentials, settings and saved logins are never included.",
+        "responses": {
+          "200": {
+            "description": "Session archive",
+            "headers": {
+              "X-Content-SHA256": {
+                "description": "Lowercase hex SHA-256 of the response body",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                }
+              },
+              "Content-Disposition": {
+                "description": "attachment; filename=\"<jobId>-<kind>.tar.gz\"",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/gzip": {
+                "schema": {
+                  "type": "string",
+                  "contentMediaType": "application/gzip"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown job: never submitted here, released, expired, or lost in a restart of this node (jobs live in memory)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Nothing to continue (NOT_CONTINUABLE): the task did not fail, was already continued, or is still running",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal service error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/generator/jobs/{jobId}/diagnostics": {
       "parameters": [
         {
@@ -741,6 +820,36 @@
           },
           "agentSettings": {
             "$ref": "#/components/schemas/AgentSettings"
+          },
+          "caseTimeoutMs": {
+            "type": "integer",
+            "minimum": 60000,
+            "maximum": 3600000,
+            "description": "Requested limit for one case, in milliseconds. The worker caps it at 20 minutes so one case cannot consume the full job budget; default 20 minutes. A single-case timeout fails with JOB_TIMEOUT and can be continued; a timed-out case in a batch is blocked and later cases proceed."
+          },
+          "continueFrom": {
+            "description": "Continue one timed-out generator case from its saved Claude session. Supply the single case and all target/context fields again. The browser restarts but verified exploration remains in the conversation. The previous task can be continued once; a later timeout can be continued again.",
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "checkpoint"
+                ],
+                "properties": {
+                  "checkpoint": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$",
+                    "description": "SHA-256 of an archive from GET /v1/generator/jobs/{jobId}/checkpoint, already pushed here with PUT /v1/generator/assets/<sha256>"
+                  }
+                }
+              },
+              {
+                "type": "string",
+                "format": "uuid",
+                "description": "Id of a continuable failed task on this node"
+              }
+            ]
           }
         }
       },
@@ -1202,6 +1311,15 @@
                 "type": "string"
               }
             }
+          },
+          "continuable": {
+            "type": "boolean",
+            "description": "True when a failed single-case generator task retained a session that may be continued via continueFrom."
+          },
+          "continuedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the interrupted session was handed to a continuation."
           },
           "diagnostics": {
             "type": "boolean",

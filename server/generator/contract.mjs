@@ -1,6 +1,6 @@
 import { validateStepEvidence } from './evidence.mjs';
 import { object, check, string, keys, validateTarget, riskEntry, riskList, LIMITATION_MAX_CHARS } from '../shared/contract.mjs';
-import { validateAssets } from '../planner/contract.mjs';
+import { validateAssets, validateContinueFrom } from '../planner/contract.mjs';
 
 // Input/output contract of the generator HTTP service: reviewed test cases in, one Playwright spec
 // per case out. The caller (CaseHub's 自动化管理) owns the cases and stores the returned scripts; the
@@ -53,8 +53,12 @@ export function validateRequirements(requirements) {
 }
 
 export function validateInput(input) {
-  keys(input, ['cases', 'requirements', 'target', 'context', 'caseTimeoutMs'], 'request');
+  keys(input, ['cases', 'requirements', 'target', 'context', 'caseTimeoutMs', 'continueFrom'], 'request');
   validateCases(input.cases);
+  if (input.continueFrom !== undefined) {
+    check(input.cases.length === 1, 'continueFrom requires exactly one case');
+    validateContinueFrom(input.continueFrom);
+  }
   if (input.requirements !== undefined) validateRequirements(input.requirements);
   validateTarget(input.target);
   if(input.caseTimeoutMs!==undefined)check(Number.isSafeInteger(input.caseTimeoutMs)&&input.caseTimeoutMs>=MIN_CASE_TIMEOUT_MS&&input.caseTimeoutMs<=MAX_CASE_TIMEOUT_MS,`caseTimeoutMs must be between ${MIN_CASE_TIMEOUT_MS} and ${MAX_CASE_TIMEOUT_MS}`);

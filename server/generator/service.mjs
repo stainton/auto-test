@@ -1,21 +1,22 @@
 // The generator's job store and HTTP routes, built once and mounted either by its own process
 // (generator/main.mjs, the generator pod) or alongside the other workflows (automation/main.mjs).
-import { rmSync } from 'node:fs';
+import { existsSync, rmSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { Jobs } from '../shared/jobs.mjs';
+import { Jobs, ServiceError } from '../shared/jobs.mjs';
 import { createHttpHandler } from '../shared/http.mjs';
 import { requireCachedAssets } from '../shared/assets.mjs';
 import { positive } from '../shared/env.mjs';
 import { withExperience } from '../shared/experience.mjs';
 import { validateInput } from './contract.mjs';
 import { createGeneratorWorker } from './worker.mjs';
+import { exportCheckpoint } from './checkpoint.mjs';
 
 export function createGeneratorService({ command, runtime, applySettings, playwrightPackage, assetCache,
   workspaceRoot, concurrency, authSessions }) {
   // Jobs live in memory, so a workspace left by an earlier process belongs to no job any more.
   rmSync(workspaceRoot, { recursive: true, force: true });
   const worker = withExperience(createGeneratorWorker({ command, runtime, playwrightPackage, assetCache, authSessions, temporaryRoot: workspaceRoot,
-    caseTimeoutMs: positive('GENERATOR_CASE_TIMEOUT_MS', 3600000) }));
+    caseTimeoutMs: positive('GENERATOR_CASE_TIMEOUT_MS', 1200000) }));
   const jobs = new Jobs({
     kind: 'generator', label: 'Generator',
     started: { stage: 'reading_cases', message: 'Reading the submitted test cases and context' },
@@ -27,8 +28,22 @@ export function createGeneratorService({ command, runtime, applySettings, playwr
     maxJobs: positive('GENERATOR_MAX_JOBS', 100), retentionMs: positive('GENERATOR_RETENTION_MS', 86400000),
     maxRetained: positive('GENERATOR_MAX_RETAINED', 200)
   });
-  const validate = async payload => { const input = validateInput(payload); await requireCachedAssets(assetCache, input); return input; };
+  const validate = async payload => {
+    const input = validateInput(payload);
+    await requireCachedAssets(assetCache, input);
+    if (input.continueFrom === undefined) return input;
+    if (typeof input.continueFrom === 'object') {
+      const { checkpoint } = input.continueFrom;
+      if (!assetCache || !await assetCache.has(checkpoint)) throw new ServiceError(409, 'CHECKPOINT_NOT_CACHED', 'Push the generator checkpoint to this node before continuing');
+      delete input.continueFrom;
+      return { ...input, resume: { checkpoint } };
+    }
+    const resume = jobs.claimContinuation(input.continueFrom);
+    if (!existsSync(resume.workspace)) throw new ServiceError(409, 'NOT_CONTINUABLE', 'The interrupted generator session is no longer on this node');
+    delete input.continueFrom;
+    return { ...input, resume };
+  };
   const handler = createHttpHandler({ jobs, validateInput: validate, applySettings, assetCache, basePath: '/v1/generator',
-    openapiPath: fileURLToPath(new URL('./openapi.json', import.meta.url)) });
+    exportCheckpoint, openapiPath: fileURLToPath(new URL('./openapi.json', import.meta.url)) });
   return { jobs, handler };
 }

@@ -11,6 +11,8 @@ import { Jobs } from '../shared/jobs.mjs';
 import { createHttpServer } from '../shared/http.mjs';
 import { fileURLToPath } from 'node:url';
 import { eventually } from './fixtures.mjs';
+import { projectDirName } from '../planner/checkpoint.mjs';
+import { exportCheckpoint, restoreCheckpoint } from '../generator/checkpoint.mjs';
 
 const input = {
   cases: [{ id: 'TC-LOGIN-AUTH-FUNC-001', title: '拒绝错误密码', priority: 'P1', requirement: 'REQ-001',
@@ -124,6 +126,41 @@ test('runs one model call per case, isolates the workspace and forwards progress
   assert.deepEqual(await readdir(temporaryRoot), []); // workspace removed after the run
 });
 
+test('a single timed-out case keeps its session and resumes without starting exploration over', async t => {
+  let runs = 0;
+  const { worker } = await setup(t, async options => {
+    runs++;
+    options.onMessage(setupCall()); options.onMessage(setupPage());
+    if (runs === 1) {
+      const session = path.join(options.env.CLAUDE_CONFIG_DIR, 'projects', projectDirName(options.cwd), `${options.sessionId}.jsonl`);
+      await mkdir(path.dirname(session), { recursive: true });
+      await writeFile(session, '{"turn":1}\n');
+      await new Promise(resolve => options.signal.addEventListener('abort', resolve, { once: true }));
+      throw options.signal.reason;
+    }
+    assert.equal(options.resume, true);
+    assert.match(options.prompt, /Continue generating the same case/);
+    return output;
+  }, { caseTimeoutMs: 40 });
+  const jobs = new Jobs({ kind: 'generator', worker, timeoutMs: 1000, completion: result => ({ scriptsGenerated: result.generated }) });
+  t.after(() => jobs.close());
+  const first = jobs.submit(input);
+  await eventually(() => jobs.get(first.id).status === 'failed');
+  assert.equal(jobs.get(first.id).error.code, 'JOB_TIMEOUT');
+  assert.match(jobs.get(first.id).error.message, /已保存会话/);
+  assert.equal(jobs.summary(jobs.get(first.id)).continuable, true);
+  const session = jobs.claimContinuation(first.id);
+  const archive = await exportCheckpoint(session);
+  const elsewhere = await mkdtemp(path.join(tmpdir(), 'generator-restore-'));
+  t.after(() => rm(elsewhere, { recursive: true, force: true }));
+  assert.deepEqual(await restoreCheckpoint(archive, elsewhere), { sessionId: session.sessionId });
+  const second = jobs.submit({ ...input, resume: session });
+  await eventually(() => ['succeeded', 'failed'].includes(jobs.get(second.id).status));
+  assert.equal(jobs.get(second.id).status, 'succeeded', jobs.get(second.id).error?.message);
+  assert.equal(runs, 2);
+  assert.equal(jobs.get(second.id).result.generated, 1);
+});
+
 test('a script that misses per-step evidence blocks only that case', async t => {
   const noEvidence={ ...output, code: `import { test, expect } from '@playwright/test';\ntest.use({ viewport: { width: 1600, height: 900 } });\ntest('无取证步骤', async ({ page }, testInfo) => { await test.step('验证页面标题', async () => { await expect(page).toHaveTitle(/示例/); }); });` };
   let call=0;
@@ -176,7 +213,7 @@ test('the OpenAPI document describes this service and only its own routes', () =
   assert.equal(spec.components.securitySchemes, undefined);
   assert.deepEqual(Object.keys(spec.paths).filter(p => p.startsWith('/v1')),
     ['/v1/generator/jobs', '/v1/generator/jobs/{jobId}', '/v1/generator/jobs/{jobId}/result', '/v1/generator/jobs/{jobId}/events',
-      '/v1/generator/jobs/{jobId}/release', '/v1/generator/jobs/{jobId}/diagnostics', '/v1/generator/capacity']);
+      '/v1/generator/jobs/{jobId}/release', '/v1/generator/jobs/{jobId}/checkpoint', '/v1/generator/jobs/{jobId}/diagnostics', '/v1/generator/capacity']);
   assert.equal(spec.components.schemas.Job.properties.kind.const, 'generator');
   assert.equal(JSON.stringify(spec).includes('planner'), false);
   assert.deepEqual(Object.keys(SCRIPT_OUTPUT_SCHEMA.properties).sort(), ['code', 'deviations', 'explorationNotes', 'missingInputs', 'status', 'summary']);

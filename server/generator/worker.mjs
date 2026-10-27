@@ -3,12 +3,14 @@ import { randomUUID } from 'node:crypto';
 import { seedSpec } from '../shared/seed.mjs';
 import { planAuthSession, stageAuthSession, readSavedAuthSession, clearAuthSession, authSessionNote } from '../shared/auth-session.mjs';
 import { describePlaywrightAction } from '../shared/playwright-progress.mjs';
-import { mkdtemp, writeFile, rm, mkdir, symlink, cp } from 'node:fs/promises';
+import { mkdtemp, writeFile, readFile, rm, mkdir, symlink, cp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { runClaude } from '../runtime/claude.mjs';
+import { ServiceError } from '../shared/jobs.mjs';
 import { writeTaskSettings } from '../runtime/settings.mjs';
+import { restoreCheckpoint } from './checkpoint.mjs';
 import { SCRIPT_OUTPUT_SCHEMA, formatScript, formatResult } from './contract.mjs';
 import { SYSTEM_PROMPT, buildPrompt } from './prompt.mjs';
 
@@ -23,10 +25,20 @@ const STAGES = new Set(['reading_cases', 'preparing', 'exploring', 'generating',
 export function createGeneratorWorker({ runtime = runClaude, command, model, settingsPath, playwrightPackage,
   temporaryRoot = tmpdir(), caseTimeoutMs = 1200000, assetCache, authSessions,
   workflow = { kind: 'generator', systemPrompt: SYSTEM_PROMPT, buildPrompt } } = {}) {
-  return async function generator(input, { signal, emit, retain = () => {}, settings }) {
+  return async function generator(input, { signal, emit, retain = () => {}, checkpoint = () => {}, settings }) {
     signal.throwIfAborted();
-    await mkdir(temporaryRoot, { recursive: true, mode: 0o700 });
-    const workspace = await mkdtemp(path.join(temporaryRoot, `${workflow.kind}-`));
+    if (!input.resume?.workspace) await mkdir(temporaryRoot, { recursive: true, mode: 0o700 });
+    const workspace = input.resume?.workspace ?? await mkdtemp(path.join(temporaryRoot, `${workflow.kind}-`));
+    let sessionId = input.resume?.sessionId ?? randomUUID();
+    if (input.resume?.checkpoint) {
+      try {
+        if (!assetCache) throw new Error('This generator has no asset cache to receive a checkpoint');
+        let archive;
+        try { archive = await readFile(assetCache.path(input.resume.checkpoint)); }
+        catch { throw new Error('The generator checkpoint is no longer cached on this node'); }
+        ({ sessionId } = await restoreCheckpoint(archive, workspace));
+      } catch (error) { await rm(workspace, { recursive: true, force: true }); throw error; }
+    }
     let completed = false;
     retain({ workspace });
     // The configuration this task was submitted with (diagnostics never include it, see shared/archive.mjs).
@@ -34,9 +46,11 @@ export function createGeneratorWorker({ runtime = runClaude, command, model, set
     const progress = emit;
     emit = event => { appendFileSync(path.join(workspace, 'progress.jsonl'), JSON.stringify({ ...event, time: new Date().toISOString() }) + '\n', { mode: 0o600 }); progress(event); };
     try {
-      emit({ stage: 'preparing', message: workflow.kind === 'healer' ? '准备独立脚本修复工作区' : 'Preparing an isolated browser session' });
+      emit({ stage: 'preparing', message: input.resume ? '继续上次中断的生成会话，并重新准备浏览器' : workflow.kind === 'healer' ? '准备独立脚本修复工作区' : 'Preparing an isolated browser session' });
       const packagePath = playwrightPackage ?? require.resolve('@playwright/test/package.json');
-      const project=path.join(workspace,'project'),nodeModules=path.dirname(path.dirname(path.dirname(packagePath)));await mkdir(project,{mode:0o700});await symlink(nodeModules,path.join(project,'node_modules'),'dir');
+      const project=path.join(workspace,'project'),nodeModules=path.dirname(path.dirname(path.dirname(packagePath)));
+      if (input.resume) await rm(project, { recursive: true, force: true });
+      await mkdir(project,{mode:0o700});await symlink(nodeModules,path.join(project,'node_modules'),'dir');
       const testEntry = path.join(path.dirname(packagePath), 'index.js');
       const cli = path.join(path.dirname(packagePath), 'cli.js');
       const configPath = path.join(project, 'playwright.config.cjs');
@@ -80,10 +94,12 @@ export function createGeneratorWorker({ runtime = runClaude, command, model, set
         const authSession = authSessionNote(authPlan, authFile);
         let output;
         try {
+          if (total === 1 && workflow.kind === 'generator') checkpoint({ workspace, sessionId });
           // A caller may still send the old 60-minute value; keep one case below the job's 60-minute limit.
           output = await runCase({ runtime, input: { ...promptInput, ...(authSession ? { authSession } : {}), context: { ...promptInput.context, explorationNotes: notes } },
             testCase, workspace, mcpConfig, signal, workflow, command, model, settingsPath: taskSettingsPath,
-            caseTimeoutMs: Math.min(input.caseTimeoutMs ?? caseTimeoutMs, caseTimeoutMs, 1200000), emit, position });
+            caseTimeoutMs: Math.min(input.caseTimeoutMs ?? caseTimeoutMs, caseTimeoutMs, 1200000), emit, position,
+            sessionId: total === 1 ? sessionId : randomUUID(), resumed: Boolean(input.resume), stopOnTimeout: total === 1 && workflow.kind === 'generator' });
         } finally {
           // Keep what the model saved for the next task, then remove it: the retained failure workspace must not hold a session.
           if (authPlan.capture) { const saved = await readSavedAuthSession(workspace); if (saved) authSessions.put(authPlan.key, saved); }
@@ -110,10 +126,12 @@ export function createGeneratorWorker({ runtime = runClaude, command, model, set
       const explorationRecords = Object.fromEntries([...notesByRequirement].filter(([, notes]) => notes.trim()));
       const result = formatResult(scripts, { explorationNotes: batchNotes, explorationRecords });
       await writeFile(path.join(workspace, 'result.json'), JSON.stringify(result, null, 2), { mode: 0o600 });
+      checkpoint(null);
       completed = !result.blocked;
       return result;
     } catch (error) {
       await writeFile(path.join(workspace, 'failure.json'), JSON.stringify({ message: error.message, stack: error.stack }), { mode: 0o600 });
+      if (error?.code !== 'JOB_TIMEOUT' && signal.reason?.code !== 'JOB_TIMEOUT') checkpoint(null);
       throw error;
     } finally {
       if (completed && !signal.aborted) { await rm(workspace, { recursive: true, force: true }); retain(null); }
@@ -125,7 +143,7 @@ export function createGeneratorWorker({ runtime = runClaude, command, model, set
 
 // A single case. Its own AbortController bounds the run so one stuck case fails that case (recorded
 // as blocked below) instead of consuming the whole job's budget; a cancelled job still aborts everything.
-async function runCase({ runtime, input, testCase, workspace, mcpConfig, signal, workflow, command, model, settingsPath, caseTimeoutMs, emit, position }) {
+async function runCase({ runtime, input, testCase, workspace, mcpConfig, signal, workflow, command, model, settingsPath, caseTimeoutMs, emit, position, sessionId, resumed, stopOnTimeout }) {
   const controller = new AbortController();
   const abort = () => controller.abort(signal.reason);
   signal.addEventListener('abort', abort, { once: true });
@@ -133,19 +151,19 @@ async function runCase({ runtime, input, testCase, workspace, mcpConfig, signal,
   timer.unref();
   const calls = new Map();
   let setupSucceeded = false, testRunSucceeded = false;
-  const sessionId = randomUUID();
-  let prompt = workflow.buildPrompt(input, testCase);
+  let prompt = resumed ? JSON.stringify({ instruction: 'Continue generating the same case from the interrupted conversation. The browser is new: call generator_setup_page again, then continue from the last verified finding. Do not re-explore controls or repeat geometry checks that already passed. Keep all original business assertions and return the complete structured result.', originalRequest: JSON.parse(workflow.buildPrompt(input, testCase)) }) : workflow.buildPrompt(input, testCase);
   const diagnostics = path.join(workspace, 'diagnostics', testCase.id);
   await mkdir(diagnostics, { recursive: true, mode: 0o700 });
   await writeFile(path.join(diagnostics, 'session.json'), JSON.stringify({ sessionId }), { mode: 0o600 });
+  const resumedAttempt = resumed ? `resume-${Date.now()}-` : '';
   try {
     for (let attempt = 0; attempt < 3; attempt++) {
       controller.signal.throwIfAborted();
-      const attemptDir = path.join(diagnostics, String(attempt + 1));
+      const attemptDir = path.join(diagnostics, resumedAttempt + String(attempt + 1));
       await mkdir(attemptDir, { mode: 0o700 });
       try {
         setupSucceeded = false; testRunSucceeded = false;
-        const output = await runtime({ cwd: workspace, prompt, sessionId, resume: attempt > 0, systemPrompt: workflow.systemPrompt,
+        const output = await runtime({ cwd: workspace, prompt, sessionId, resume: resumed || attempt > 0, systemPrompt: workflow.systemPrompt,
           schema: SCRIPT_OUTPUT_SCHEMA, mcpConfig, allowedTools: ['mcp__playwright-test__*'],
           disallowedTools: EXCLUDED_TOOLS.map(t => `mcp__playwright-test__${t}`),
           signal: controller.signal, command, model, settingsPath, env: { CLAUDE_CONFIG_DIR: path.join(workspace, 'claude-config') },
@@ -212,6 +230,7 @@ async function runCase({ runtime, input, testCase, workspace, mcpConfig, signal,
     // reported as blocked so the rest of the batch still produces specs.
     await writeFile(path.join(diagnostics, 'failure.json'), JSON.stringify({ message: error.message, stack: error.stack, sessionId }), { mode: 0o600 });
     if (signal.aborted) throw signal.reason ?? error;
+    if (stopOnTimeout && controller.signal.aborted) throw new ServiceError(504, 'JOB_TIMEOUT', `${testCase.id} 生成超过 ${Math.round(caseTimeoutMs / 60000)} 分钟；已保存会话，可继续生成`);
     const summary=caseFailureSummary(error);return { status: 'blocked', code: '', summary, deviations: [], missingInputs: [String(error.message || summary).slice(0, 200)], explorationNotes: '' };
   } finally {
     clearTimeout(timer);
