@@ -21,7 +21,7 @@ const STAGES = new Set(['reading_cases', 'preparing', 'exploring', 'generating',
 // cases, and a failure on the fifth case must not throw away the four specs already written. Each
 // run gets its own timeout and its own small schema, and the notes it produces feed the next case.
 export function createGeneratorWorker({ runtime = runClaude, command, model, settingsPath, playwrightPackage,
-  temporaryRoot = tmpdir(), caseTimeoutMs = 3600000, assetCache, authSessions,
+  temporaryRoot = tmpdir(), caseTimeoutMs = 1200000, assetCache, authSessions,
   workflow = { kind: 'generator', systemPrompt: SYSTEM_PROMPT, buildPrompt } } = {}) {
   return async function generator(input, { signal, emit, retain = () => {}, settings }) {
     signal.throwIfAborted();
@@ -80,8 +80,10 @@ export function createGeneratorWorker({ runtime = runClaude, command, model, set
         const authSession = authSessionNote(authPlan, authFile);
         let output;
         try {
+          // A caller may still send the old 60-minute value; keep one case below the job's 60-minute limit.
           output = await runCase({ runtime, input: { ...promptInput, ...(authSession ? { authSession } : {}), context: { ...promptInput.context, explorationNotes: notes } },
-            testCase, workspace, mcpConfig, signal, workflow, command, model, settingsPath: taskSettingsPath, caseTimeoutMs:input.caseTimeoutMs??caseTimeoutMs, emit, position });
+            testCase, workspace, mcpConfig, signal, workflow, command, model, settingsPath: taskSettingsPath,
+            caseTimeoutMs: Math.min(input.caseTimeoutMs ?? caseTimeoutMs, caseTimeoutMs, 1200000), emit, position });
         } finally {
           // Keep what the model saved for the next task, then remove it: the retained failure workspace must not hold a session.
           if (authPlan.capture) { const saved = await readSavedAuthSession(workspace); if (saved) authSessions.put(authPlan.key, saved); }
@@ -194,7 +196,7 @@ async function runCase({ runtime, input, testCase, workspace, mcpConfig, signal,
           await writeFile(path.join(attemptDir, 'validation-error.txt'), error.stack || error.message, { mode: 0o600 });
           if (attempt === 2) throw error;
           emit({ stage: 'verifying', caseId: testCase.id, message: `脚本校验未通过，正在原会话修复（${attempt + 1}/2）：${error.message}` });
-          prompt = JSON.stringify({ instruction: 'Continue the same case. Fix the returned source using the validation error below. Do not re-explore working flows or weaken assertions. Only actual test steps need screenshots; setup/cleanup do not. Use a local screenshot helper or inline screenshot and attach. Run the corrected spec with test_run and return the complete structured result. The browser is new: initialize generator_setup_page before debugging.', workflow: workflow.kind, validationError: error.message, previousOutput: output });
+          prompt = JSON.stringify({ instruction: 'Continue the same case. Fix only the failure described below. Reuse the already verified viewport and batch geometry findings in the previous output and resumed session; do not resize, repeat the batch probe, or re-explore working pages and controls unless the failed step shows that they changed. Do not weaken assertions. Only actual test steps need screenshots; setup/cleanup do not. Use a local screenshot helper or inline screenshot and attach. Run the corrected spec with test_run and return the complete structured result. The browser is new: initialize generator_setup_page before debugging.', workflow: workflow.kind, validationError: error.message, previousOutput: output });
           continue;
         }
         return output;

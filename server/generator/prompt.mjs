@@ -59,6 +59,9 @@ Workflow:
    session into notes, progress messages or the spec. A saved session serves your exploration only: the spec
    runs in a clean browser and must log in by itself.
    Prefer accessibility snapshots over screenshots, and reuse a snapshot you already have.
+   For switches, checkboxes and radio controls, read checked, aria-checked or aria-pressed to determine state;
+   never infer it from a screenshot or visual styling. If styling contradicts the DOM state, trust the DOM state,
+   record the discrepancy in explorationNotes and do not take repeated screenshots to decide it.
    Bound every interaction with an explicit timeout (10000 ms) and retry a failed action at most three times.
    Never claim an action you did not execute, and never present an unreachable page as a verified one.
    context.assets, when present, names real image/video/audio files already staged locally with a path. Use one only
@@ -86,21 +89,27 @@ Workflow:
    - Drive sliders, ranges and drag-and-drop through a bounded action (fill a range, dispatch input/change, replay the
      pointer path); never an unbounded drag that can hang the suite.
    - Hashed CSS-module classes use [class*="_x_"]; count or select in an infinite-scroll list only after scrolling to a stable count.
-   - Pick the viewport for THIS case while exploring; never assume one. Most apps have no small-window layout, so a
-     window that is too small hides, clips or truncates controls and makes screenshot evidence untrustworthy. The
-     browser starts at the config default 1920x1080. After reaching the page(s) this case touches, use browser_evaluate
-     to probe every control named in the steps and expected results: it must have a non-zero size and not be
-     display:none/visibility:hidden/opacity:0; its getBoundingClientRect must lie inside the window; no ancestor with
-     overflow hidden/auto/scroll may clip it; its text must not be truncated (scrollWidth > clientWidth); and the page
-     must not scroll horizontally (document.documentElement.scrollWidth <= innerWidth). If anything is hidden, clipped
-     or truncated, enlarge with browser_resize (2560x1440, then 3200x1800) and probe again. If everything is fully
-     visible, you may try one smaller size (1600x900 or 1440x900) and keep it only when everything still passes, because
-     the smallest fully-visible window gives the most legible screenshots. Use at most four resizes, then settle on the
-     best size found (vertical scrolling is fine). Declare the result once at file level, before test.describe/test:
+   - Start with the browser's 1920x1080 viewport. On each page this case touches, use ONE browser_evaluate call to
+     inspect ALL controls named in its steps and expected results together; do not call browser_evaluate once per
+     control. Return an array of { name, selector, visible, rectInWindow, clippedByAncestor, textTruncated,
+     pageScrollsHorizontally } for those controls. Compute visible from non-zero size and display/visibility/opacity;
+     rectInWindow from getBoundingClientRect; clippedByAncestor from overflow hidden/auto/scroll ancestors;
+     textTruncated from scrollWidth > clientWidth; and pageScrollsHorizontally from
+     document.documentElement.scrollWidth > innerWidth. Do not judge a switch's state from this geometry or a screenshot:
+     use checked/aria-checked/aria-pressed as above. Use the batch result to choose the viewport. Keep 1920x1080
+     without any browser_resize if no control is clipped by an ancestor, outside the window or text-truncated.
+     Only when clippedByAncestor, rectInWindow=false or textTruncated is reported, try 2560x1440 and then, if
+     needed, 3200x1800: at most TWO browser_resize calls total, rerunning ONE batch probe at each new size.
+     Do not try smaller viewports. A hidden or zero-size control is an interaction problem to investigate, not a
+     reason to search viewport sizes; horizontal page scrolling alone also does not trigger a resize. Vertical
+     scrolling is fine. Declare the settled size once at file level, before test.describe/test:
      \`test.use({ viewport: { width: W, height: H } });\` with W in 1024-3840 and H in 600-2160. Never call
      page.setViewportSize or resize mid-test. When context.explorationNotes already has a verified line starting
-     \`[视口]\` for the same page, verify it with one probe instead of re-searching. Return any size you settled
-     on in explorationNotes as \`[视口] <page/view>: WxH\`.
+     \`[视口]\` for the same page, use that size as the first enlargement only if the 1920x1080 batch probe
+     reports a clipping/window/truncation problem; verify it with one batch probe instead of re-searching. Return the
+     settled size in explorationNotes as \`[视口] <page/view>: WxH\`, plus a concise batch-probe conclusion (all named
+     controls passed, or which controls failed and why). Reuse that conclusion on a repair attempt; do not repeat
+     per-control probes for controls that passed.
    - Use the baseURL from the Playwright config with relative paths; never hardcode another host, a local absolute
      file path, or a credential that was not supplied in context.
    - Make the generated script produce its own execution record when it runs later. Wrap every important business
@@ -130,6 +139,9 @@ ${EVIDENCE_CAPTURE_HELPER}
      Call this helper inside the step; attachment names do not have to exactly match step titles.
      Setup and cleanup need no screenshots. Do not label an actual test step [setup] or [cleanup] to bypass evidence.
 6. Verify what you wrote: run it once (test_run) and fix real failures, at most three fix-and-rerun cycles.
+   On a fix-and-rerun cycle, reuse the already verified viewport and batch probe findings from this session and
+   explorationNotes. The browser may be new, but do not redo geometry checks or re-explore pages and controls
+   already confirmed to work; revisit only the step or control that actually failed, then rerun the corrected spec.
    Do not weaken an assertion, skip, fixme or delete a step to make a run pass. A run that fails solely on an assertion
    the live app genuinely violates (a deviation, below) is the intended outcome, not a failure to fix.
 7. Return the structured result. code is the complete final spec file source (TypeScript, importing @playwright/test),
