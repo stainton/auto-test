@@ -19,10 +19,15 @@ const require = createRequire(import.meta.url);
 export const EXCLUDED_TOOLS = ['planner_setup_page', 'planner_save_plan', 'planner_submit_plan'];
 const STAGES = new Set(['reading_cases', 'preparing', 'exploring', 'generating', 'verifying', 'finalizing']);
 const setupFailure = message => Object.assign(new Error(message), { code: 'GENERATOR_SETUP_FAILED' });
-const batchReportsClipping = content => {
-  const text = (Array.isArray(content) ? content : []).filter(item => item.type === 'text').map(item => item.text).join(' ').replace(/\\"/g, '"');
-  return /\[/.test(text) && /\bname\b/.test(text) && /\bselector\b/.test(text) &&
-    /(?:clippedByAncestor\s*["']?\s*:\s*true|rectInWindow\s*["']?\s*:\s*false|textTruncated\s*["']?\s*:\s*true)/.test(text);
+// The verdict of a geometry batch probe: null when the tool result is not one, otherwise whether it reports
+// clipping. Only the "### Result" section counts: the MCP also echoes the probe's code, whose not-found
+// fallback (rectInWindow: false) must not read as a finding.
+export const batchProbeVerdict = content => {
+  let text = (Array.isArray(content) ? content : []).filter(item => item.type === 'text').map(item => item.text).join(' ');
+  if (text.includes('### Result')) text = text.split('### Result')[1].split(/\n###\s/)[0];
+  text = text.replace(/\\"/g, '"');
+  if (!(/\[/.test(text) && /\bname\b/.test(text) && /\bselector\b/.test(text) && /\bclippedByAncestor\b/.test(text))) return null;
+  return /(?:clippedByAncestor\s*["']?\s*:\s*true|rectInWindow\s*["']?\s*:\s*false|textTruncated\s*["']?\s*:\s*true)/.test(text);
 };
 
 // One model run per case rather than one run for the whole batch: a folder-level job covers many
@@ -202,8 +207,11 @@ async function runCase({ runtime, input, testCase, workspace, mcpConfig, signal,
                 const failed = Boolean(block.is_error);
                 if (tool === 'generator_setup_page' && !failed) setupSucceeded = true;
                 if (tool === 'test_run' && !failed) testRunSucceeded = true;
-                if (workflow.kind === 'generator' && tool === 'browser_evaluate' && !failed)
-                  resizeAllowed ||= batchReportsClipping(block.content);
+                // Only the latest batch probe decides: a later clean probe withdraws an earlier permission.
+                if (workflow.kind === 'generator' && (tool === 'browser_evaluate' || tool === 'browser_run_code_unsafe') && !failed) {
+                  const verdict = batchProbeVerdict(block.content);
+                  if (verdict !== null) resizeAllowed = verdict;
+                }
                 emit({ stage: toolStage(tool), message: `${call.action}${failed ? '失败' : '已完成'}（${position}）`, tool, toolStatus: failed ? 'failed' : 'completed', caseId: testCase.id });
                 if (workflow.kind === 'generator' && tool === 'generator_setup_page' && failed) {
                   const detail = (Array.isArray(block.content) ? block.content : []).filter(item => item.type === 'text').map(item => item.text).join(' ').replace(/\s+/g, ' ').trim().slice(0, 160);

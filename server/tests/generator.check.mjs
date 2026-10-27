@@ -159,6 +159,22 @@ test('browser resize requires a preceding batch probe that reports clipping', as
   assert.equal(generated.generated, 1);
 });
 
+test('only the latest batch probe, from evaluate or run_code, decides whether resize is allowed', async t => {
+  const tool = (id, name) => ({ type: 'assistant', message: { content: [{ type: 'tool_use', id, name: `mcp__playwright-test__${name}` }] } });
+  const probe = (id, clipped) => ({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: id, content: [{ type: 'text', text: `### Result\n${JSON.stringify({ items: [{ name: '面数', selector: 'input', visible: true, rectInWindow: true, clippedByAncestor: clipped, textTruncated: false }] })}\n### Ran Playwright code\n\`\`\`js\nreturn { name, selector: null, rectInWindow: false, clippedByAncestor: false };\n\`\`\`` }] }] } });
+  const run = async steps => (await setup(t, async options => {
+    options.onMessage(setupCall()); options.onMessage(setupPage());
+    for (const [id, name, clipped] of steps) { options.onMessage(tool(id, name)); options.onMessage(probe(id, clipped)); }
+    options.onMessage(tool('resize', 'browser_resize'));
+    return output;
+  })).worker(input, { signal: new AbortController().signal, emit: () => {} });
+  // A stale clipping report is withdrawn by a later clean probe made with run_code.
+  assert.equal((await run([['g1', 'browser_evaluate', true], ['g2', 'browser_run_code_unsafe', false]])).blocked, 1);
+  // The echoed probe code's not-found fallback is not a finding.
+  assert.equal((await run([['g1', 'browser_evaluate', false]])).blocked, 1);
+  assert.equal((await run([['g1', 'browser_run_code_unsafe', true]])).generated, 1);
+});
+
 test('runs one model call per case, isolates the workspace and forwards progress', async t => {
   const runs = [];
   const { temporaryRoot, worker } = await setup(t, async options => {

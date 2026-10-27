@@ -108,7 +108,9 @@ Workflow:
      control above or below the fold is reached by vertical scrolling; clippedByAncestor true only when an overflow
      ancestor cuts the control horizontally, or cuts it vertically while that ancestor's overflow-y is hidden or clip
      (an overflow-y auto/scroll container scrolls the control into view, so it is not clipping);
-     textTruncated from scrollWidth > clientWidth; and pageScrollsHorizontally from
+     textTruncated true only for an element with its own non-empty innerText, overflow other than visible and
+     scrollWidth > clientWidth + 1 (an element without text, such as an icon or a slider handle, is never
+     truncated); and pageScrollsHorizontally from
      document.documentElement.scrollWidth > innerWidth. Do not judge a switch's state from this geometry or a screenshot:
      use checked/aria-checked/aria-pressed as above. Use ONLY the returned batch array to choose the viewport.
      browser_resize is forbidden unless that array explicitly contains clippedByAncestor=true,

@@ -246,7 +246,8 @@ application behavior.
       `opacity:0`, `getBoundingClientRect` inside the window horizontally, not clipped by an ancestor's
       `overflow` (horizontally, or vertically only when that ancestor's `overflow-y` is `hidden`/`clip` —
       a control below the fold or inside an `auto`/`scroll` container is reached by scrolling and passes),
-      text not truncated (`scrollWidth > clientWidth`), no horizontal page scroll. If
+      text not truncated (`scrollWidth > clientWidth` on an element with its own non-empty text and
+      non-`visible` overflow — an icon or slider handle without text never counts), no horizontal page scroll. If
       anything fails, `browser_resize` up (2560×1440, then 3200×1800) and re-probe; if all pass, you
       may try one smaller size (1600×900 / 1440×900) and keep it only if everything still passes
       (smaller window = more legible shots). At most 4 resizes, then settle. Declare the result once
