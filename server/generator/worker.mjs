@@ -18,6 +18,12 @@ const require = createRequire(import.meta.url);
 // Planning belongs to the planner service; the generator never saves or submits a plan.
 export const EXCLUDED_TOOLS = ['planner_setup_page', 'planner_save_plan', 'planner_submit_plan'];
 const STAGES = new Set(['reading_cases', 'preparing', 'exploring', 'generating', 'verifying', 'finalizing']);
+const setupFailure = message => Object.assign(new Error(message), { code: 'GENERATOR_SETUP_FAILED' });
+const batchReportsClipping = content => {
+  const text = (Array.isArray(content) ? content : []).filter(item => item.type === 'text').map(item => item.text).join(' ').replace(/\\"/g, '"');
+  return /\[/.test(text) && /\bname\b/.test(text) && /\bselector\b/.test(text) &&
+    /(?:clippedByAncestor\s*["']?\s*:\s*true|rectInWindow\s*["']?\s*:\s*false|textTruncated\s*["']?\s*:\s*true)/.test(text);
+};
 
 // One model run per case rather than one run for the whole batch: a folder-level job covers many
 // cases, and a failure on the fifth case must not throw away the four specs already written. Each
@@ -156,13 +162,17 @@ async function runCase({ runtime, input, testCase, workspace, mcpConfig, signal,
   await mkdir(diagnostics, { recursive: true, mode: 0o700 });
   await writeFile(path.join(diagnostics, 'session.json'), JSON.stringify({ sessionId }), { mode: 0o600 });
   const resumedAttempt = resumed ? `resume-${Date.now()}-` : '';
+  let setupFailures = 0, validationRepairs = 0;
+  let resizeCount = 0, resizeAllowed = false;
   try {
-    for (let attempt = 0; attempt < 3; attempt++) {
+    // Three initialization attempts and two script-repair attempts have independent budgets.
+    for (let attempt = 0; attempt < 5; attempt++) {
       controller.signal.throwIfAborted();
       const attemptDir = path.join(diagnostics, resumedAttempt + String(attempt + 1));
       await mkdir(attemptDir, { mode: 0o700 });
       try {
         setupSucceeded = false; testRunSucceeded = false;
+        resizeAllowed = false; // each model attempt opens a new browser
         const output = await runtime({ cwd: workspace, prompt, sessionId, resume: resumed || attempt > 0, systemPrompt: workflow.systemPrompt,
           schema: SCRIPT_OUTPUT_SCHEMA, mcpConfig, allowedTools: ['mcp__playwright-test__*'],
           disallowedTools: EXCLUDED_TOOLS.map(t => `mcp__playwright-test__${t}`),
@@ -178,6 +188,10 @@ async function runCase({ runtime, input, testCase, workspace, mcpConfig, signal,
             for (const block of blocks) {
               if (message.type === 'assistant' && block.type === 'tool_use' && block.name.startsWith('mcp__playwright-test__')) {
                 const tool = block.name.replace('mcp__playwright-test__', '');
+                if (workflow.kind === 'generator' && tool === 'browser_resize') {
+                  if (!resizeAllowed || resizeCount >= 2) throw new Error('browser_resize 禁止：必须先由当前视口的一次批量 browser_evaluate 明确报告控件裁剪、窗口外或文字截断，且每条用例最多放大两次');
+                  resizeCount++; resizeAllowed = false;
+                }
                 const action=describePlaywrightAction(tool,block.input);
                 calls.set(block.id, {tool,action});
                 emit({ stage: toolStage(tool), message: `正在${action}（${position}）`, tool, toolStatus: 'started', caseId: testCase.id });
@@ -188,7 +202,13 @@ async function runCase({ runtime, input, testCase, workspace, mcpConfig, signal,
                 const failed = Boolean(block.is_error);
                 if (tool === 'generator_setup_page' && !failed) setupSucceeded = true;
                 if (tool === 'test_run' && !failed) testRunSucceeded = true;
+                if (workflow.kind === 'generator' && tool === 'browser_evaluate' && !failed)
+                  resizeAllowed ||= batchReportsClipping(block.content);
                 emit({ stage: toolStage(tool), message: `${call.action}${failed ? '失败' : '已完成'}（${position}）`, tool, toolStatus: failed ? 'failed' : 'completed', caseId: testCase.id });
+                if (workflow.kind === 'generator' && tool === 'generator_setup_page' && failed) {
+                  const detail = (Array.isArray(block.content) ? block.content : []).filter(item => item.type === 'text').map(item => item.text).join(' ').replace(/\s+/g, ' ').trim().slice(0, 160);
+                  throw setupFailure(`generator_setup_page 初始化浏览器失败${detail ? `：${detail}` : ''}`);
+                }
               }
               if (message.type === 'assistant' && block.type === 'text') {
                 for (const line of block.text.split('\n')) {
@@ -205,19 +225,26 @@ async function runCase({ runtime, input, testCase, workspace, mcpConfig, signal,
         });
         await writeFile(path.join(attemptDir, 'output.json'), JSON.stringify(output, null, 2), { mode: 0o600 });
         if (typeof output?.code === 'string') await writeFile(path.join(attemptDir, `${testCase.id}.spec.ts`), output.code, { mode: 0o600 });
-        if (!(workflow.kind === 'healer' ? output.status === 'blocked' || testRunSucceeded : setupSucceeded)) throw new Error(workflow.kind === 'healer' ? 'Healer did not run the original script with test_run' : 'Generator did not successfully initialize the target browser');
+        if (workflow.kind === 'generator' && !setupSucceeded) throw setupFailure('Generator 未成功初始化目标浏览器');
+        if (workflow.kind === 'healer' && output.status !== 'blocked' && !testRunSucceeded) throw new Error('Healer did not run the original script with test_run');
         try {
           formatScript(output, testCase, { requireViewport: workflow.kind !== 'healer' });
           if (output.status === 'generated') await workflow.verifyOutput?.({ output, testCase, workspace, signal: controller.signal, emit });
         }
         catch (error) {
           await writeFile(path.join(attemptDir, 'validation-error.txt'), error.stack || error.message, { mode: 0o600 });
-          if (attempt === 2) throw error;
-          emit({ stage: 'verifying', caseId: testCase.id, message: `脚本校验未通过，正在原会话修复（${attempt + 1}/2）：${error.message}` });
+          if (validationRepairs === 2) throw error;
+          validationRepairs++;
+          emit({ stage: 'verifying', caseId: testCase.id, message: `脚本校验未通过，正在原会话修复（${validationRepairs}/2）：${error.message}` });
           prompt = JSON.stringify({ instruction: 'Continue the same case. Fix only the failure described below. Reuse the already verified viewport and batch geometry findings in the previous output and resumed session; do not resize, repeat the batch probe, or re-explore working pages and controls unless the failed step shows that they changed. Do not weaken assertions. Only actual test steps need screenshots; setup/cleanup do not. Use a local screenshot helper or inline screenshot and attach. Run the corrected spec with test_run and return the complete structured result. The browser is new: initialize generator_setup_page before debugging.', workflow: workflow.kind, validationError: error.message, previousOutput: output });
           continue;
         }
         return output;
+      } catch (error) {
+        if (error?.code !== 'GENERATOR_SETUP_FAILED' || ++setupFailures >= 3) throw error;
+        emit({ stage: 'preparing', caseId: testCase.id, message: `浏览器初始化失败，立即重试（${setupFailures}/3）：${error.message}` });
+        prompt = JSON.stringify({ instruction: 'Browser initialization failed. Immediately call generator_setup_page again with seedFile "seed.spec.ts" before inspecting configuration or exploring. browser_get_config remains available for diagnosis if initialization still fails after direct retries; it is not the first response to setup failure. Continue the same case after setup succeeds.', setupError: error.message });
+        continue;
       } finally {
         // Playwright can replace its output directory on the next test run: snapshot each model attempt.
         await cp(path.join(workspace, 'project'), path.join(attemptDir, 'project'), { recursive: true, filter: source => path.basename(source) !== 'node_modules' });

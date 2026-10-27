@@ -91,6 +91,9 @@ test('the prompt carries the case and only its own requirement, never the browse
   assert.match(SYSTEM_PROMPT, /Every actual test-step `test\.step` must attach its own screenshot on BOTH paths/);
   assert.match(SYSTEM_PROMPT, /步骤名称失败现场/);
   assert.match(SYSTEM_PROMPT.replace(/\s+/g, ' '), /Setup is not a test step and needs no screenshot evidence/);
+  assert.match(SYSTEM_PROMPT, /exactly ONE browser_evaluate call/);
+  assert.match(SYSTEM_PROMPT, /browser_resize is forbidden unless that array explicitly contains/);
+  assert.match(SYSTEM_PROMPT, /browser_get_config is available for diagnosis/);
 });
 
 async function setup(t, runtime, options = {}) {
@@ -101,6 +104,58 @@ async function setup(t, runtime, options = {}) {
 }
 const setupPage = () => ({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'call-1' }] } });
 const setupCall = () => ({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'call-1', name: 'mcp__playwright-test__generator_setup_page' }] } });
+
+test('failed browser setup retries immediately in the same case without configuration probing', async t => {
+  const calls = [], events = [];
+  const { worker } = await setup(t, async options => {
+    calls.push(options);
+    options.onMessage(setupCall());
+    if (calls.length === 1) options.onMessage({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'call-1', is_error: true }] } });
+    options.onMessage(setupPage());
+    return output;
+  });
+  const result = await worker(input, { signal: new AbortController().signal, emit: e => events.push(e) });
+  assert.equal(result.generated, 1);
+  assert.equal(calls.length, 2);
+  assert.equal(calls[1].resume, true);
+  assert.equal(calls[1].sessionId, calls[0].sessionId);
+  assert.match(calls[1].prompt, /Immediately call generator_setup_page again/);
+  assert.ok(!calls[0].disallowedTools.includes('mcp__playwright-test__browser_get_config'));
+  assert.ok(events.some(e => /浏览器初始化失败，立即重试/.test(e.message)));
+});
+
+test('three failed browser setups block the case with an initialization reason', async t => {
+  let attempts = 0;
+  const { worker } = await setup(t, async options => {
+    attempts++;
+    options.onMessage(setupCall());
+    options.onMessage({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'call-1', is_error: true }] } });
+    return output;
+  });
+  const result = await worker(input, { signal: new AbortController().signal, emit: () => {} });
+  assert.equal(attempts, 3);
+  assert.equal(result.blocked, 1);
+  assert.match(result.scripts[0].missingInputs[0], /generator_setup_page 初始化浏览器失败/);
+});
+
+test('browser resize requires a preceding batch probe that reports clipping', async t => {
+  const tool = (id, name) => ({ type: 'assistant', message: { content: [{ type: 'tool_use', id, name: `mcp__playwright-test__${name}` }] } });
+  const evaluated = clipped => ({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'geometry', content: [{ type: 'text', text: JSON.stringify([{ name: '提交', selector: '#submit', visible: true, rectInWindow: true, clippedByAncestor: clipped, textTruncated: false, pageScrollsHorizontally: false }]) }] }] } });
+  const makeWorker = async clipped => setup(t, async options => {
+    options.onMessage(setupCall()); options.onMessage(setupPage());
+    options.onMessage(tool('geometry', 'browser_evaluate'));
+    options.onMessage(evaluated(clipped));
+    options.onMessage(tool('resize', 'browser_resize'));
+    return output;
+  });
+  const denied = await makeWorker(false);
+  const blocked = await denied.worker(input, { signal: new AbortController().signal, emit: () => {} });
+  assert.equal(blocked.blocked, 1);
+  assert.match(blocked.scripts[0].missingInputs[0], /browser_resize 禁止/);
+  const allowed = await makeWorker(true);
+  const generated = await allowed.worker(input, { signal: new AbortController().signal, emit: () => {} });
+  assert.equal(generated.generated, 1);
+});
 
 test('runs one model call per case, isolates the workspace and forwards progress', async t => {
   const runs = [];

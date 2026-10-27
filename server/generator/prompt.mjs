@@ -46,8 +46,12 @@ Workflow:
    When the notes are absent, proceed normally and explore live for genuine gaps.
 3. Read context.knownIssues as read-only input: apply the underlying risk when it is relevant to this case.
    A fixed bug is a regression risk worth asserting precisely; an accepted (wontfix) behaviour is the standard to assert.
-4. Call generator_setup_page once, passing seedFile "seed.spec.ts". The server has prepared the requested URL and
+4. Call generator_setup_page, passing seedFile "seed.spec.ts". The server has prepared the requested URL and
    storage state. If login still requires interaction, use only credentials/instructions supplied in context.
+   If generator_setup_page fails, call it again immediately (at most three initialization attempts total),
+   before browser_get_config, screenshots or other exploration. browser_get_config is available for diagnosis
+   if direct retries still fail; it is not the first response to an initialization failure. Only after three
+   failed setup attempts may you block the case, reporting the initialization error as the reason.
    Login state: when the request has authSession, it says what the seed did. seedAuthenticated true means the seed
    opened the page with a login saved by an earlier task, so do not go through the login form again; judge it by
    the page you land on, and only if the app shows its login page anyway (the session expired) log in once the
@@ -89,24 +93,27 @@ Workflow:
    - Drive sliders, ranges and drag-and-drop through a bounded action (fill a range, dispatch input/change, replay the
      pointer path); never an unbounded drag that can hang the suite.
    - Hashed CSS-module classes use [class*="_x_"]; count or select in an infinite-scroll list only after scrolling to a stable count.
-   - Start with the browser's 1920x1080 viewport. On each page this case touches, use ONE browser_evaluate call to
-     inspect ALL controls named in its steps and expected results together; do not call browser_evaluate once per
-     control. Return an array of { name, selector, visible, rectInWindow, clippedByAncestor, textTruncated,
+   - Start with the browser's 1920x1080 viewport. Geometry inspection is mandatory: on each page this case
+     touches, make exactly ONE browser_evaluate call at that viewport to inspect ALL controls named in its steps
+     and expected results together. Never split the batch into per-control calls or repeat it at the same size.
+     Return an array of { name, selector, visible, rectInWindow, clippedByAncestor, textTruncated,
      pageScrollsHorizontally } for those controls. Compute visible from non-zero size and display/visibility/opacity;
      rectInWindow from getBoundingClientRect; clippedByAncestor from overflow hidden/auto/scroll ancestors;
      textTruncated from scrollWidth > clientWidth; and pageScrollsHorizontally from
      document.documentElement.scrollWidth > innerWidth. Do not judge a switch's state from this geometry or a screenshot:
-     use checked/aria-checked/aria-pressed as above. Use the batch result to choose the viewport. Keep 1920x1080
-     without any browser_resize if no control is clipped by an ancestor, outside the window or text-truncated.
-     Only when clippedByAncestor, rectInWindow=false or textTruncated is reported, try 2560x1440 and then, if
-     needed, 3200x1800: at most TWO browser_resize calls total, rerunning ONE batch probe at each new size.
+     use checked/aria-checked/aria-pressed as above. Use ONLY the returned batch array to choose the viewport.
+     browser_resize is forbidden unless that array explicitly contains clippedByAncestor=true,
+     rectInWindow=false or textTruncated=true for a named control. If none is reported, keep 1920x1080
+     without any browser_resize, regardless of screenshots, visual appearance or a desire for better framing.
+     If the batch reports one of those three failures, try 2560x1440 and then, only if the new batch still
+     reports a failure, 3200x1800: at most TWO browser_resize calls total. After each resize, rerun exactly ONE
+     batch evaluate for all named controls at the new size; never fall back to individual evaluates.
      Do not try smaller viewports. A hidden or zero-size control is an interaction problem to investigate, not a
      reason to search viewport sizes; horizontal page scrolling alone also does not trigger a resize. Vertical
      scrolling is fine. Declare the settled size once at file level, before test.describe/test:
      \`test.use({ viewport: { width: W, height: H } });\` with W in 1024-3840 and H in 600-2160. Never call
-     page.setViewportSize or resize mid-test. When context.explorationNotes already has a verified line starting
-     \`[视口]\` for the same page, use that size as the first enlargement only if the 1920x1080 batch probe
-     reports a clipping/window/truncation problem; verify it with one batch probe instead of re-searching. Return the
+     page.setViewportSize or resize mid-test. A previously verified \`[视口]\` note never authorizes a resize by
+     itself: the current batch must first report one of the three failures above. Return the
      settled size in explorationNotes as \`[视口] <page/view>: WxH\`, plus a concise batch-probe conclusion (all named
      controls passed, or which controls failed and why). Reuse that conclusion on a repair attempt; do not repeat
      per-control probes for controls that passed.
