@@ -34,7 +34,7 @@ export const batchProbeVerdict = content => {
 // cases, and a failure on the fifth case must not throw away the four specs already written. Each
 // run gets its own timeout and its own small schema, and the notes it produces feed the next case.
 export function createGeneratorWorker({ runtime = runClaude, command, model, settingsPath, playwrightPackage,
-  temporaryRoot = tmpdir(), caseTimeoutMs = 1200000, assetCache, authSessions,
+  temporaryRoot = tmpdir(), caseTimeoutMs = 2400000, jobTimeoutMs = 3600000, assetCache, authSessions,
   workflow = { kind: 'generator', systemPrompt: SYSTEM_PROMPT, buildPrompt } } = {}) {
   return async function generator(input, { signal, emit, retain = () => {}, checkpoint = () => {}, settings }) {
     signal.throwIfAborted();
@@ -106,10 +106,10 @@ export function createGeneratorWorker({ runtime = runClaude, command, model, set
         let output;
         try {
           if (total === 1 && workflow.kind === 'generator') checkpoint({ workspace, sessionId });
-          // A caller may still send the old 60-minute value; keep one case below the job's 60-minute limit.
+          // Keep the case timer ahead of the job timer so a batch can continue after a case times out.
           output = await runCase({ runtime, input: { ...promptInput, ...(authSession ? { authSession } : {}), context: { ...promptInput.context, explorationNotes: notes } },
             testCase, workspace, mcpConfig, signal, workflow, command, model, settingsPath: taskSettingsPath,
-            caseTimeoutMs: Math.min(input.caseTimeoutMs ?? caseTimeoutMs, caseTimeoutMs, 1200000), emit, position,
+            caseTimeoutMs: Math.min(input.caseTimeoutMs ?? caseTimeoutMs, Math.max(1, jobTimeoutMs - 1000)), emit, position,
             sessionId: total === 1 ? sessionId : randomUUID(), resumed: Boolean(input.resume), stopOnTimeout: total === 1 && workflow.kind === 'generator' });
         } finally {
           // Keep what the model saved for the next task, then remove it: the retained failure workspace must not hold a session.

@@ -69,6 +69,11 @@ Workflow:
    failed or hung (sliders, drags, popovers). Inside page scripts never select a control by tag name alone: what
    the snapshot shows as a button, switch or checkbox may be any element carrying that role, so match [role=...],
    aria-label or text.
+   If a status/stream long connection disconnects and the page rerenders, prefer one bounded
+   browser_run_code_unsafe call that locates the control, performs the action and immediately reads
+   the resulting DOM state or value in that same call. Set the page default timeout to 10000 ms first;
+   return only the relevant readback. Do not repeat browser_snapshot after each rerender. Take one fresh
+   snapshot only if the page structure actually changed and the known locator no longer works.
    For switches, checkboxes and radio controls, read checked, aria-checked or aria-pressed to determine state;
    never infer it from a screenshot or visual styling. If styling contradicts the DOM state, trust the DOM state,
    record the discrepancy in explorationNotes and do not take repeated screenshots to decide it.

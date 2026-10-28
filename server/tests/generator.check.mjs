@@ -96,6 +96,8 @@ test('the prompt carries the case and only its own requirement, never the browse
   assert.match(SYSTEM_PROMPT.replace(/\s+/g, ' '), /a control above or below the fold is reached by vertical scrolling/);
   assert.match(SYSTEM_PROMPT.replace(/\s+/g, ' '), /never select a control by tag name alone/);
   assert.match(SYSTEM_PROMPT, /browser_get_config is available for diagnosis/);
+  assert.match(SYSTEM_PROMPT, /status\/stream long connection disconnects/);
+  assert.match(SYSTEM_PROMPT, /performs the action and immediately reads/);
 });
 
 async function setup(t, runtime, options = {}) {
@@ -197,6 +199,16 @@ test('runs one model call per case, isolates the workspace and forwards progress
   assert.ok(events.some(e => e.stage === 'generating' && e.caseStatus === 'generated' && e.caseTotal === 2));
   assert.equal(runs[0].mcpConfig.mcpServers['playwright-test'].args.includes('run-test-mcp-server'), true);
   assert.deepEqual(await readdir(temporaryRoot), []); // workspace removed after the run
+});
+
+test('request case timeout can exceed the configured default', async t => {
+  const { worker } = await setup(t, async options => {
+    options.onMessage(setupCall()); options.onMessage(setupPage());
+    await new Promise(resolve => setTimeout(resolve, 80));
+    return output;
+  }, { caseTimeoutMs: 30, jobTimeoutMs: 10000 });
+  const result = await worker({ ...input, caseTimeoutMs: 200 }, { signal: new AbortController().signal, emit() {} });
+  assert.equal(result.generated, 1);
 });
 
 test('a single timed-out case keeps its session and resumes without starting exploration over', async t => {

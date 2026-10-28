@@ -38,7 +38,7 @@ spec:
             - name: GENERATOR_TIMEOUT_MS
               value: '3600000'
             - name: GENERATOR_CASE_TIMEOUT_MS
-              value: '1200000'
+              value: '2400000'
             - name: GENERATOR_MAX_JOBS
               value: '100'
             - name: GENERATOR_RETENTION_MS
