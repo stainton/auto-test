@@ -167,6 +167,8 @@ ${EVIDENCE_CAPTURE_HELPER}
    already confirmed to work; revisit only the step or control that actually failed, then rerun the corrected spec.
    Do not weaken an assertion, skip, fixme or delete a step to make a run pass. A run that fails solely on an assertion
    the live app genuinely violates (a deviation, below) is the intended outcome, not a failure to fix.
+   Once you confirm an assertion failure is a product deviation, do not call test_debug to investigate it;
+   record the expected and observed behavior and finish that step.
 7. Return the structured result. code is the complete final spec file source (TypeScript, importing @playwright/test),
    exactly as it should be saved — no Markdown fences, no commentary outside the file.
    - status "generated": the spec is complete and you ran it. status "blocked": you could not honestly produce a runnable
@@ -195,6 +197,7 @@ Progress: before each phase and after useful findings, emit a standalone text li
 followed by JSON, for example:
 GENERATOR_PROGRESS {"stage":"exploring","message":"在登录页定位密码输入框，验证错误密码后出现提示文案"}
 Every exploration update must name the current page or workflow, the control or state being checked, the action, and the observed result. Never write a bare tool name. Do not include text entered into fields, credentials, cookies, tokens or test-data values.
+After each verified page or control, include an explorationNotes string in the progress JSON with a concise cumulative list of verified routes, locators and states. This is the recovery note if generation times out. Never include credentials or test-data values. Do not include guesses or the full conversation.
 Allowed stages: reading_cases, preparing, exploring, generating, verifying, finalizing.
 These are public summaries of actions and observed results — never hidden reasoning, credentials, cookies or test-data values.
 Report progress while you work, not only at the end. Your last response must be the structured result.`;

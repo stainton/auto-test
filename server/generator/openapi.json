@@ -515,8 +515,8 @@
           "Generator"
         ],
         "operationId": "getGeneratorCheckpoint",
-        "summary": "Download the interrupted session",
-        "description": "For a failed task whose status says continuable: a tar.gz of the generation session it kept. Store it, push it to any generator node with PUT /v1/generator/assets/<sha256>, and submit continueFrom: { checkpoint: <sha256> } there. Credentials, settings and saved logins are never included.",
+        "summary": "Download the interrupted exploration notes",
+        "description": "For a failed task whose status says continuable: a tar.gz of the verified exploration notes it kept. Store it, push it to any generator node with PUT /v1/generator/assets/<sha256>, and submit continueFrom: { checkpoint: <sha256> } there. Credentials, settings and saved logins are never included.",
         "responses": {
           "200": {
             "description": "Session archive",
@@ -825,10 +825,10 @@
             "type": "integer",
             "minimum": 60000,
             "maximum": 3600000,
-            "description": "Requested limit for one case, in milliseconds. Defaults to GENERATOR_CASE_TIMEOUT_MS (40 minutes by default); the effective limit is capped below GENERATOR_TIMEOUT_MS by one second so a case cannot consume the full job budget. A single-case timeout fails with JOB_TIMEOUT and can be continued; a timed-out case in a batch is blocked and later cases proceed."
+            "description": "Requested limit for one case, in milliseconds. Defaults to GENERATOR_CASE_TIMEOUT_MS (40 minutes by default); the effective limit is capped below GENERATOR_TIMEOUT_MS by one second so a case cannot consume the full job budget. A timeout returns the last written spec as generated with an unfinished-validation deviation if formatScript accepts it. Otherwise a single-case task fails with JOB_TIMEOUT and can be continued; a timed-out case in a batch is blocked and later cases proceed."
           },
           "continueFrom": {
-            "description": "Continue one timed-out generator case from its saved Claude session. Supply the single case and all target/context fields again. The browser restarts but verified exploration remains in the conversation. The previous task can be continued once; a later timeout can be continued again.",
+            "description": "Continue one timed-out generator case from its saved verified exploration notes. Supply the single case and all target/context fields again. The browser and model session restart, using the verified exploration notes instead of the old transcript. The previous task can be continued once; a later timeout can be continued again.",
             "oneOf": [
               {
                 "type": "object",
@@ -1314,12 +1314,12 @@
           },
           "continuable": {
             "type": "boolean",
-            "description": "True when a failed single-case generator task retained a session that may be continued via continueFrom."
+            "description": "True when a failed single-case generator task retained exploration notes that may be continued via continueFrom."
           },
           "continuedAt": {
             "type": "string",
             "format": "date-time",
-            "description": "When the interrupted session was handed to a continuation."
+            "description": "When the interrupted exploration notes were handed to a continuation."
           },
           "diagnostics": {
             "type": "boolean",

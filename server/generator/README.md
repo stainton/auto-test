@@ -30,7 +30,7 @@ node server/generator/main.mjs
 | DELETE | `/v1/generator/jobs/{jobId}` | 取消任务，不删除已有结果 |
 | POST | `/v1/generator/jobs/{jobId}/release` | 下发方取走结果后释放已结束的任务（含保留的失败现场） |
 | GET | `/v1/generator/jobs/{jobId}/diagnostics` | 失败现场的诊断包（tar.gz） |
-| GET | `/v1/generator/jobs/{jobId}/checkpoint` | 超时失败后保存的 Claude 会话；供跨节点继续生成 |
+| GET | `/v1/generator/jobs/{jobId}/checkpoint` | 超时失败后保存的探索笔记；供跨节点继续生成 |
 | GET | `/v1/generator/capacity` | 本节点空闲槽位，供下发方挑选节点；提交时加 `?queue=false` 则无空闲槽位直接 429 |
 | GET | `/healthz`、`/readyz` | 无鉴权健康检查 |
 
@@ -97,7 +97,7 @@ node server/generator/main.mjs
 - `summary` 与 `deviations[].summary` 都写给非技术评审人看：中文、不含选择器/URL/工具名。
 - `explorationNotes` 是合并后的探索记录，建议调用方保存并在下次请求中回传，可显著减少重复探索。
 - 任务只要跑完就是 `succeeded`，blocked 属于结果而非失败，调用方据此保存能用的脚本、并逐条看到其余用例为什么没生成。
-- 单用例任务超时时返回 `JOB_TIMEOUT` 与 `continuable: true`。调用方可在新请求中带上同一条用例、完整目标与上下文，并设置 `continueFrom` 为原任务 ID（同节点），或先下载 checkpoint、作为资产推送到另一节点，再设置 `continueFrom: {"checkpoint":"<sha256>"}`。浏览器重新打开，Claude 沿用上次会话；测试密码等凭据需重新提供。批量任务中单条超时仍记为 blocked，继续处理下一条。
+- 单用例超时时，若 `project/` 中最后写出的 spec 通过 `formatScript` 校验，则返回 `generated`，并在 `deviations` 标明尚未完成验证、需人工复核。否则返回 `JOB_TIMEOUT` 与 `continuable: true`。调用方可在新请求中带上同一条用例、完整目标与上下文，并设置 `continueFrom` 为原任务 ID（同节点），或先下载 checkpoint、作为资产推送到另一节点，再设置 `continueFrom: {"checkpoint":"<sha256>"}`。续跑开启新会话并使用已验证探索笔记；测试密码等凭据需重新提供。批量任务中单条超时若无可用 spec 仍记为 blocked，继续处理下一条。
 
 每条用例独立生成（见 worker.mjs）；返回代码校验失败时，最多在原 Claude 会话中修复两轮，共用本条用例的超时预算：批量任务里第五条失败不会丢掉前四条已经写好的脚本，每次调用有独立超时，前一条用例观察到的页面信息会传给下一条。
 
@@ -114,7 +114,7 @@ node server/generator/main.mjs
 | GENERATOR_DATA_DIR | 系统临时目录/auto-test-generator-jobs | 任务工作目录的临时空间（启动时清空）与 healer 配置文件；镜像为 /var/lib/generator |
 | GENERATOR_CONCURRENCY | 1 | 同时运行的浏览器任务数 |
 | GENERATOR_TIMEOUT_MS | 3600000 | 单个任务（含批量全部用例）的最长时间，不含排队 |
-| GENERATOR_CASE_TIMEOUT_MS | 2400000 | 单条用例的默认最长生成时间（40 分钟）；请求中的 `caseTimeoutMs` 可覆盖，实际时限最多为任务时限减 1 秒。单用例任务超时可继续，批量任务该条记为 blocked 并继续 |
+| GENERATOR_CASE_TIMEOUT_MS | 2400000 | 单条用例的默认最长生成时间（40 分钟）；请求中的 `caseTimeoutMs` 可覆盖，实际时限最多为任务时限减 1 秒。超时后先尝试返回通过校验的已写出 spec，否则单用例任务可继续、批量任务该条记为 blocked 并继续 |
 | GENERATOR_MAX_JOBS | 100 | 未完成（排队 + 运行）任务数上限，满时 503 |
 | GENERATOR_RETENTION_MS | 86400000 | 未被释放的终态任务最长保留时间 |
 | GENERATOR_MAX_RETAINED | 200 | 未被释放的终态任务最多保留条数，超出淘汰最旧的 |

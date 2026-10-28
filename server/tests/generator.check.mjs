@@ -11,7 +11,6 @@ import { Jobs } from '../shared/jobs.mjs';
 import { createHttpServer } from '../shared/http.mjs';
 import { fileURLToPath } from 'node:url';
 import { eventually } from './fixtures.mjs';
-import { projectDirName } from '../planner/checkpoint.mjs';
 import { exportCheckpoint, restoreCheckpoint } from '../generator/checkpoint.mjs';
 
 const input = {
@@ -98,6 +97,7 @@ test('the prompt carries the case and only its own requirement, never the browse
   assert.match(SYSTEM_PROMPT, /browser_get_config is available for diagnosis/);
   assert.match(SYSTEM_PROMPT, /status\/stream long connection disconnects/);
   assert.match(SYSTEM_PROMPT, /performs the action and immediately reads/);
+  assert.match(SYSTEM_PROMPT, /do not call test_debug to investigate it/);
 });
 
 async function setup(t, runtime, options = {}) {
@@ -211,20 +211,32 @@ test('request case timeout can exceed the configured default', async t => {
   assert.equal(result.generated, 1);
 });
 
-test('a single timed-out case keeps its session and resumes without starting exploration over', async t => {
+test('a timed-out case returns its last valid written spec for manual review', async t => {
+  const { worker } = await setup(t, async options => {
+    options.onMessage(setupCall()); options.onMessage(setupPage());
+    await writeFile(path.join(options.cwd, 'project', `${input.cases[0].id}.spec.ts`), spec);
+    await new Promise(resolve => options.signal.addEventListener('abort', resolve, { once: true }));
+    throw options.signal.reason;
+  }, { caseTimeoutMs: 40 });
+  const result = await worker(input, { signal: new AbortController().signal, emit() {} });
+  assert.equal(result.generated, 1);
+  assert.equal(result.scripts[0].code, spec.trim());
+  assert.match(result.scripts[0].deviations[0].summary, /人工复核/);
+});
+
+test('a single timed-out case keeps exploration notes and resumes with a fresh session', async t => {
   let runs = 0;
   const { worker } = await setup(t, async options => {
     runs++;
     options.onMessage(setupCall()); options.onMessage(setupPage());
     if (runs === 1) {
-      const session = path.join(options.env.CLAUDE_CONFIG_DIR, 'projects', projectDirName(options.cwd), `${options.sessionId}.jsonl`);
-      await mkdir(path.dirname(session), { recursive: true });
-      await writeFile(session, '{"turn":1}\n');
+      options.onMessage({ type: 'assistant', message: { content: [{ type: 'text', text: 'GENERATOR_PROGRESS {"stage":"exploring","message":"已验证登录页","explorationNotes":"登录页：密码框已定位"}' }] } });
       await new Promise(resolve => options.signal.addEventListener('abort', resolve, { once: true }));
       throw options.signal.reason;
     }
-    assert.equal(options.resume, true);
+    assert.equal(options.resume, false);
     assert.match(options.prompt, /Continue generating the same case/);
+    assert.match(options.prompt, /密码框已定位/);
     return output;
   }, { caseTimeoutMs: 40 });
   const jobs = new Jobs({ kind: 'generator', worker, timeoutMs: 1000, completion: result => ({ scriptsGenerated: result.generated }) });
@@ -232,14 +244,15 @@ test('a single timed-out case keeps its session and resumes without starting exp
   const first = jobs.submit(input);
   await eventually(() => jobs.get(first.id).status === 'failed');
   assert.equal(jobs.get(first.id).error.code, 'JOB_TIMEOUT');
-  assert.match(jobs.get(first.id).error.message, /已保存会话/);
+  assert.match(jobs.get(first.id).error.message, /已保存探索笔记/);
   assert.equal(jobs.summary(jobs.get(first.id)).continuable, true);
   const session = jobs.claimContinuation(first.id);
   const archive = await exportCheckpoint(session);
   const elsewhere = await mkdtemp(path.join(tmpdir(), 'generator-restore-'));
   t.after(() => rm(elsewhere, { recursive: true, force: true }));
-  assert.deepEqual(await restoreCheckpoint(archive, elsewhere), { sessionId: session.sessionId });
-  const second = jobs.submit({ ...input, resume: session });
+  assert.deepEqual(await restoreCheckpoint(archive, elsewhere), { explorationNotes: '登录页：密码框已定位' });
+  assert.deepEqual((await readdir(elsewhere)).sort(), ['checkpoint.json', 'resume-notes.json']);
+  const second = jobs.submit({ ...input, resume: { workspace: elsewhere } });
   await eventually(() => ['succeeded', 'failed'].includes(jobs.get(second.id).status));
   assert.equal(jobs.get(second.id).status, 'succeeded', jobs.get(second.id).error?.message);
   assert.equal(runs, 2);

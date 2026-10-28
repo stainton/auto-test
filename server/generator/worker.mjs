@@ -1,4 +1,4 @@
-import { appendFileSync } from 'node:fs';
+import { appendFileSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { seedSpec } from '../shared/seed.mjs';
 import { planAuthSession, stageAuthSession, readSavedAuthSession, clearAuthSession, authSessionNote } from '../shared/auth-session.mjs';
@@ -40,14 +40,14 @@ export function createGeneratorWorker({ runtime = runClaude, command, model, set
     signal.throwIfAborted();
     if (!input.resume?.workspace) await mkdir(temporaryRoot, { recursive: true, mode: 0o700 });
     const workspace = input.resume?.workspace ?? await mkdtemp(path.join(temporaryRoot, `${workflow.kind}-`));
-    let sessionId = input.resume?.sessionId ?? randomUUID();
+    let sessionId = randomUUID();
     if (input.resume?.checkpoint) {
       try {
         if (!assetCache) throw new Error('This generator has no asset cache to receive a checkpoint');
         let archive;
         try { archive = await readFile(assetCache.path(input.resume.checkpoint)); }
         catch { throw new Error('The generator checkpoint is no longer cached on this node'); }
-        ({ sessionId } = await restoreCheckpoint(archive, workspace));
+        await restoreCheckpoint(archive, workspace);
       } catch (error) { await rm(workspace, { recursive: true, force: true }); throw error; }
     }
     let completed = false;
@@ -60,7 +60,10 @@ export function createGeneratorWorker({ runtime = runClaude, command, model, set
       emit({ stage: 'preparing', message: input.resume ? '继续上次中断的生成会话，并重新准备浏览器' : workflow.kind === 'healer' ? '准备独立脚本修复工作区' : 'Preparing an isolated browser session' });
       const packagePath = playwrightPackage ?? require.resolve('@playwright/test/package.json');
       const project=path.join(workspace,'project'),nodeModules=path.dirname(path.dirname(path.dirname(packagePath)));
-      if (input.resume) await rm(project, { recursive: true, force: true });
+      if (input.resume) {
+        await rm(project, { recursive: true, force: true });
+        await rm(path.join(workspace, 'claude-config'), { recursive: true, force: true });
+      }
       await mkdir(project,{mode:0o700});await symlink(nodeModules,path.join(project,'node_modules'),'dir');
       const testEntry = path.join(path.dirname(packagePath), 'index.js');
       const cli = path.join(path.dirname(packagePath), 'cli.js');
@@ -94,7 +97,8 @@ export function createGeneratorWorker({ runtime = runClaude, command, model, set
         // A batch shares discoveries even when its cases reference different requirement
         // documents. Each spec remains independently generated and verified, while the
         // expensive product navigation and locator discovery happen only once per batch.
-        const notes = mergeNotes(batchNotes, notesByRequirement.get(testCase.requirement) ?? '');
+        const savedNotes = input.resume ? await readFile(path.join(workspace, 'resume-notes.json'), 'utf8').then(JSON.parse).catch(() => ({})) : {};
+        const notes = mergeNotes(batchNotes, notesByRequirement.get(testCase.requirement) ?? '', savedNotes.explorationNotes);
         await workflow.prepareCase?.({ workspace, project, testCase });
         // The seed starts the exploration browser; whether it starts logged in is decided per case (a case about
         // login itself must start logged out), and only the seed carries the session, never the project config.
@@ -162,10 +166,13 @@ async function runCase({ runtime, input, testCase, workspace, mcpConfig, signal,
   timer.unref();
   const calls = new Map();
   let setupSucceeded = false, testRunSucceeded = false;
-  let prompt = resumed ? JSON.stringify({ instruction: 'Continue generating the same case from the interrupted conversation. The browser is new: call generator_setup_page again, then continue from the last verified finding. Do not re-explore controls or repeat geometry checks that already passed. Keep all original business assertions and return the complete structured result.', originalRequest: JSON.parse(workflow.buildPrompt(input, testCase)) }) : workflow.buildPrompt(input, testCase);
+  let prompt = resumed ? JSON.stringify({ instruction: 'Continue generating the same case using the verified exploration notes in originalRequest.context.explorationNotes. Start a fresh browser with generator_setup_page; do not repeat confirmed exploration. Keep all original business assertions and return the complete structured result.', originalRequest: JSON.parse(workflow.buildPrompt(input, testCase)) }) : workflow.buildPrompt(input, testCase);
   const diagnostics = path.join(workspace, 'diagnostics', testCase.id);
   await mkdir(diagnostics, { recursive: true, mode: 0o700 });
   await writeFile(path.join(diagnostics, 'session.json'), JSON.stringify({ sessionId }), { mode: 0o600 });
+  let recoveryNotes = String(input.context?.explorationNotes ?? '').slice(-12000);
+  const saveRecoveryNotes = () => writeFileSync(path.join(workspace, 'resume-notes.json'), JSON.stringify({ explorationNotes: recoveryNotes }), { mode: 0o600 });
+  if (workflow.kind === 'generator') saveRecoveryNotes();
   const resumedAttempt = resumed ? `resume-${Date.now()}-` : '';
   let setupFailures = 0, validationRepairs = 0;
   let resizeCount = 0, resizeAllowed = false;
@@ -178,7 +185,7 @@ async function runCase({ runtime, input, testCase, workspace, mcpConfig, signal,
       try {
         setupSucceeded = false; testRunSucceeded = false;
         resizeAllowed = false; // each model attempt opens a new browser
-        const output = await runtime({ cwd: workspace, prompt, sessionId, resume: resumed || attempt > 0, systemPrompt: workflow.systemPrompt,
+        const output = await runtime({ cwd: workspace, prompt, sessionId, resume: attempt > 0, systemPrompt: workflow.systemPrompt,
           schema: SCRIPT_OUTPUT_SCHEMA, mcpConfig, allowedTools: ['mcp__playwright-test__*'],
           disallowedTools: EXCLUDED_TOOLS.map(t => `mcp__playwright-test__${t}`),
           signal: controller.signal, command, model, settingsPath, env: { CLAUDE_CONFIG_DIR: path.join(workspace, 'claude-config') },
@@ -226,6 +233,13 @@ async function runCase({ runtime, input, testCase, workspace, mcpConfig, signal,
                   try { progress = JSON.parse(line.slice(prefix.length)); } catch { continue; }
                   if (STAGES.has(progress.stage) && typeof progress.message === 'string')
                     emit({ stage: progress.stage, message: `${progress.message} (${position})`, caseId: testCase.id });
+                  if (workflow.kind === 'generator' && typeof progress.explorationNotes === 'string' && progress.explorationNotes.length <= 12000) {
+                    recoveryNotes = progress.explorationNotes;
+                    saveRecoveryNotes();
+                  } else if (workflow.kind === 'generator' && progress.stage === 'exploring' && typeof progress.message === 'string') {
+                    recoveryNotes = `${recoveryNotes}\n${progress.message}`.slice(-12000);
+                    saveRecoveryNotes();
+                  }
                 }
               }
             }
@@ -265,7 +279,21 @@ async function runCase({ runtime, input, testCase, workspace, mcpConfig, signal,
     // reported as blocked so the rest of the batch still produces specs.
     await writeFile(path.join(diagnostics, 'failure.json'), JSON.stringify({ message: error.message, stack: error.stack, sessionId }), { mode: 0o600 });
     if (signal.aborted) throw signal.reason ?? error;
-    if (stopOnTimeout && controller.signal.aborted) throw new ServiceError(504, 'JOB_TIMEOUT', `${testCase.id} 生成超过 ${Math.round(caseTimeoutMs / 60000)} 分钟；已保存会话，可继续生成`);
+    if (workflow.kind === 'generator' && controller.signal.aborted) {
+      const code = await readFile(path.join(workspace, 'project', `${testCase.id}.spec.ts`), 'utf8').catch(() => '');
+      if (code) {
+        const partial = { status: 'generated', code, summary: '生成超时，脚本待人工复核',
+          deviations: [{ risk: 'medium', summary: '生成超时，脚本尚未完成验证，请人工复核' }], missingInputs: [], explorationNotes: '' };
+        try {
+          formatScript(partial, testCase);
+          emit({ stage: 'finalizing', caseId: testCase.id, message: `${testCase.id} 超时；返回已写出且通过格式校验的脚本，需人工复核` });
+          return partial;
+        } catch (validationError) {
+          await writeFile(path.join(diagnostics, 'timeout-spec-validation-error.txt'), validationError.message, { mode: 0o600 });
+        }
+      }
+    }
+    if (stopOnTimeout && controller.signal.aborted) throw new ServiceError(504, 'JOB_TIMEOUT', `${testCase.id} 生成超过 ${Math.round(caseTimeoutMs / 60000)} 分钟；已保存探索笔记，可继续生成`);
     const summary=caseFailureSummary(error);return { status: 'blocked', code: '', summary, deviations: [], missingInputs: [String(error.message || summary).slice(0, 200)], explorationNotes: '' };
   } finally {
     clearTimeout(timer);
