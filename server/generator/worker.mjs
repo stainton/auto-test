@@ -201,7 +201,7 @@ async function runCase({ runtime, input, testCase, workspace, mcpConfig, signal,
               if (message.type === 'assistant' && block.type === 'tool_use' && block.name.startsWith('mcp__playwright-test__')) {
                 const tool = block.name.replace('mcp__playwright-test__', '');
                 if (workflow.kind === 'generator' && tool === 'browser_resize') {
-                  if (!resizeAllowed || resizeCount >= 2) throw new Error('browser_resize 禁止：必须先由当前视口的一次批量 browser_evaluate 明确报告控件裁剪、窗口外或文字截断，且每条用例最多放大两次');
+                  if (!resizeAllowed || resizeCount >= 2) throw new Error('browser_resize 禁止：页面或容器过长时先滚动；只有当前视口的批量探测明确报告控件裁剪、水平窗口外或文字截断时才能放大，且每条用例最多两次');
                   resizeCount++; resizeAllowed = false;
                 }
                 const action=describePlaywrightAction(tool,block.input);

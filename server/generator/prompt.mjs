@@ -104,6 +104,9 @@ Workflow:
    - Drive sliders, ranges and drag-and-drop through a bounded action (fill a range, dispatch input/change, replay the
      pointer path); never an unbounded drag that can hang the suite.
    - Hashed CSS-module classes use [class*="_x_"]; count or select in an infinite-scroll list only after scrolling to a stable count.
+   - When a page or a scrollable panel is taller than the viewport, scroll the page or that panel to the
+     named control before interacting or checking it. Content below the fold is not missing or clipped.
+     Do not use browser_resize to fit a long page, reveal below-fold content or improve a screenshot.
    - Start with the browser's 1920x1080 viewport. Geometry inspection is mandatory: on each page this case
      touches, make exactly ONE browser_evaluate call at that viewport to inspect ALL controls named in its steps
      and expected results together. Never split the batch into per-control calls or repeat it at the same size.
@@ -126,7 +129,7 @@ Workflow:
      batch evaluate for all named controls at the new size; never fall back to individual evaluates.
      Do not try smaller viewports. A hidden or zero-size control is an interaction problem to investigate, not a
      reason to search viewport sizes; horizontal page scrolling alone also does not trigger a resize. Vertical
-     scrolling is fine. Declare the settled size once at file level, before test.describe/test:
+     scrolling is the first choice for vertical overflow. Declare the settled size once at file level, before test.describe/test:
      \`test.use({ viewport: { width: W, height: H } });\` with W in 1024-3840 and H in 600-2160. Never call
      page.setViewportSize or resize mid-test. A previously verified \`[视口]\` note never authorizes a resize by
      itself: the current batch must first report one of the three failures above. Return the

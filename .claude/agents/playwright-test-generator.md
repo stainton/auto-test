@@ -239,18 +239,18 @@ application behavior.
       where `<NN>` is the zero-padded step number (`01`, `02`, ...) so attachments stay ordered.
       Use `fullPage: true` only for a step whose result is below the fold; the default viewport
       shot is enough otherwise.
-    - **Choose the window size per scenario while exploring — never hardcode one.** Most apps have no
-      small-window layout, so a too-small window hides/clips/truncates controls and the screenshots
-      lose credibility. The browser starts at the config default 1920×1080. With `browser_evaluate`,
-      probe every control the scenario uses: non-zero size, not `display:none`/`visibility:hidden`/
+    - **Scroll long pages before considering a resize.** The browser starts at 1920×1080. If a control
+      is below the fold or inside a scrollable panel, scroll the page or panel to it before interacting
+      or checking it. Page length alone never justifies `browser_resize`, even for a screenshot.
+      In one `browser_evaluate` call, probe all controls the scenario uses: non-zero size, not `display:none`/`visibility:hidden`/
       `opacity:0`, `getBoundingClientRect` inside the window horizontally, not clipped by an ancestor's
       `overflow` (horizontally, or vertically only when that ancestor's `overflow-y` is `hidden`/`clip` —
       a control below the fold or inside an `auto`/`scroll` container is reached by scrolling and passes),
       text not truncated (`scrollWidth > clientWidth` on an element with its own non-empty text and
-      non-`visible` overflow — an icon or slider handle without text never counts), no horizontal page scroll. If
-      anything fails, `browser_resize` up (2560×1440, then 3200×1800) and re-probe; if all pass, you
-      may try one smaller size (1600×900 / 1440×900) and keep it only if everything still passes
-      (smaller window = more legible shots). At most 4 resizes, then settle. Declare the result once
+      non-`visible` overflow — an icon or slider handle without text never counts), no horizontal page scroll.
+      Only a named control's actual horizontal clipping, window overflow or text truncation authorizes
+      `browser_resize` up (2560×1440, then 3200×1800), at most twice, with one repeat batch probe after
+      each resize. Do not try smaller sizes. Declare the result once
       at file level: `test.use({ viewport: { width: W, height: H } })` (W 1024–3840, H 600–2160);
       never `setViewportSize` mid-test. Record it in `exploration-notes.md` as `[视口] <page>: WxH`
       and reuse it (one verifying probe) next time.

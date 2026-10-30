@@ -93,6 +93,7 @@ test('the prompt carries the case and only its own requirement, never the browse
   assert.match(SYSTEM_PROMPT, /exactly ONE browser_evaluate call/);
   assert.match(SYSTEM_PROMPT, /browser_resize is forbidden unless that array explicitly contains/);
   assert.match(SYSTEM_PROMPT.replace(/\s+/g, ' '), /a control above or below the fold is reached by vertical scrolling/);
+  assert.match(SYSTEM_PROMPT.replace(/\s+/g, ' '), /Do not use browser_resize to fit a long page/);
   assert.match(SYSTEM_PROMPT.replace(/\s+/g, ' '), /never select a control by tag name alone/);
   assert.match(SYSTEM_PROMPT, /browser_get_config is available for diagnosis/);
   assert.match(SYSTEM_PROMPT, /status\/stream long connection disconnects/);
