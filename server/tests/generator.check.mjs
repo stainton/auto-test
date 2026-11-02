@@ -34,6 +34,12 @@ test('rejects malformed cases, local storage-state paths and unsupported fields'
     { ...input, mcpConfig: { command: 'arbitrary-command' } } ]) assert.throws(() => validateInput(invalid));
 });
 
+test('accepts more than 20 referenced assets for script generation', () => {
+  const assets = Array.from({ length: 25 }, (_, i) => ({ id: `asset-${i}`, name: `image-${i}.png`,
+    type: 'image', mimeType: 'image/png', sha256: 'a'.repeat(64), size: 68 }));
+  assert.deepEqual(validateInput({ ...input, context: { ...input.context, assets } }).context.assets, assets);
+});
+
 test('requires an in-range explored viewport for generated specs but not for healed ones', () => {
   const view = 'test.use({ viewport: { width: 1600, height: 900 } });';
   const without = spec.replace(view, '');

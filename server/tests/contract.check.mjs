@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { CASE_FIELDS, OUTPUT_SCHEMA, CASE_ID_RE, validateInput, formatResult, outputSchema, requirementCode,
-  MIN_TIMEOUT_MS, MAX_TIMEOUT_MS, MAX_ASSETS } from '../planner/contract.mjs';
+  MIN_TIMEOUT_MS, MAX_TIMEOUT_MS } from '../planner/contract.mjs';
 import { buildPrompt } from '../planner/prompt.mjs';
 import { input, output } from './fixtures.mjs';
 
@@ -35,8 +35,8 @@ test('context.assets accepts references to pushed files and rejects anything els
     { ...asset, size: 1.5 }, { ...asset, url: 'http://elsewhere/x' }, { id: 'a1' }, { ...asset, id: '' }
   ]) assert.throws(() => validateInput({ ...input, context: { assets: [invalid] } }));
   assert.throws(() => validateInput({ ...input, context: { assets: 'a1' } }));
-  assert.throws(() => validateInput({ ...input, context: { assets: Array(MAX_ASSETS + 1).fill(asset) } }));
-  assert.equal(validateInput({ ...input, context: { assets: Array(MAX_ASSETS).fill(asset) } }).context.assets.length, MAX_ASSETS);
+  const manyAssets = Array.from({ length: 25 }, (_, i) => ({ ...asset, id: `a${i + 1}` }));
+  assert.deepEqual(validateInput({ ...input, context: { assets: manyAssets } }).context.assets, manyAssets);
   assert.deepEqual(validateInput({ ...input, context: { assets: [] } }).context.assets, []);
 });
 

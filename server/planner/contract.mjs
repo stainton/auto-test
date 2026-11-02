@@ -81,10 +81,9 @@ export function validateContinueFrom(value, name = 'continueFrom') {
 // task only references them, by hash. The service copies each into the task's workspace and tells the
 // model where (planner/worker.mjs), so the model never downloads anything and this service never
 // contacts CaseHub.
-export const MAX_ASSETS = 20;
 export const ASSET_TYPES = ['image', 'video', 'audio'];
 export function validateAssets(assets) {
-  check(Array.isArray(assets) && assets.length <= MAX_ASSETS, `context.assets must contain at most ${MAX_ASSETS} entries`);
+  check(Array.isArray(assets), 'context.assets must be an array');
   for (const asset of assets) {
     keys(asset, ['id', 'name', 'type', 'mimeType', 'sha256', 'size'], 'context.assets entry');
     string(asset.id, 'context.assets.id', 200);
