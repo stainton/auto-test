@@ -15,7 +15,7 @@ export function createGeneratorService({ command, runtime, applySettings, playwr
   workspaceRoot, concurrency, authSessions }) {
   // Jobs live in memory, so a workspace left by an earlier process belongs to no job any more.
   rmSync(workspaceRoot, { recursive: true, force: true });
-  const jobTimeoutMs = positive('GENERATOR_TIMEOUT_MS', 3600000);
+  const jobTimeoutMs = positive('GENERATOR_TIMEOUT_MS', 43200000);
   const worker = withExperience(createGeneratorWorker({ command, runtime, playwrightPackage, assetCache, authSessions, temporaryRoot: workspaceRoot,
     caseTimeoutMs: positive('GENERATOR_CASE_TIMEOUT_MS', 2400000), jobTimeoutMs }));
   const jobs = new Jobs({

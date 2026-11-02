@@ -18,6 +18,6 @@
 
 OpenAPI 文档在 `server/generator/openapi.json`，运行时可直接请求 `GET /openapi.json`。
 
-Pod 是无状态节点，不需要 PVC：任务记录、进度、结果和失败现场的诊断包都由 CaseHub 取走保存，Pod 内只有 `emptyDir`（`/var/lib/generator`：任务工作目录、资产缓存和 healer 的配置文件，重建即清空）。副本数可固定、可随时调整，也可按 generator + healer 的排队数自动扩缩（见 `deploy/kubernetes/README.md`）。停机时运行中的任务最多再跑 `GENERATOR_DRAIN_TIMEOUT_MS`（默认 60 分钟），仍未结束的由 CaseHub 重新排队到其他 Pod。
+Pod 是无状态节点，不需要 PVC：任务记录、进度、结果和失败现场的诊断包都由 CaseHub 取走保存，Pod 内只有 `emptyDir`（`/var/lib/generator`：任务工作目录、资产缓存和 healer 的配置文件，重建即清空）。副本数可固定、可随时调整，也可按 generator + healer 的排队数自动扩缩（见 `deploy/kubernetes/README.md`）。停机时运行中的任务最多再跑 `GENERATOR_DRAIN_TIMEOUT_MS`（默认 12 小时），仍未结束的由 CaseHub 重新排队到其他 Pod。
 
 清单保留浏览器资源预算、共享内存和健康检查；容器文件系统可写，不设置额外的容器安全策略。Pod 需要能够访问模型 API 和被测系统。

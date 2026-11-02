@@ -22,7 +22,7 @@ spec:
       # On SIGTERM the node stops taking tasks (readiness turns 503, so it leaves planner-nodes), lets the running
       # one finish for up to PLANNER_DRAIN_TIMEOUT_MS, then waits up to PLANNER_DRAIN_HOLD_MS for CaseHub to collect
       # it. A run cut off by the drain limit stays continuable from its checkpoint. Keep this above the sum.
-      terminationGracePeriodSeconds: 990
+      terminationGracePeriodSeconds: 10890
       containers:
         - name: planner
           image: auto-test-planner:local
@@ -34,13 +34,13 @@ spec:
             - name: PLANNER_CONCURRENCY
               value: '1'
             - name: PLANNER_TIMEOUT_MS
-              value: '900000'
+              value: '10800000'
             - name: PLANNER_MAX_JOBS
               value: '100'
             - name: PLANNER_RETENTION_MS
               value: '86400000'
             - name: PLANNER_DRAIN_TIMEOUT_MS
-              value: '900000'
+              value: '10800000'
             - name: PLANNER_DRAIN_HOLD_MS
               value: '60000'
             # Scratch only: task workspaces (cleared on start) and the asset cache.

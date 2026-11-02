@@ -43,7 +43,7 @@ export async function main() {
     workspaceRoot: path.join(dataDir, 'healer-workspaces') });
   const server = createRoutedServer([{ ...healer, prefix: '/v1/healer/' }, generator]);
   server.listen(positive('GENERATOR_PORT', 4502), host, () => console.log(`Generator HTTP service listening on ${host}:${server.address().port}`));
-  stopOnSignals(server, { label: 'Generator', drainTimeoutMs: positive('GENERATOR_DRAIN_TIMEOUT_MS', positive('GENERATOR_TIMEOUT_MS', 3600000)),
+  stopOnSignals(server, { label: 'Generator', drainTimeoutMs: positive('GENERATOR_DRAIN_TIMEOUT_MS', positive('GENERATOR_TIMEOUT_MS', 43200000)),
     holdMs: positive('GENERATOR_DRAIN_HOLD_MS', 60000) });
   return { server, jobs: generator.jobs, healerJobs: healer.jobs };
 }

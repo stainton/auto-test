@@ -19,7 +19,7 @@ export function createPlannerService({ command, runtime, applySettings, playwrig
   rmSync(workspaceRoot, { recursive: true, force: true });
   const worker = withExperience(createPlannerWorker({ command, runtime, playwrightPackage, assetCache, authSessions, temporaryRoot: workspaceRoot }));
   const jobs = new Jobs({
-    worker, concurrency, timeoutMs: positive('PLANNER_TIMEOUT_MS', 900000),
+    worker, concurrency, timeoutMs: positive('PLANNER_TIMEOUT_MS', 10800000),
     // A request may raise or lower its own limit; the deployment keeps the last word through
     // PLANNER_MAX_TIMEOUT_MS, so one caller cannot occupy the single browser slot indefinitely.
     timeoutFor: input => input.timeoutMs && Math.min(input.timeoutMs, positive('PLANNER_MAX_TIMEOUT_MS', MAX_TIMEOUT_MS)),

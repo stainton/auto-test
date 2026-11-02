@@ -39,7 +39,7 @@ export async function main() {
     concurrency: positive('ORGANIZER_CONCURRENCY', 1), authSessions });
   const server = createRoutedServer([organizer, planner]);
   server.listen(positive('PLANNER_PORT', 4501), host, () => console.log(`Planner HTTP service listening on ${host}:${server.address().port}`));
-  stopOnSignals(server, { label: 'Planner', drainTimeoutMs: positive('PLANNER_DRAIN_TIMEOUT_MS', positive('PLANNER_TIMEOUT_MS', 900000)),
+  stopOnSignals(server, { label: 'Planner', drainTimeoutMs: positive('PLANNER_DRAIN_TIMEOUT_MS', positive('PLANNER_TIMEOUT_MS', 10800000)),
     holdMs: positive('PLANNER_DRAIN_HOLD_MS', 60000) });
   return { server, jobs: planner.jobs, organizerJobs: organizer.jobs };
 }

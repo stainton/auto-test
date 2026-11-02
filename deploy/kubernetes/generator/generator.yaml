@@ -24,7 +24,7 @@ spec:
       # generator and healer tasks finish for up to GENERATOR_DRAIN_TIMEOUT_MS, then waits up to
       # GENERATOR_DRAIN_HOLD_MS for CaseHub to collect them; a task cut off by the drain limit is run again
       # elsewhere by CaseHub. Keep this above the sum.
-      terminationGracePeriodSeconds: 3690
+      terminationGracePeriodSeconds: 43290
       containers:
         - name: generator
           image: auto-test-generator:local
@@ -36,7 +36,7 @@ spec:
             - name: GENERATOR_CONCURRENCY
               value: '1'
             - name: GENERATOR_TIMEOUT_MS
-              value: '3600000'
+              value: '43200000'
             - name: GENERATOR_CASE_TIMEOUT_MS
               value: '2400000'
             - name: GENERATOR_MAX_JOBS
@@ -44,7 +44,7 @@ spec:
             - name: GENERATOR_RETENTION_MS
               value: '86400000'
             - name: GENERATOR_DRAIN_TIMEOUT_MS
-              value: '3600000'
+              value: '43200000'
             - name: GENERATOR_DRAIN_HOLD_MS
               value: '60000'
             # Scratch only: task workspaces (cleared on start; a failed one kept until CaseHub has its diagnostics),

@@ -95,7 +95,7 @@ curl http://localhost:4501/v1/planner/jobs/JOB_ID/result
 }
 ```
 
-请求可带可选的 `timeoutMs`：整个设计任务的时限（毫秒，1 分钟–4 小时），由发起任务的人在界面上选择——探索耗时取决于被测系统和用例预算，固定的服务端默认值对大需求经常不够。不传时使用 `PLANNER_TIMEOUT_MS`；服务端再按 `PLANNER_MAX_TIMEOUT_MS` 封顶，单个调用方不会长期占住唯一的浏览器槽位。超时任务以 `JOB_TIMEOUT` 失败，实际生效的时限会写在任务状态的 `timeoutMs` 上。
+请求可带可选的 `timeoutMs`：整个设计任务的时限（毫秒，1 分钟–4 小时），由发起任务的人在界面上选择，按被测系统和用例预算调整。不传时使用 `PLANNER_TIMEOUT_MS`（默认 180 分钟）；服务端再按 `PLANNER_MAX_TIMEOUT_MS` 封顶，单个调用方不会长期占住唯一的浏览器槽位。超时任务以 `JOB_TIMEOUT` 失败，实际生效的时限会写在任务状态的 `timeoutMs` 上。
 
 请求可带可选的 `continueFrom`，指向一次中断的设计（状态里带 `continuable: true`，通常是 `JOB_TIMEOUT` 或停机时的 `NODE_SHUTDOWN`）。此时新任务不会从零开始探索，而是用 `claude --resume` 接着那次会话继续——浏览器是新的（继续的第一件事仍是 `planner_setup_page`），但模型此前探索到的内容还在。两种写法：
 
@@ -116,7 +116,7 @@ curl http://localhost:4501/v1/planner/jobs/JOB_ID/result
 
 状态为 queued → running → succeeded / failed / cancelled。阶段和工具开始/完成事件来自运行过程，不使用虚构百分比。SSE 首先发送 snapshot，然后回放游标之后的 progress；使用 `Last-Event-ID` 或 `?after=N` 重连。最多保留最近 500 条，较旧记录丢失时先发送 reset。snapshot 表示当前任务状态，回放的旧 progress 用于过程记录，不应覆盖较新的状态。每 15 秒有心跳；终态关闭连接。抽屉关闭不影响任务，重新打开按 ID 查看即可。
 
-取消后阶段先变为 cancelling，等待 Agent/MCP/浏览器进程终止再进入 cancelled。整任务默认 15 分钟超时，可由请求的 `timeoutMs` 覆盖。当前没有幂等提交或自动续跑；重复 POST 会创建新任务。
+取消后阶段先变为 cancelling，等待 Agent/MCP/浏览器进程终止再进入 cancelled。整任务默认 180 分钟超时，可由请求的 `timeoutMs` 覆盖。当前没有幂等提交或自动续跑；重复 POST 会创建新任务。
 
 任务只存在内存里（见 [server/README.md](../README.md) 的"无状态执行节点"）：状态、进度和结果保留到下发方释放（`POST .../release`）为止，未释放的终态任务 24 小时后或超过 200 条时淘汰最旧的，之后返回 404；进程重启后所有任务都查不到，中断的会话只能靠下发方事先取走的 checkpoint 继续。未完成（排队 + 运行）的任务最多 100 个，满时新请求返回 503；已结束的任务不占这个名额。正常停机时运行中的任务先跑完（`PLANNER_DRAIN_TIMEOUT_MS`），超时的以 `NODE_SHUTDOWN` 失败并保留会话，下发方仍可取走 checkpoint。
 
@@ -134,7 +134,7 @@ curl http://localhost:4501/v1/planner/jobs/JOB_ID/result
 | PLANNER_CLAUDE_COMMAND | claude | 受信任的运行时可执行文件，不接受请求指定 |
 | PLANNER_DATA_DIR | 系统临时目录/auto-test-planner-jobs | 任务工作目录的临时空间（`workspaces/`，启动时清空）；镜像为 /var/lib/planner |
 | PLANNER_CONCURRENCY | 1 | 同时运行的浏览器任务数 |
-| PLANNER_TIMEOUT_MS | 900000 | 单个执行任务的默认最长时间，不含排队；请求里的 `timeoutMs` 优先 |
+| PLANNER_TIMEOUT_MS | 10800000 | 单个执行任务的默认最长时间（180 分钟），不含排队；请求里的 `timeoutMs` 优先 |
 | PLANNER_MAX_TIMEOUT_MS | 14400000 | 请求 `timeoutMs` 的上限，超出按此封顶 |
 | PLANNER_MAX_JOBS | 100 | 未完成（排队 + 运行）任务数上限，满时 503 |
 | PLANNER_RETENTION_MS | 86400000 | 未被释放的终态任务最长保留时间 |
