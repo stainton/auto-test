@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { describePlaywrightAction, describePlaywrightResult } from '../shared/playwright-progress.mjs';
+import { describePlaywrightAction, describePlaywrightCode, describePlaywrightIntent, describePlaywrightResult } from '../shared/playwright-progress.mjs';
 assert.equal(describePlaywrightAction('browser_click',{element:'新建素材按钮'}),'定位并点击控件：新建素材按钮');
 assert.equal(describePlaywrightAction('browser_fill',{selector:'input[name=password]',text:'secret-value'}),'定位并填写控件：input[name=password]');
 assert.equal(describePlaywrightAction('browser_snapshot',{}),'读取当前页面的控件与状态');
@@ -16,4 +16,10 @@ assert.equal(describePlaywrightResult('browser_evaluate',[{type:'text',text:'###
   '批量检查控件布局：管线、版本');
 assert.equal(describePlaywrightResult('browser_snapshot',[{type:'text',text:'Page URL: https://test.example.com/create?token=private\nPage Title: 创建素材'}]),
   '读取页面控件与状态：https://test.example.com/create');
+assert.equal(describePlaywrightCode({code:"await page.getByLabel('密码').fill('secret-value'); await page.getByRole('button', { name: '登录' }).click();"}),
+  "await page.getByLabel('密码').fill(\"[REDACTED]\"); await page.getByRole('button', { name: '登录' }).click();");
+assert.equal(describePlaywrightCode({code:"const token = 'private'; await page.goto('https://test.example.com/home?key=private');"}),
+  "const token = \"[REDACTED]\"; await page.goto('https://test.example.com/home?[REDACTED]');");
+assert.equal(describePlaywrightIntent({intent:'检查版本列表是否出现'},'检查控件状态'),'检查版本列表是否出现');
+assert.equal(describePlaywrightIntent({intent:'password=private'},'检查控件状态'),'检查控件状态');
 console.log('playwright progress descriptions checks passed');

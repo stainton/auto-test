@@ -28,6 +28,20 @@ const codeTargets=input=>{
   return names;
 };
 const describedTargets=names=>names.length?`：${names.slice(0,3).join('、')}${names.length>3?` 等 ${names.length} 个控件`:''}`:'';
+// The model's browser code is useful for diagnosis, but may inline test credentials.
+// Keep executable structure and locators while masking values passed to input APIs.
+export function describePlaywrightCode(input={}){
+  const source=['code','function','expression'].map(key=>input?.[key]).find(value=>typeof value==='string');
+  if(!source)return '';
+  return source
+    .replace(/(\.(?:fill|type|pressSequentially|setInputFiles)\s*\(\s*)(['"`])(?:\\.|(?!\2)[\s\S])*?\2/gi,'$1"[REDACTED]"')
+    .replace(/((?:password|passwd|secret|token|authorization|cookie|api[_-]?key)\s*[:=]\s*)(['"`])(?:\\.|(?!\2)[\s\S])*?\2/gi,'$1"[REDACTED]"')
+    .replace(/(https?:\/\/[^\s'"`?#]+)\?[^\s'"`#]*/gi,'$1?[REDACTED]')
+    .slice(0,12000);
+}
+export function describePlaywrightIntent(input, fallback){
+  return safeName(input?.intent)||fallback;
+}
 export function describePlaywrightResult(tool,content){
   const text=(Array.isArray(content)?content:[]).filter(item=>item?.type==='text'&&typeof item.text==='string').map(item=>item.text).join('\n');
   if(tool==='browser_snapshot'){

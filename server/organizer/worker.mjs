@@ -4,7 +4,7 @@
 // store, and a request with continueFrom arrives here as input.resume.
 import { seedSpec } from '../shared/seed.mjs';
 import { planAuthSession, stageAuthSession, readSavedAuthSession, clearAuthSession, authSessionNote } from '../shared/auth-session.mjs';
-import { describePlaywrightAction, describePlaywrightResult } from '../shared/playwright-progress.mjs';
+import { describePlaywrightAction, describePlaywrightCode, describePlaywrightIntent, describePlaywrightResult } from '../shared/playwright-progress.mjs';
 import { mkdtemp, mkdir, writeFile, rm, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -81,17 +81,18 @@ export function createOrganizerWorker({ runtime = runClaude, command, model, set
             if (message.type === 'assistant' && block.type === 'tool_use' && block.name.startsWith('mcp__playwright-test__')) {
               const tool = block.name.replace('mcp__playwright-test__', '');
               const action = describePlaywrightAction(tool, block.input);
-              calls.set(block.id, { tool, action, startedAt: Date.now() });
-              emit({ stage: tool === 'planner_setup_page' ? 'preparing' : 'exploring', message: `正在${action}`, tool, toolStatus: 'started', operationId: block.id });
+              const toolCode=describePlaywrightCode(block.input),toolIntent=describePlaywrightIntent(block.input,action);
+              calls.set(block.id, { tool, action, toolCode, toolIntent, startedAt: Date.now() });
+              emit({ stage: tool === 'planner_setup_page' ? 'preparing' : 'exploring', message: `正在${action}`, tool, toolIntent, ...(toolCode?{toolCode}:{}), toolStatus: 'started', operationId: block.id });
             }
             if (message.type === 'user' && block.type === 'tool_result' && calls.has(block.tool_use_id)) {
-              const { tool, action, startedAt } = calls.get(block.tool_use_id);
+              const { tool, action, toolCode, toolIntent, startedAt } = calls.get(block.tool_use_id);
               calls.delete(block.tool_use_id);
               const failed = Boolean(block.is_error);
               if (tool === 'planner_setup_page' && !failed) setupSucceeded = true;
               const detail=failed?action:describePlaywrightResult(tool,block.content)||action;
               emit({ stage: tool === 'planner_setup_page' ? 'preparing' : 'exploring', message: `${detail}${failed ? '失败' : '已完成'}`, tool,
-                toolStatus: failed ? 'failed' : 'completed', operationId: block.tool_use_id,
+                toolIntent, ...(toolCode?{toolCode}:{}), toolStatus: failed ? 'failed' : 'completed', operationId: block.tool_use_id,
                 durationMs: Date.now() - startedAt });
             }
             if (message.type === 'assistant' && block.type === 'text') {
