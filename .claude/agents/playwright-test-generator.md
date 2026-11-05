@@ -239,21 +239,19 @@ application behavior.
       where `<NN>` is the zero-padded step number (`01`, `02`, ...) so attachments stay ordered.
       Use `fullPage: true` only for a step whose result is below the fold; the default viewport
       shot is enough otherwise.
-    - **Scroll long pages before considering a resize.** The browser starts at 1920×1080. If a control
+    - **Use a fixed 2560×1440 viewport and scroll to controls.** If a control
       is below the fold or inside a scrollable panel, scroll the page or panel to it before interacting
-      or checking it. Page length alone never justifies `browser_resize`, even for a screenshot.
+      or checking it. Scroll horizontally when needed. `browser_resize` and `page.setViewportSize` are
+      forbidden during exploration and tests.
       In one `browser_evaluate` call, probe all controls the scenario uses: non-zero size, not `display:none`/`visibility:hidden`/
       `opacity:0`, `getBoundingClientRect` inside the window horizontally, not clipped by an ancestor's
       `overflow` (horizontally, or vertically only when that ancestor's `overflow-y` is `hidden`/`clip` —
       a control below the fold or inside an `auto`/`scroll` container is reached by scrolling and passes),
       text not truncated (`scrollWidth > clientWidth` on an element with its own non-empty text and
       non-`visible` overflow — an icon or slider handle without text never counts), no horizontal page scroll.
-      Only a named control's actual horizontal clipping, window overflow or text truncation authorizes
-      `browser_resize` up (2560×1440, then 3200×1800), at most twice, with one repeat batch probe after
-      each resize. Do not try smaller sizes. Declare the result once
-      at file level: `test.use({ viewport: { width: W, height: H } })` (W 1024–3840, H 600–2160);
-      never `setViewportSize` mid-test. Record it in `exploration-notes.md` as `[视口] <page>: WxH`
-      and reuse it (one verifying probe) next time.
+      Use the batch result to identify which controls need scrolling; never change the viewport.
+      Declare `test.use({ viewport: { width: 2560, height: 1440 } })` once at file level.
+      Record `[视口] <page>: 2560x1440` in `exploration-notes.md` and reuse verified facts next time.
     - **Fit as many controls as possible, but stay readable.** Many pages have no small-window
       layout. Before the shot, temporarily set `document.documentElement.style.zoom` to
       `min(1, innerWidth/scrollWidth, innerHeight/scrollHeight)` but **never below 0.6**, take the

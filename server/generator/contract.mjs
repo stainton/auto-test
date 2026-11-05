@@ -93,13 +93,12 @@ export const SCRIPT_OUTPUT_SCHEMA = {
 
 // Validates one model result against the case it was generated for, and returns the stored script.
 const VIEWPORT = /viewport\s*:\s*\{\s*width\s*:\s*(\d+)\s*,\s*height\s*:\s*(\d+)\s*\}/;
-// A generated spec carries the window size the generator found while exploring; a missing or absurd one would
-// silently fall back to the config default and crop (or waste) the screenshot evidence.
+// The spec must use the same fixed window as the exploration browser.
 function checkViewport(code) {
   const m = VIEWPORT.exec(code);
-  check(m, 'a generated script must declare the explored window size: test.use({ viewport: { width: W, height: H } })');
+  check(m, 'a generated script must declare test.use({ viewport: { width: 2560, height: 1440 } })');
   const w = Number(m[1]), h = Number(m[2]);
-  check(w >= 1024 && w <= 3840 && h >= 600 && h <= 2160, 'viewport must be between 1024x600 and 3840x2160');
+  check(w === 2560 && h === 1440, 'generator viewport must be 2560x1440');
 }
 
 export function formatScript(output, testCase, { requireViewport = true, allowIncomplete = false } = {}) {
@@ -116,6 +115,7 @@ export function formatScript(output, testCase, { requireViewport = true, allowIn
   if (output.status === 'generated') {
     if (requireViewport && !allowIncomplete)
       check(deviations.length===0, 'a generator case with an observed product mismatch must be blocked');
+    check(!/\bsetViewportSize\s*\(/.test(code), 'generated scripts must not resize the viewport');
     check(code.includes('@playwright/test') && /\btest\s*\(/.test(code),
       'a generated script must be a Playwright spec importing @playwright/test and declaring a test');
     check(!/\btest\.(skip|fixme)\s*\(/.test(code), 'a generated script must not skip or fixme the case');

@@ -74,13 +74,11 @@ and repeated setup, not token throughput, so the rules below are load-bearing, n
   once (check-then-reuse into one folder), never per scenario. Bulk upload over a network is
   the slowest thing in a run.
 - **Re-run one test (`-g "<title>"`), not the suite,** when checking a freshly generated/fixed spec.
-- **Keep the 1920×1080 viewport unless a batch probe proves it is too small.** On each page, the generator
-  inspects all named controls in one `browser_evaluate` call. It must scroll the page or a scrollable panel to
-  reach below-fold content; `browser_resize` is forbidden for long pages or better screenshots. Only a batch
-  result reporting ancestor clipping, a control outside the viewport horizontally, or truncated text permits
-  enlarging to 2560×1440, then 3200×1800 if the next batch still reports a problem (at most two resizes per
-  case). Never try a smaller viewport or resize during a test. Declare the settled size once at file level as
-  `test.use({ viewport })` (validated 1024–3840 × 600–2160).
+- **Use a fixed 2560×1440 viewport.** On each page, the generator inspects all named controls in one
+  `browser_evaluate` call. If a control is below the fold or clipped by a scrollable page/panel, scroll that
+  page or panel horizontally or vertically to reach it. `browser_resize` and `page.setViewportSize` are
+  forbidden during exploration and tests. Declare `test.use({ viewport: { width: 2560, height: 1440 } })`
+  once at file level.
 - **One screenshot per step** (attach-only; `fullPage` only when the result is below the fold). Temporarily
   zoom the page out (floor 0.6, restored afterwards) so non-responsive pages fit more controls per shot.
 

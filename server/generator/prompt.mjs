@@ -107,11 +107,12 @@ Workflow:
    - Drive sliders, ranges and drag-and-drop through a bounded action (fill a range, dispatch input/change, replay the
      pointer path); never an unbounded drag that can hang the suite.
    - Hashed CSS-module classes use [class*="_x_"]; count or select in an infinite-scroll list only after scrolling to a stable count.
-   - When a page or a scrollable panel is taller than the viewport, scroll the page or that panel to the
-     named control before interacting or checking it. Content below the fold is not missing or clipped.
-     Do not use browser_resize to fit a long page, reveal below-fold content or improve a screenshot.
-   - Start with the browser's 1920x1080 viewport. Geometry inspection is mandatory: on each page this case
-     touches, make exactly ONE browser_evaluate call at that viewport to inspect ALL controls named in its steps
+   - The browser and generated spec use a fixed 2560x1440 viewport. browser_resize and page.setViewportSize
+     are forbidden throughout exploration and tests. When a control is outside the visible area or clipped by
+     a scrollable ancestor, scroll the page or that container (horizontally or vertically as needed), then
+     interact with or read the control. Content below the fold is not missing or blocked.
+   - Geometry inspection is mandatory: on each page this case touches, make exactly ONE browser_evaluate call
+     at 2560x1440 to inspect ALL controls named in its steps
      and expected results together. Never split the batch into per-control calls or repeat it at the same size.
      Return an array of { name, selector, visible, rectInWindow, clippedByAncestor, textTruncated,
      pageScrollsHorizontally } for those controls. Compute visible from non-zero size and display/visibility/opacity;
@@ -123,22 +124,13 @@ Workflow:
      scrollWidth > clientWidth + 1 (an element without text, such as an icon or a slider handle, is never
      truncated); and pageScrollsHorizontally from
      document.documentElement.scrollWidth > innerWidth. Do not judge a switch's state from this geometry or a screenshot:
-     use checked/aria-checked/aria-pressed as above. Use ONLY the returned batch array to choose the viewport.
-     browser_resize is forbidden unless that array explicitly contains clippedByAncestor=true,
-     rectInWindow=false or textTruncated=true for a named control. If none is reported, keep 1920x1080
-     without any browser_resize, regardless of screenshots, visual appearance or a desire for better framing.
-     If the batch reports one of those three failures, try 2560x1440 and then, only if the new batch still
-     reports a failure, 3200x1800: at most TWO browser_resize calls total. After each resize, rerun exactly ONE
-     batch evaluate for all named controls at the new size; never fall back to individual evaluates.
-     Do not try smaller viewports. A hidden or zero-size control that the case expects to be usable is a blocking
-     product mismatch, not a reason to search viewport sizes; horizontal page scrolling alone also does not trigger a resize. Vertical
-     scrolling is the first choice for vertical overflow. Declare the settled size once at file level, before test.describe/test:
-     \`test.use({ viewport: { width: W, height: H } });\` with W in 1024-3840 and H in 600-2160. Never call
-     page.setViewportSize or resize mid-test. A previously verified \`[视口]\` note never authorizes a resize by
-     itself: the current batch must first report one of the three failures above. Return the
-     settled size in explorationNotes as \`[视口] <page/view>: WxH\`, plus a concise batch-probe conclusion (all named
-     controls passed, or which controls failed and why). Reuse that conclusion on a repair attempt; do not repeat
-     per-control probes for controls that passed.
+     use checked/aria-checked/aria-pressed as above. Use the batch result to identify controls needing scroll;
+     after scrolling, read the affected control in the same bounded browser_run_code_unsafe call as the action.
+     If scrolling cannot expose a control that the case expects to be usable, report the observed mismatch as
+     blocked without diagnosing its cause. A hidden or zero-size control that the case expects to be usable is
+     also a blocking product mismatch. Declare the fixed viewport once at file level, before test.describe/test:
+     \`test.use({ viewport: { width: 2560, height: 1440 } });\`. Record \`[视口] <page/view>: 2560x1440\`
+     and a concise batch-probe conclusion in explorationNotes. Reuse verified findings on a repair attempt.
    - Use the baseURL from the Playwright config with relative paths; never hardcode another host, a local absolute
      file path, or a credential that was not supplied in context.
    - Make the generated script produce its own execution record when it runs later. Wrap every important business
@@ -168,7 +160,7 @@ ${EVIDENCE_CAPTURE_HELPER}
      Call this helper inside the step; attachment names do not have to exactly match step titles.
      Setup and cleanup need no screenshots. Do not label an actual test step [setup] or [cleanup] to bypass evidence.
 6. Verify what you wrote: run it once (test_run) and fix real failures, at most three fix-and-rerun cycles.
-   On a fix-and-rerun cycle, reuse the already verified viewport and batch probe findings from this session and
+   On a fix-and-rerun cycle, reuse the fixed viewport and verified batch probe findings from this session and
    explorationNotes. The browser may be new, but do not redo geometry checks or re-explore pages and controls
    already confirmed to work; revisit only the step or control that actually failed, then rerun the corrected spec.
    Do not weaken an assertion, skip, fixme or delete a step to make a run pass. If the live app contradicts any

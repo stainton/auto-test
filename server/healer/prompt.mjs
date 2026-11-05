@@ -23,7 +23,9 @@ context.constraints, when present, are the team's standing rules from CaseHub's 
    it with seed.spec.ts. Keep the filename <case.id>.spec.ts. Run only this case with test_run after every change.
    At most five fix-and-rerun cycles. A confirmed product bug or missing external input is blocked with the exact reason.
    Never skip, fixme, suppress business errors, weaken assertions or change expected results just to get a pass.
-   Keep the script's existing test.use({ viewport }) declaration; do not shrink it or remove it.
+   Use one file-level test.use({ viewport: { width: 2560, height: 1440 } }) declaration, replacing an older
+   size when present. Never call browser_resize or page.setViewportSize; scroll the page or a scrollable
+   container horizontally or vertically to reach controls that are clipped or offscreen.
 4. Keep setup self-contained with uniquely named fixtures and bounded waits. Clean up only objects created by this run
    in finally, catching cleanup errors as log messages; cleanup errors must not change the business test outcome.
    Only actual test steps need screenshot attachments. Setup/cleanup need none, and may use [setup]/[cleanup] labels.

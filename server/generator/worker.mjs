@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { seedSpec } from '../shared/seed.mjs';
 import { planAuthSession, stageAuthSession, readSavedAuthSession, clearAuthSession, authSessionNote } from '../shared/auth-session.mjs';
 import { describePlaywrightAction, describePlaywrightCode, describePlaywrightIntent, describePlaywrightResult } from '../shared/playwright-progress.mjs';
+import { FIXED_VIEWPORT, assertFixedViewportTool } from '../shared/viewport.mjs';
 import { mkdtemp, writeFile, readFile, rm, mkdir, symlink, cp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -16,20 +17,10 @@ import { SYSTEM_PROMPT, buildPrompt } from './prompt.mjs';
 
 const require = createRequire(import.meta.url);
 // Planning belongs to the planner service; the generator never saves or submits a plan.
-export const EXCLUDED_TOOLS = ['planner_setup_page', 'planner_save_plan', 'planner_submit_plan'];
+export const EXCLUDED_TOOLS = ['planner_setup_page', 'planner_save_plan', 'planner_submit_plan', 'browser_resize'];
 const STAGES = new Set(['reading_cases', 'preparing', 'exploring', 'generating', 'verifying', 'finalizing']);
 const INCOMPLETE_SPEC = Symbol('incomplete spec recovered after timeout');
 const setupFailure = message => Object.assign(new Error(message), { code: 'GENERATOR_SETUP_FAILED' });
-// The verdict of a geometry batch probe: null when the tool result is not one, otherwise whether it reports
-// clipping. Only the "### Result" section counts: the MCP also echoes the probe's code, whose not-found
-// fallback (rectInWindow: false) must not read as a finding.
-export const batchProbeVerdict = content => {
-  let text = (Array.isArray(content) ? content : []).filter(item => item.type === 'text').map(item => item.text).join(' ');
-  if (text.includes('### Result')) text = text.split('### Result')[1].split(/\n###\s/)[0];
-  text = text.replace(/\\"/g, '"');
-  if (!(/\[/.test(text) && /\bname\b/.test(text) && /\bselector\b/.test(text) && /\bclippedByAncestor\b/.test(text))) return null;
-  return /(?:clippedByAncestor\s*["']?\s*:\s*true|rectInWindow\s*["']?\s*:\s*false|textTruncated\s*["']?\s*:\s*true)/.test(text);
-};
 
 // One model run per case rather than one run for the whole batch: a folder-level job covers many
 // cases, and a failure on the fifth case must not throw away the four specs already written. Each
@@ -71,7 +62,7 @@ export function createGeneratorWorker({ runtime = runClaude, command, model, set
       const configPath = path.join(project, 'playwright.config.cjs');
       const config = { testDir: project, testMatch: '*.spec.ts', workers: 1, retries: 0,
         timeout: 60000, outputDir: path.join(workspace, 'test-results'), reporter: [['list'], ['json', { outputFile: path.join(workspace, 'test-results', 'report.json') }]],
-        use: { headless: true, browserName: 'chromium', viewport: { width: 1920, height: 1080 }, baseURL: input.target.baseUrl,
+        use: { headless: true, browserName: 'chromium', viewport: FIXED_VIEWPORT, baseURL: input.target.baseUrl,
           actionTimeout: 10000, navigationTimeout: 30000, screenshot: 'only-on-failure', trace: 'retain-on-failure', video: 'off',
           ...(input.target.storageState ? { storageState: input.target.storageState } : {}),
           ...(input.target.extraHTTPHeaders ? { extraHTTPHeaders: input.target.extraHTTPHeaders } : {}) } };
@@ -176,7 +167,6 @@ async function runCase({ runtime, input, testCase, workspace, mcpConfig, signal,
   if (workflow.kind === 'generator') saveRecoveryNotes();
   const resumedAttempt = resumed ? `resume-${Date.now()}-` : '';
   let setupFailures = 0, validationRepairs = 0;
-  let resizeCount = 0, resizeAllowed = false;
   try {
     // Three initialization attempts and two script-repair attempts have independent budgets.
     for (let attempt = 0; attempt < 5; attempt++) {
@@ -185,7 +175,6 @@ async function runCase({ runtime, input, testCase, workspace, mcpConfig, signal,
       await mkdir(attemptDir, { mode: 0o700 });
       try {
         setupSucceeded = false; testRunSucceeded = false;
-        resizeAllowed = false; // each model attempt opens a new browser
         const output = await runtime({ cwd: workspace, prompt, sessionId, resume: attempt > 0, systemPrompt: workflow.systemPrompt,
           schema: SCRIPT_OUTPUT_SCHEMA, mcpConfig, allowedTools: ['mcp__playwright-test__*'],
           disallowedTools: EXCLUDED_TOOLS.map(t => `mcp__playwright-test__${t}`),
@@ -201,10 +190,7 @@ async function runCase({ runtime, input, testCase, workspace, mcpConfig, signal,
             for (const block of blocks) {
               if (message.type === 'assistant' && block.type === 'tool_use' && block.name.startsWith('mcp__playwright-test__')) {
                 const tool = block.name.replace('mcp__playwright-test__', '');
-                if (workflow.kind === 'generator' && tool === 'browser_resize') {
-                  if (!resizeAllowed || resizeCount >= 2) throw new Error('browser_resize 禁止：页面或容器过长时先滚动；只有当前视口的批量探测明确报告控件裁剪、水平窗口外或文字截断时才能放大，且每条用例最多两次');
-                  resizeCount++; resizeAllowed = false;
-                }
+                assertFixedViewportTool(tool, block.input);
                 const action=describePlaywrightAction(tool,block.input);
                 const toolCode=describePlaywrightCode(block.input),toolIntent=describePlaywrightIntent(block.input,action);
                 calls.set(block.id, {tool,action,toolCode,toolIntent,startedAt:Date.now()});
@@ -216,11 +202,6 @@ async function runCase({ runtime, input, testCase, workspace, mcpConfig, signal,
                 const failed = Boolean(block.is_error);
                 if (tool === 'generator_setup_page' && !failed) setupSucceeded = true;
                 if (tool === 'test_run' && !failed) testRunSucceeded = true;
-                // Only the latest batch probe decides: a later clean probe withdraws an earlier permission.
-                if (workflow.kind === 'generator' && (tool === 'browser_evaluate' || tool === 'browser_run_code_unsafe') && !failed) {
-                  const verdict = batchProbeVerdict(block.content);
-                  if (verdict !== null) resizeAllowed = verdict;
-                }
                 const action=failed?call.action:describePlaywrightResult(tool,block.content)||call.action;
                 emit({ stage: toolStage(tool), message: `${action}${failed ? '失败' : '已完成'}（${position}）`, tool,
                   toolIntent: call.toolIntent, ...(call.toolCode?{toolCode:call.toolCode}:{}), toolStatus: failed ? 'failed' : 'completed', operationId: block.tool_use_id,

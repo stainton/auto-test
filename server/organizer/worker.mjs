@@ -5,6 +5,7 @@
 import { seedSpec } from '../shared/seed.mjs';
 import { planAuthSession, stageAuthSession, readSavedAuthSession, clearAuthSession, authSessionNote } from '../shared/auth-session.mjs';
 import { describePlaywrightAction, describePlaywrightCode, describePlaywrightIntent, describePlaywrightResult } from '../shared/playwright-progress.mjs';
+import { FIXED_VIEWPORT, assertFixedViewportTool } from '../shared/viewport.mjs';
 import { mkdtemp, mkdir, writeFile, rm, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -18,7 +19,7 @@ import { SYSTEM_PROMPT, buildPrompt, buildContinuationPrompt, outputSchema, form
 const require = createRequire(import.meta.url);
 // Exploration only: no test generation, running, or plan saving.
 export const EXCLUDED_TOOLS = ['generator_setup_page', 'generator_read_log', 'generator_write_test',
-  'test_list', 'test_run', 'test_debug', 'planner_save_plan', 'planner_submit_plan'];
+  'test_list', 'test_run', 'test_debug', 'planner_save_plan', 'planner_submit_plan', 'browser_resize'];
 const STAGES = new Set(['reading_requirements', 'preparing', 'exploring', 'designing', 'finalizing']);
 
 export function createOrganizerWorker({ runtime = runClaude, command, model, settingsPath, playwrightPackage, assetCache, authSessions,
@@ -49,7 +50,7 @@ export function createOrganizerWorker({ runtime = runClaude, command, model, set
       const configPath = path.join(workspace, 'playwright.config.cjs');
       const config = { testDir: workspace, testMatch: 'seed.spec.ts', workers: 1, retries: 0,
         timeout: 30000, outputDir: path.join(workspace, 'test-results'), reporter: [['list']],
-        use: { headless: true, browserName: 'chromium', viewport: { width: 1920, height: 1080 }, baseURL: input.target.baseUrl,
+        use: { headless: true, browserName: 'chromium', viewport: FIXED_VIEWPORT, baseURL: input.target.baseUrl,
           actionTimeout: 10000, navigationTimeout: 30000, screenshot: 'off', trace: 'off', video: 'off',
           ...(input.target.storageState ? { storageState: input.target.storageState } : {}),
           ...(input.target.extraHTTPHeaders ? { extraHTTPHeaders: input.target.extraHTTPHeaders } : {}) } };
@@ -80,6 +81,7 @@ export function createOrganizerWorker({ runtime = runClaude, command, model, set
           for (const block of blocks) {
             if (message.type === 'assistant' && block.type === 'tool_use' && block.name.startsWith('mcp__playwright-test__')) {
               const tool = block.name.replace('mcp__playwright-test__', '');
+              assertFixedViewportTool(tool, block.input);
               const action = describePlaywrightAction(tool, block.input);
               const toolCode=describePlaywrightCode(block.input),toolIntent=describePlaywrightIntent(block.input,action);
               calls.set(block.id, { tool, action, toolCode, toolIntent, startedAt: Date.now() });

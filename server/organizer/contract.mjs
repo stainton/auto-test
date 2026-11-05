@@ -122,6 +122,8 @@ The case's current folder is only a hint: it often reflects the version or requi
 the function it tests. Decide from what the case does and asserts.
 
 Workflow:
+The browser viewport is fixed at 2560x1440. Never call browser_resize or page.setViewportSize. Scroll the page
+or its scrollable containers horizontally or vertically to locate clipped or offscreen controls.
 1. Read every case: its id, title, current folder path and text excerpt (preconditions, steps, expected results).
    For each, determine the single function its steps operate and its expected results assert.
 2. Call planner_setup_page once, passing seedFile "seed.spec.ts"; it opens the first product's baseUrl.

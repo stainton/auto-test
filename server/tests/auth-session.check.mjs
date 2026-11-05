@@ -96,7 +96,7 @@ test('only the seed carries the session', () => {
 
 // ---- the workers -----------------------------------------------------------------------------------------------
 const pkg = '/runtime/node_modules/@playwright/test/package.json';
-const spec = `import { test, expect } from '@playwright/test';\ntest.use({ viewport: { width: 1600, height: 900 } });\ntest('t', async ({ page }, testInfo) => { await test.step('打开页面', async () => { await page.goto('/'); await expect(page).toHaveTitle(/x/); await testInfo.attach('页面已打开', { body: await page.screenshot(), contentType: 'image/png' }); }); });`;
+const spec = `import { test, expect } from '@playwright/test';\ntest.use({ viewport: { width: 2560, height: 1440 } });\ntest('t', async ({ page }, testInfo) => { await test.step('打开页面', async () => { await page.goto('/'); await expect(page).toHaveTitle(/x/); await testInfo.attach('页面已打开', { body: await page.screenshot(), contentType: 'image/png' }); }); });`;
 const generated = { status: 'generated', code: spec, summary: '已生成', deviations: [], missingInputs: [], explorationNotes: '' };
 const caseOf = (id, title) => ({ id, title, priority: 'P1', precondition: '已登录', steps: '1. 打开页面', expects: '1. 页面可见' });
 const setupCall = () => ({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'c1', name: 'mcp__playwright-test__generator_setup_page' }] } });
@@ -208,7 +208,7 @@ test('prompts: trust recorded locators and re-explore only on failure; reuse the
   for (const prompt of [GENERATOR_PROMPT, PLANNER_PROMPT]) {
     assert.doesNotMatch(prompt, /one bounded live check/, 'the blanket re-verification rule is gone');
     assert.match(prompt, /matches a recorded\s+route/);
-    for (const trigger of ['navigation fails', 'not found within the timeout', 'differs from'])
+    for (const trigger of prompt===GENERATOR_PROMPT?['navigation fails', 'locator no longer identifies', 'block immediately']:['navigation fails', 'not found within the timeout', 'differs from'])
       assert.match(prompt, new RegExp(trigger));
   }
   assert.match(GENERATOR_PROMPT, /must log in by itself/);

@@ -20,7 +20,7 @@ const input = {
   target: { baseUrl: 'https://example.test/login' },
   context: { explorationNotes: 'Existing login form', testData: { password: 'super-secret-password' } }
 };
-const spec = `import { test, expect } from '@playwright/test';\ntest.use({ viewport: { width: 1600, height: 900 } });\ntest('拒绝错误密码', async ({ page }, testInfo) => { await test.step('打开登录页并确认表单', async () => { await page.goto('/login'); await expect(page).toHaveTitle(/登录/); await testInfo.attach('登录页显示表单', { body: await page.screenshot(), contentType: 'image/png' }); }); });\n`;
+const spec = `import { test, expect } from '@playwright/test';\ntest.use({ viewport: { width: 2560, height: 1440 } });\ntest('拒绝错误密码', async ({ page }, testInfo) => { await test.step('打开登录页并确认表单', async () => { await page.goto('/login'); await expect(page).toHaveTitle(/登录/); await testInfo.attach('登录页显示表单', { body: await page.screenshot(), contentType: 'image/png' }); }); });\n`;
 const output = { status: 'generated', code: spec, summary: '验证错误密码被拒绝', deviations: [], missingInputs: [], explorationNotes: 'Existing login form\nError banner' };
 
 test('rejects malformed cases, local storage-state paths and unsupported fields', () => {
@@ -40,13 +40,14 @@ test('accepts more than 20 referenced assets for script generation', () => {
   assert.deepEqual(validateInput({ ...input, context: { ...input.context, assets } }).context.assets, assets);
 });
 
-test('requires an in-range explored viewport for generated specs but not for healed ones', () => {
-  const view = 'test.use({ viewport: { width: 1600, height: 900 } });';
+test('requires the fixed 2560x1440 viewport for generated specs but not for healed ones', () => {
+  const view = 'test.use({ viewport: { width: 2560, height: 1440 } });';
   const without = spec.replace(view, '');
   assert.notEqual(without, spec);
   assert.throws(() => formatScript({ ...output, code: without }, input.cases[0]), /viewport/);
-  for (const bad of ['width: 320, height: 900', 'width: 1600, height: 5000'])
-    assert.throws(() => formatScript({ ...output, code: spec.replace('width: 1600, height: 900', bad) }, input.cases[0]), /viewport/);
+  for (const bad of ['width: 320, height: 900', 'width: 2560, height: 5000', 'width: 1920, height: 1080'])
+    assert.throws(() => formatScript({ ...output, code: spec.replace('width: 2560, height: 1440', bad) }, input.cases[0]), /viewport/);
+  assert.throws(() => formatScript({ ...output, code: spec.replace("await page.goto('/login');", "await page.setViewportSize({ width: 3200, height: 1800 }); await page.goto('/login');") }, input.cases[0]), /must not resize/);
   assert.equal(formatScript({ ...output, code: without }, input.cases[0], { requireViewport: false }).status, 'generated');
 });
 
@@ -54,7 +55,7 @@ test('accepts a runnable spec and refuses one that is stubbed, skipped or not a 
   const script = formatScript(output, input.cases[0]);
   assert.deepEqual(script, { caseId: 'TC-LOGIN-AUTH-FUNC-001', title: '拒绝错误密码', fileName: 'TC-LOGIN-AUTH-FUNC-001.spec.ts',
     language: 'typescript', status: 'generated', code: spec.trim(), summary: '验证错误密码被拒绝', deviations: [], missingInputs: [] });
-  const setupWithoutEvidence=`import { test, expect } from '@playwright/test';\ntest.use({ viewport: { width: 1600, height: 900 } });
+  const setupWithoutEvidence=`import { test, expect } from '@playwright/test';\ntest.use({ viewport: { width: 2560, height: 1440 } });
     test('前置条件不取证', async ({ page }, testInfo) => {
       await test.step('[setup] 创建临时目录', async () => { await page.goto('/'); });
       await test.step('验证目录可用', async () => { await expect(page).toHaveTitle(/示例/); await testInfo.attach('目录可用', { body: await page.screenshot(), contentType: 'image/png' }); });
@@ -63,7 +64,7 @@ test('accepts a runnable spec and refuses one that is stubbed, skipped or not a 
   for (const invalid of [ { ...output, code: '// nothing here' },
     { ...output, code: `import { test } from '@playwright/test';\ntest.skip('x', async () => {});` },
     { ...output, code: `import { test } from '@playwright/test';\ntest('no evidence', async ({ page }) => { await page.goto('/'); });` },
-    { ...output, code: `import { test, expect } from '@playwright/test';\ntest.use({ viewport: { width: 1600, height: 900 } });\ntest('partial evidence', async ({ page }, testInfo) => { await test.step('有证据', async () => { await expect(page).toHaveTitle(/x/); await testInfo.attach('有证据', { body: await page.screenshot(), contentType: 'image/png' }); }); await test.step('无证据', async () => { await expect(page).toHaveURL(/x/); }); });` },
+    { ...output, code: `import { test, expect } from '@playwright/test';\ntest.use({ viewport: { width: 2560, height: 1440 } });\ntest('partial evidence', async ({ page }, testInfo) => { await test.step('有证据', async () => { await expect(page).toHaveTitle(/x/); await testInfo.attach('有证据', { body: await page.screenshot(), contentType: 'image/png' }); }); await test.step('无证据', async () => { await expect(page).toHaveURL(/x/); }); });` },
     { ...output, status: 'done' }, { ...output, summary: '' }, { ...output, summary: '汉'.repeat(41) },
     { ...output, deviations: [{ risk: 'unknown', summary: 'x' }] } ]) assert.throws(() => formatScript(invalid, input.cases[0]));
 });
@@ -105,9 +106,10 @@ test('the prompt carries the case and only its own requirement, never the browse
   assert.match(SYSTEM_PROMPT, /步骤名称失败现场/);
   assert.match(SYSTEM_PROMPT.replace(/\s+/g, ' '), /Setup is not a test step and needs no screenshot evidence/);
   assert.match(SYSTEM_PROMPT, /exactly ONE browser_evaluate call/);
-  assert.match(SYSTEM_PROMPT, /browser_resize is forbidden unless that array explicitly contains/);
+  assert.match(SYSTEM_PROMPT, /browser_resize and page\.setViewportSize/);
+  assert.match(SYSTEM_PROMPT, /fixed 2560x1440 viewport/);
   assert.match(SYSTEM_PROMPT.replace(/\s+/g, ' '), /a control above or below the fold is reached by vertical scrolling/);
-  assert.match(SYSTEM_PROMPT.replace(/\s+/g, ' '), /Do not use browser_resize to fit a long page/);
+  assert.match(SYSTEM_PROMPT.replace(/\s+/g, ' '), /scroll the page or that container \(horizontally or vertically as needed\)/);
   assert.match(SYSTEM_PROMPT.replace(/\s+/g, ' '), /never select a control by tag name alone/);
   assert.match(SYSTEM_PROMPT, /browser_get_config is available for diagnosis/);
   assert.match(SYSTEM_PROMPT, /status\/stream long connection disconnects/);
@@ -158,7 +160,7 @@ test('three failed browser setups block the case with an initialization reason',
   assert.match(result.scripts[0].missingInputs[0], /generator_setup_page 初始化浏览器失败/);
 });
 
-test('browser resize requires a preceding batch probe that reports clipping', async t => {
+test('browser resize is rejected even after a batch probe reports clipping', async t => {
   const tool = (id, name) => ({ type: 'assistant', message: { content: [{ type: 'tool_use', id, name: `mcp__playwright-test__${name}` }] } });
   const evaluated = clipped => ({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'geometry', content: [{ type: 'text', text: JSON.stringify([{ name: '提交', selector: '#submit', visible: true, rectInWindow: true, clippedByAncestor: clipped, textTruncated: false, pageScrollsHorizontally: false }]) }] }] } });
   const makeWorker = async clipped => setup(t, async options => {
@@ -168,29 +170,12 @@ test('browser resize requires a preceding batch probe that reports clipping', as
     options.onMessage(tool('resize', 'browser_resize'));
     return output;
   });
-  const denied = await makeWorker(false);
-  const blocked = await denied.worker(input, { signal: new AbortController().signal, emit: () => {} });
-  assert.equal(blocked.blocked, 1);
-  assert.match(blocked.scripts[0].missingInputs[0], /browser_resize 禁止/);
-  const allowed = await makeWorker(true);
-  const generated = await allowed.worker(input, { signal: new AbortController().signal, emit: () => {} });
-  assert.equal(generated.generated, 1);
-});
-
-test('only the latest batch probe, from evaluate or run_code, decides whether resize is allowed', async t => {
-  const tool = (id, name) => ({ type: 'assistant', message: { content: [{ type: 'tool_use', id, name: `mcp__playwright-test__${name}` }] } });
-  const probe = (id, clipped) => ({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: id, content: [{ type: 'text', text: `### Result\n${JSON.stringify({ items: [{ name: '面数', selector: 'input', visible: true, rectInWindow: true, clippedByAncestor: clipped, textTruncated: false }] })}\n### Ran Playwright code\n\`\`\`js\nreturn { name, selector: null, rectInWindow: false, clippedByAncestor: false };\n\`\`\`` }] }] } });
-  const run = async steps => (await setup(t, async options => {
-    options.onMessage(setupCall()); options.onMessage(setupPage());
-    for (const [id, name, clipped] of steps) { options.onMessage(tool(id, name)); options.onMessage(probe(id, clipped)); }
-    options.onMessage(tool('resize', 'browser_resize'));
-    return output;
-  })).worker(input, { signal: new AbortController().signal, emit: () => {} });
-  // A stale clipping report is withdrawn by a later clean probe made with run_code.
-  assert.equal((await run([['g1', 'browser_evaluate', true], ['g2', 'browser_run_code_unsafe', false]])).blocked, 1);
-  // The echoed probe code's not-found fallback is not a finding.
-  assert.equal((await run([['g1', 'browser_evaluate', false]])).blocked, 1);
-  assert.equal((await run([['g1', 'browser_run_code_unsafe', true]])).generated, 1);
+  for (const clipped of [false, true]) {
+    const { worker } = await makeWorker(clipped);
+    const result = await worker(input, { signal: new AbortController().signal, emit: () => {} });
+    assert.equal(result.blocked, 1);
+    assert.match(result.scripts[0].missingInputs[0], /resize 禁止/);
+  }
 });
 
 test('runs one model call per case, isolates the workspace and forwards progress', async t => {
@@ -279,7 +264,7 @@ test('a single timed-out case keeps exploration notes and resumes with a fresh s
 });
 
 test('a script that misses per-step evidence blocks only that case', async t => {
-  const noEvidence={ ...output, code: `import { test, expect } from '@playwright/test';\ntest.use({ viewport: { width: 1600, height: 900 } });\ntest('无取证步骤', async ({ page }, testInfo) => { await test.step('验证页面标题', async () => { await expect(page).toHaveTitle(/示例/); }); });` };
+  const noEvidence={ ...output, code: `import { test, expect } from '@playwright/test';\ntest.use({ viewport: { width: 2560, height: 1440 } });\ntest('无取证步骤', async ({ page }, testInfo) => { await test.step('验证页面标题', async () => { await expect(page).toHaveTitle(/示例/); }); });` };
   let call=0;
   const { worker } = await setup(t, async options => {
     options.onMessage(setupCall()); options.onMessage(setupPage());
@@ -361,7 +346,7 @@ test('the shared HTTP layer serves this service under its own base path', async 
 });
 
 test('evidence validation follows local helpers and handles TypeScript, aliases, templates and braces', () => {
-  const code = `import { test, expect } from '@playwright/test';\ntest.use({ viewport: { width: 1600, height: 900 } });
+  const code = `import { test, expect } from '@playwright/test';\ntest.use({ viewport: { width: 2560, height: 1440 } });
   test('fixture', async ({ page: browser }, info) => {
     async function capture(name: string) {
       await info.attach(name, { body: await browser.screenshot(), contentType: 'image/png' });

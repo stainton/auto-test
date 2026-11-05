@@ -25,7 +25,7 @@ export default defineConfig({
     baseURL: process.env.BASE_URL,
     // Desktop-sized window: most apps have no small-window layout, so the default 1280x720
     // crops controls out of the per-step screenshots.
-    viewport: { width: 1920, height: 1080 },
+    viewport: { width: 2560, height: 1440 },
     trace: 'on-first-retry',
     // Steps attach their own screenshots; skip Playwright's implicit end-of-test capture.
     screenshot: 'off',
