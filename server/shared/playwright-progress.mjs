@@ -1,7 +1,47 @@
 // Turn low-level Playwright MCP calls into progress a test engineer can follow.
 // Never expose values typed into forms: prompts/logs may contain credentials or tokens.
-const clean=value=>typeof value==='string'?value.replace(/\s+/g,' ').trim().slice(0,160):'';
-const target=input=>clean(input?.element)||clean(input?.selector)||clean(input?.ref)||clean(input?.target)||clean(input?.locator)||clean(input?.url)||'';
+const clean=value=>typeof value==='string'?value.replace(/\s+/g,' ').trim().slice(0,120):'';
+const sensitive=value=>/[?&]|\b(?:value|token|secret|password|cookie|authorization)\s*[=:]|@|\b[A-Za-z0-9_-]{32,}\b/i.test(value);
+const safeName=value=>{const name=clean(value);return name&&!sensitive(name)?name:''};
+const safeURL=value=>{
+  try { const url=new URL(value); return `${url.origin}${url.pathname}`; }
+  catch { return /^\/(?!\/)[^?&#\s]*$/.test(value)?value:''; }
+};
+const target=input=>{
+  for(const key of ['element','selector','target','locator','ref']){
+    const name=safeName(input?.[key]);if(name)return name;
+  }
+  return typeof input?.url==='string'?safeURL(input.url):'';
+};
+// Read only static locator names, never fill values or arbitrary Playwright code.
+const codeTargets=input=>{
+  const code=typeof input?.code==='string'?input.code:typeof input?.function==='string'?input.function:typeof input?.expression==='string'?input.expression:'';
+  const names=[];
+  for(const pattern of [/getByRole\(\s*['"`](?:button|link|textbox|checkbox|radio|switch|tab|menuitem|option)['"`]\s*,\s*\{[^}]{0,120}\bname\s*:\s*['"`]([^'"`]+)['"`]/g,
+    /getBy(?:Label|Placeholder)\(\s*['"`]([^'"`]+)['"`]/g,
+    /\.locator\(\s*['"`]([^'"`]+)['"`]/g, /\bname\s*:\s*['"`]([^'"`]+)['"`]\s*,\s*selector\s*:/g]){
+    for(const match of code.matchAll(pattern)){
+      const name=safeName(match[1]);if(name&&!names.includes(name))names.push(name);
+      if(names.length>=5)break;
+    }
+  }
+  return names;
+};
+const describedTargets=names=>names.length?`：${names.slice(0,3).join('、')}${names.length>3?` 等 ${names.length} 个控件`:''}`:'';
+export function describePlaywrightResult(tool,content){
+  const text=(Array.isArray(content)?content:[]).filter(item=>item?.type==='text'&&typeof item.text==='string').map(item=>item.text).join('\n');
+  if(tool==='browser_snapshot'){
+    const url=/\bPage URL:\s*(\S+)/i.exec(text)?.[1];
+    const page=url&&safeURL(url);
+    return page?`读取页面控件与状态：${page}`:'';
+  }
+  if(tool!=='browser_evaluate'&&tool!=='browser_run_code_unsafe')return '';
+  const result=text.includes('### Result')?text.split('### Result')[1].split(/\n###\s/)[0]:text;
+  if(!/\bclippedByAncestor\b/.test(result)||!/\bselector\b/.test(result))return '';
+  const names=[...result.replace(/\\"/g,'"').matchAll(/\bname\s*["']?\s*:\s*["']([^"']+)["']/g)]
+    .map(match=>safeName(match[1])).filter((name,index,all)=>name&&all.indexOf(name)===index);
+  return names.length?`批量检查控件布局${describedTargets(names)}`:'';
+}
 export function describePlaywrightAction(tool,input={}){
   const name=String(tool||'').toLowerCase(),item=target(input),withTarget=(verb,fallback)=>`${verb}${item?`：${item}`:fallback||''}`;
   if(/setup.*page/.test(name))return '准备隔离浏览器会话并打开被测系统';
@@ -14,6 +54,8 @@ export function describePlaywrightAction(tool,input={}){
   if(/upload|file/.test(name))return withTarget('定位并上传文件到控件','');
   if(/screenshot/.test(name))return '截取当前页面状态';
   if(/wait/.test(name))return withTarget('等待页面状态','');
+  if(name==='browser_run_code_unsafe')return `操作并读取控件${describedTargets(codeTargets(input))}`;
+  if(name==='browser_evaluate')return `检查控件状态${describedTargets(codeTargets(input))}`;
   if(/evaluate|script/.test(name))return withTarget('检查页面状态','');
   if(/write.*test/.test(name))return '写入并验证测试脚本';
   return item?`检查控件或页面状态：${item}`:'检查当前页面状态';

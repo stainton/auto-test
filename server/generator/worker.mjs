@@ -2,7 +2,7 @@ import { appendFileSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { seedSpec } from '../shared/seed.mjs';
 import { planAuthSession, stageAuthSession, readSavedAuthSession, clearAuthSession, authSessionNote } from '../shared/auth-session.mjs';
-import { describePlaywrightAction } from '../shared/playwright-progress.mjs';
+import { describePlaywrightAction, describePlaywrightResult } from '../shared/playwright-progress.mjs';
 import { mkdtemp, writeFile, readFile, rm, mkdir, symlink, cp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -205,8 +205,8 @@ async function runCase({ runtime, input, testCase, workspace, mcpConfig, signal,
                   resizeCount++; resizeAllowed = false;
                 }
                 const action=describePlaywrightAction(tool,block.input);
-                calls.set(block.id, {tool,action});
-                emit({ stage: toolStage(tool), message: `正在${action}（${position}）`, tool, toolStatus: 'started', caseId: testCase.id });
+                calls.set(block.id, {tool,action,startedAt:Date.now()});
+                emit({ stage: toolStage(tool), message: `正在${action}（${position}）`, tool, toolStatus: 'started', operationId: block.id, caseId: testCase.id });
               }
               if (message.type === 'user' && block.type === 'tool_result' && calls.has(block.tool_use_id)) {
                 const call = calls.get(block.tool_use_id),tool=call.tool;
@@ -219,7 +219,10 @@ async function runCase({ runtime, input, testCase, workspace, mcpConfig, signal,
                   const verdict = batchProbeVerdict(block.content);
                   if (verdict !== null) resizeAllowed = verdict;
                 }
-                emit({ stage: toolStage(tool), message: `${call.action}${failed ? '失败' : '已完成'}（${position}）`, tool, toolStatus: failed ? 'failed' : 'completed', caseId: testCase.id });
+                const action=failed?call.action:describePlaywrightResult(tool,block.content)||call.action;
+                emit({ stage: toolStage(tool), message: `${action}${failed ? '失败' : '已完成'}（${position}）`, tool,
+                  toolStatus: failed ? 'failed' : 'completed', operationId: block.tool_use_id,
+                  durationMs: Date.now() - call.startedAt, caseId: testCase.id });
                 if (workflow.kind === 'generator' && tool === 'generator_setup_page' && failed) {
                   const detail = (Array.isArray(block.content) ? block.content : []).filter(item => item.type === 'text').map(item => item.text).join(' ').replace(/\s+/g, ' ').trim().slice(0, 160);
                   throw setupFailure(`generator_setup_page 初始化浏览器失败${detail ? `：${detail}` : ''}`);

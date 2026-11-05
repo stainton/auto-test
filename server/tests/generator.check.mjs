@@ -204,6 +204,9 @@ test('runs one model call per case, isolates the workspace and forwards progress
   assert.deepEqual(runs[0].disallowedTools, EXCLUDED_TOOLS.map(t => `mcp__playwright-test__${t}`));
   assert.ok(events.some(e => e.stage === 'verifying' && e.caseId === 'TC-LOGIN-AUTH-FUNC-001'));
   assert.ok(events.some(e => e.stage === 'generating' && e.caseStatus === 'generated' && e.caseTotal === 2));
+  const started=events.find(e=>e.operationId==='call-1'&&e.toolStatus==='started');
+  const completed=events.find(e=>e.operationId==='call-1'&&e.toolStatus==='completed');
+  assert.ok(started&&completed&&Number.isFinite(completed.durationMs)&&completed.durationMs>=0);
   assert.equal(runs[0].mcpConfig.mcpServers['playwright-test'].args.includes('run-test-mcp-server'), true);
   assert.deepEqual(await readdir(temporaryRoot), []); // workspace removed after the run
 });
