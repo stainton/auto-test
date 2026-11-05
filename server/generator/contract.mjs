@@ -84,8 +84,7 @@ export const SCRIPT_OUTPUT_SCHEMA = {
     status: { type: 'string', enum: SCRIPT_STATUSES },
     code: { type: 'string', maxLength: SCRIPT_MAX_CHARS },
     summary: { type: 'string', minLength: 1, maxLength: LIMITATION_MAX_CHARS },
-    // Where the live application contradicts the case's expected result: the spec keeps asserting the
-    // EXPECTED result (so it fails and exposes the defect), marked with a // deviation: comment, and says so here too.
+    // Where the live application contradicts the case's expected result: block this case without diagnosis.
     deviations: { type: 'array', maxItems: 10, items: riskEntry('summary') },
     missingInputs: missingInputsSchema,
     explorationNotes: { type: 'string' }
@@ -103,7 +102,7 @@ function checkViewport(code) {
   check(w >= 1024 && w <= 3840 && h >= 600 && h <= 2160, 'viewport must be between 1024x600 and 3840x2160');
 }
 
-export function formatScript(output, testCase, { requireViewport = true } = {}) {
+export function formatScript(output, testCase, { requireViewport = true, allowIncomplete = false } = {}) {
   keys(output, ['status', 'code', 'summary', 'deviations', 'missingInputs', 'explorationNotes'], 'generator output');
   check(SCRIPT_STATUSES.includes(output.status), `generator status must be one of ${SCRIPT_STATUSES.join(', ')}`);
   check(typeof output.code === 'string' && output.code.length <= SCRIPT_MAX_CHARS, `generated code must be a string of at most ${SCRIPT_MAX_CHARS} characters`);
@@ -115,6 +114,8 @@ export function formatScript(output, testCase, { requireViewport = true } = {}) 
   const missingInputs=[...new Set(output.missingInputs.map(x=>x.trim()))];
   const code = output.code.trim();
   if (output.status === 'generated') {
+    if (requireViewport && !allowIncomplete)
+      check(deviations.length===0, 'a generator case with an observed product mismatch must be blocked');
     check(code.includes('@playwright/test') && /\btest\s*\(/.test(code),
       'a generated script must be a Playwright spec importing @playwright/test and declaring a test');
     check(!/\btest\.(skip|fixme)\s*\(/.test(code), 'a generated script must not skip or fixme the case');
@@ -122,7 +123,7 @@ export function formatScript(output, testCase, { requireViewport = true } = {}) 
     if (requireViewport) checkViewport(code);
     check(missingInputs.length===0, 'a generated script must not report missing inputs');
   } else {
-    check(missingInputs.length>0, 'a blocked script must explain each missing input or unreachable dependency');
+    check(missingInputs.length>0 || deviations.length>0, 'a blocked script must explain its missing input, unreachable dependency or observed product mismatch');
   }
   return { caseId: testCase.id, title: testCase.title, fileName: `${testCase.id}.spec.ts`, language: 'typescript',
     status: output.status, code: output.status === 'generated' ? code : '', summary: output.summary.trim(), deviations, missingInputs };

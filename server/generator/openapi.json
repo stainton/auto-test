@@ -1113,7 +1113,7 @@
             "items": {
               "$ref": "#/components/schemas/RiskNote"
             },
-            "description": "Where the live application contradicts the case; the spec asserts the observed behaviour and marks it with a // deviation: comment."
+            "description": "Where the live application contradicts the case. The case is blocked without diagnosis and no spec is generated."
           }
         }
       },

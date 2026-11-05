@@ -78,6 +78,14 @@ test('a blocked case keeps its reason, drops any code and is reported as a limit
   assert.deepEqual(result.limitations, [{ risk: 'high', summary: '缺少测试账号，无法登录' }]);
   assert.equal(result.scripts.length, 2);
 });
+test('an observed product mismatch blocks the case without requiring a missing input', () => {
+  const blocked = formatScript({ status: 'blocked', code: spec, summary: '提交按钮不可用', deviations: [{ risk: 'medium', summary: '预期可提交，实际按钮禁用' }], missingInputs: [], explorationNotes: '' }, input.cases[0]);
+  assert.equal(blocked.status, 'blocked');
+  assert.equal(blocked.code, '');
+  assert.deepEqual(blocked.missingInputs, []);
+  assert.equal(blocked.deviations[0].summary, '预期可提交，实际按钮禁用');
+  assert.throws(() => formatScript({ ...output, deviations: [{ risk: 'medium', summary: '预期可提交，实际按钮禁用' }] }, input.cases[0]), /must be blocked/);
+});
 
 test('the prompt carries the case and only its own requirement, never the browser credentials', () => {
   const payload = JSON.parse(buildPrompt({ ...input, requirements: [...input.requirements, { id: 'REQ-002', title: '其他', content: '无关需求' }],
@@ -104,7 +112,8 @@ test('the prompt carries the case and only its own requirement, never the browse
   assert.match(SYSTEM_PROMPT, /browser_get_config is available for diagnosis/);
   assert.match(SYSTEM_PROMPT, /status\/stream long connection disconnects/);
   assert.match(SYSTEM_PROMPT, /performs the action and immediately reads/);
-  assert.match(SYSTEM_PROMPT, /do not call test_debug to investigate it/);
+  assert.match(SYSTEM_PROMPT, /return status "blocked" with the expected and observed behavior/);
+  assert.match(SYSTEM_PROMPT, /Do not call test_debug, search for another/);
 });
 
 async function setup(t, runtime, options = {}) {

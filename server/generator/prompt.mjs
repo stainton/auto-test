@@ -39,13 +39,15 @@ Workflow:
    error strings and reliable ways to drive tricky controls. Trust it: when the page you are on matches a recorded
    route (URL or title) and the recorded locator is the control you need, act on that locator right away. The action
    and the state it produces are the check, so do not take extra snapshots, navigate again or re-confirm entries
-   just to be safe. Re-explore only what actually fails: navigation fails or lands somewhere else (for example a
-   redirect to the login page), the element is not found within the timeout, or the state after the action differs from
-   what the notes recorded. Then explore only that page or control, and return the corrected facts in explorationNotes
+   just to be safe. Re-explore only technical uncertainty: navigation fails, a locator no longer identifies the
+   recorded control, or the page structure changes. If the observed product state conflicts with this case's
+   expected behavior, block immediately as described below; do not investigate its cause. Otherwise return
+   corrected facts in explorationNotes
    (start the route chain with REPLAY_RESET when a route changed); everything you did not touch stays as it was.
    When the notes are absent, proceed normally and explore live for genuine gaps.
 3. Read context.knownIssues as read-only input: apply the underlying risk when it is relevant to this case.
-   A fixed bug is a regression risk worth asserting precisely; an accepted (wontfix) behaviour is the standard to assert.
+   A fixed bug is a regression risk worth asserting precisely. Even an accepted (wontfix) behavior must not
+   replace this case's expected result; if they conflict, block and report the observed mismatch.
 4. Call generator_setup_page, passing seedFile "seed.spec.ts". The server has prepared the requested URL and
    storage state. If login still requires interaction, use only credentials/instructions supplied in context.
    If generator_setup_page fails, call it again immediately (at most three initialization attempts total),
@@ -77,7 +79,8 @@ Workflow:
    For switches, checkboxes and radio controls, read checked, aria-checked or aria-pressed to determine state;
    never infer it from a screenshot or visual styling. If styling contradicts the DOM state, trust the DOM state,
    record the discrepancy in explorationNotes and do not take repeated screenshots to decide it.
-   Bound every interaction with an explicit timeout (10000 ms) and retry a failed action at most three times.
+   Bound every interaction with an explicit timeout (10000 ms). Retry a transient tool or locator failure at most
+   three times, but never retry an observed product behavior that contradicts the case's expected result.
    Never claim an action you did not execute, and never present an unreachable page as a verified one.
    context.assets, when present, names real image/video/audio files already staged locally with a path. Use one only
    when this case genuinely needs it (for example, upload or media verification); never download it or invent a path.
@@ -127,8 +130,8 @@ Workflow:
      If the batch reports one of those three failures, try 2560x1440 and then, only if the new batch still
      reports a failure, 3200x1800: at most TWO browser_resize calls total. After each resize, rerun exactly ONE
      batch evaluate for all named controls at the new size; never fall back to individual evaluates.
-     Do not try smaller viewports. A hidden or zero-size control is an interaction problem to investigate, not a
-     reason to search viewport sizes; horizontal page scrolling alone also does not trigger a resize. Vertical
+     Do not try smaller viewports. A hidden or zero-size control that the case expects to be usable is a blocking
+     product mismatch, not a reason to search viewport sizes; horizontal page scrolling alone also does not trigger a resize. Vertical
      scrolling is the first choice for vertical overflow. Declare the settled size once at file level, before test.describe/test:
      \`test.use({ viewport: { width: W, height: H } });\` with W in 1024-3840 and H in 600-2160. Never call
      page.setViewportSize or resize mid-test. A previously verified \`[视口]\` note never authorizes a resize by
@@ -168,30 +171,28 @@ ${EVIDENCE_CAPTURE_HELPER}
    On a fix-and-rerun cycle, reuse the already verified viewport and batch probe findings from this session and
    explorationNotes. The browser may be new, but do not redo geometry checks or re-explore pages and controls
    already confirmed to work; revisit only the step or control that actually failed, then rerun the corrected spec.
-   Do not weaken an assertion, skip, fixme or delete a step to make a run pass. A run that fails solely on an assertion
-   the live app genuinely violates (a deviation, below) is the intended outcome, not a failure to fix.
-   Once you confirm an assertion failure is a product deviation, do not call test_debug to investigate it;
-   record the expected and observed behavior and finish that step.
+   Do not weaken an assertion, skip, fixme or delete a step to make a run pass. If the live app contradicts any
+   expected result (including a disabled, hidden or unresponsive control expected to work), stop this case and
+   return status "blocked" with the expected and observed behavior. Do not call test_debug, search for another
+   selector, force-click, investigate the cause, or spend fix-and-rerun cycles on that product behavior.
 7. Return the structured result. code is the complete final spec file source (TypeScript, importing @playwright/test),
    exactly as it should be saved — no Markdown fences, no commentary outside the file.
    - status "generated": the spec is complete and you ran it. status "blocked": you could not honestly produce a runnable
-     spec (a required account, token, fixture file or external resource was not supplied; the flow was unreachable after
-     three attempts). A blocked case returns an empty code and says exactly what is missing — never a spec that skips,
+     spec (a required account, token, fixture file or external resource was not supplied; a technical flow stayed
+     unreachable after three attempts; or the observed application contradicted any expected result). A blocked case
+     returns an empty code and says exactly what blocked it — never a spec that skips,
      fixmes, stubs or asserts something it never verified.
    - summary: one short Simplified Chinese clause, at most 40 characters — what the spec verifies, or for a blocked case
      what was missing. Write it for a non-technical reader: no selectors, URLs, tool names or narration of attempts.
-   - missingInputs: for status "blocked", list every concrete missing input or unreachable prerequisite separately in Simplified
-     Chinese (for example "可登录的测试账号", "用于上传的 PNG 素材", "测试环境的支付模拟服务"). For status "generated", return [].
-   - deviations: where the live application contradicts the case's expected result, that is a product defect to EXPOSE, not
-     to explain away. Keep the assertion on the case's EXPECTED result so the spec FAILS against the defective behaviour; never
-     rewrite it to assert the buggy behaviour, and never add a step whose purpose is to confirm the defect exists so the run
-     passes. Mark the failing assertion with a // deviation: comment (expected X, observed Y) and record one entry here:
-     {risk, summary}, summary in Simplified Chinese at most 40 characters. Only when context.knownIssues marks the behaviour
-     wontfix (accepted), or the case text itself is wrong about a label/locator rather than the business rule, assert the
-     accepted behaviour instead. risk high = a core flow, data integrity or security behaviour differs;
-     medium = a secondary flow, boundary or error handling differs; low = cosmetic or rare edge. Leave empty when the
-     application behaves as the case expects. A spec that fails ONLY at such a deviation assertion is still status "generated":
-     it is correct as written, so do not spend fix-and-rerun cycles weakening it.
+   - missingInputs: for status "blocked" due to missing input or an unreachable technical prerequisite, list each
+     reason separately in Simplified Chinese (for example "可登录的测试账号", "用于上传的 PNG 素材"). For a product mismatch
+     return [] here and put the observation in deviations. For status "generated", return [].
+   - deviations: when the live application contradicts any case expectation, immediately return status "blocked"
+     with empty code and one {risk, summary} entry describing expected X and observed Y (Simplified Chinese, at most
+     40 characters). Do not diagnose the cause or attempt to make the behavior pass. This also applies to
+     known or accepted defects. risk high = a core flow, data integrity or security behavior
+     differs; medium = a secondary flow, boundary or error handling differs; low = cosmetic or rare edge.
+     Leave deviations empty when the application behaves as the case expects.
    - explorationNotes: this is optional experience, never a reason to block script generation. When you newly observe reusable
      facts, merge them with context.explorationNotes (locators, quirks, reliable techniques) so the next run does not re-explore
      the same views; otherwise return an empty string. Never include credentials or test-data values. Only record exploration facts you actually verified live: never write a guessed route, locator or action. A seed may have replayed a prior route before setup; if it stops on an earlier page because a route/control changed, explore from that last successful page rather than restarting from login. After repairing it, return REPLAY_RESET on its own line followed by the complete corrected, successfully verified route from the base page to the repaired location. Otherwise, append only newly verified replay lines in exactly this form: REPLAY: goto /relative-path and REPLAY: click button | visible control name. Include only stable user-facing button/link/tab/menuitem/option names; never include temporary refs, typed values or destructive actions.

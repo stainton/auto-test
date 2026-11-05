@@ -92,8 +92,8 @@ node server/generator/main.mjs
 ```
 
 - `code` 是完整的 spec 源码，由调用方保存；服务不向仓库写文件，全部成功时删除工作目录；有用例受阻、失败、超时或取消时保留现场。
-- `status` 为 `blocked` 表示无法诚实地生成可运行脚本（缺少账号/令牌/素材等必需输入，或流程三次尝试仍不可达）：此时 `code` 为空，`summary` 说明缺什么。**不会**返回 skip、fixme、占位或未经验证的断言。所有 blocked 用例同时汇总在 `limitations` 里（`{risk, summary}`，与 planner 的字段一致，便于同一套界面展示）。
-- `deviations` 是实测行为与用例预期不一致的地方：脚本按实测行为断言并在该行标注 `// deviation:`，同时在这里登记一条中文说明（每条不超过 40 字，按风险排序）。
+- `status` 为 `blocked` 表示无法诚实地生成可运行脚本（缺少必需输入、技术流程三次尝试仍不可达，或页面实测行为与用例预期相悖）：此时 `code` 为空，`summary` 说明原因。产品行为相悖时直接记录偏差，不继续定位原因。**不会**返回 skip、fixme、占位或未经验证的断言。所有 blocked 用例同时汇总在 `limitations` 里（`{risk, summary}`，与 planner 的字段一致，便于同一套界面展示）。
+- `deviations` 记录实测行为与用例预期不一致的地方（每条不超过 40 字）；这种用例返回 `blocked`，不生成脚本。
 - `summary` 与 `deviations[].summary` 都写给非技术评审人看：中文、不含选择器/URL/工具名。
 - `explorationNotes` 是合并后的探索记录，建议调用方保存并在下次请求中回传，可显著减少重复探索。
 - 任务只要跑完就是 `succeeded`，blocked 属于结果而非失败，调用方据此保存能用的脚本、并逐条看到其余用例为什么没生成。

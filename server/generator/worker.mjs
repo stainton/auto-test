@@ -18,6 +18,7 @@ const require = createRequire(import.meta.url);
 // Planning belongs to the planner service; the generator never saves or submits a plan.
 export const EXCLUDED_TOOLS = ['planner_setup_page', 'planner_save_plan', 'planner_submit_plan'];
 const STAGES = new Set(['reading_cases', 'preparing', 'exploring', 'generating', 'verifying', 'finalizing']);
+const INCOMPLETE_SPEC = Symbol('incomplete spec recovered after timeout');
 const setupFailure = message => Object.assign(new Error(message), { code: 'GENERATOR_SETUP_FAILED' });
 // The verdict of a geometry batch probe: null when the tool result is not one, otherwise whether it reports
 // clipping. Only the "### Result" section counts: the MCP also echoes the probe's code, whose not-found
@@ -121,7 +122,7 @@ export function createGeneratorWorker({ runtime = runClaude, command, model, set
           await clearAuthSession(workspace);
         }
         let script;
-        try { script = formatScript(output, testCase, { requireViewport: workflow.kind !== 'healer' }); }
+        try { script = formatScript(output, testCase, { requireViewport: workflow.kind !== 'healer', allowIncomplete: Boolean(output[INCOMPLETE_SPEC]) }); }
         catch (error) {
           // A malformed generated spec blocks only this case; later cases in the batch still run.
           const summary=caseFailureSummary(error);
@@ -289,7 +290,8 @@ async function runCase({ runtime, input, testCase, workspace, mcpConfig, signal,
         const partial = { status: 'generated', code, summary: '生成超时，脚本待人工复核',
           deviations: [{ risk: 'medium', summary: '生成超时，脚本尚未完成验证，请人工复核' }], missingInputs: [], explorationNotes: '' };
         try {
-          formatScript(partial, testCase);
+          formatScript(partial, testCase, { allowIncomplete: true });
+          partial[INCOMPLETE_SPEC] = true;
           emit({ stage: 'finalizing', caseId: testCase.id, message: `${testCase.id} 超时；返回已写出且通过格式校验的脚本，需人工复核` });
           return partial;
         } catch (validationError) {
