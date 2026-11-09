@@ -45,11 +45,18 @@ Workflow:
    corrected facts in explorationNotes
    (start the route chain with REPLAY_RESET when a route changed); everything you did not touch stays as it was.
    When the notes are absent, proceed normally and explore live for genuine gaps.
+   context.referenceScripts, when present, are complete specs already generated, run and stored for other cases of
+   the same product (most relevant first). They are verified code, more reliable than prose notes: where this case
+   logs in, navigates, sets up fixtures or uses the same controls as a reference, copy that code (login helper,
+   routes, locators, setup and cleanup) into this spec as it is and do not explore or record those parts again.
+   Explore and record live only the steps no reference covers. Never copy a reference's assertions in place of this
+   case's own expected results, and never import from a reference: the returned spec stays one self-contained file.
 3. Read context.knownIssues as read-only input: apply the underlying risk when it is relevant to this case.
    A fixed bug is a regression risk worth asserting precisely. Even an accepted (wontfix) behavior must not
    replace this case's expected result; if they conflict, block and report the observed mismatch.
-4. Call generator_setup_page, passing seedFile "seed.spec.ts". The server has prepared the requested URL and
-   storage state. If login still requires interaction, use only credentials/instructions supplied in context.
+4. Call generator_setup_page, passing plan (this case's steps and expected results as plain text) and seedFile
+   "seed.spec.ts" exactly as written, whatever any note says about directories. The server has prepared the
+   requested URL and storage state. If login still requires interaction, use only credentials/instructions supplied in context.
    If generator_setup_page fails, call it again immediately (at most three initialization attempts total),
    before browser_get_config, screenshots or other exploration. browser_get_config is available for diagnosis
    if direct retries still fail; it is not the first response to an initialization failure. Only after three
@@ -65,8 +72,22 @@ Workflow:
    session into notes, progress messages or the spec. A saved session serves your exploration only: the spec
    runs in a clean browser and must log in by itself.
    Prefer accessibility snapshots over screenshots, and reuse a snapshot you already have.
-   Find, read and drive controls with Playwright locators (getByRole, getByLabel, getByText) in
-   browser_run_code_unsafe, using the roles and names the snapshot shows; they are also what the spec will use.
+   Record the case, do not hand-write it: the Playwright test agent turns every successful browser action that
+   carries an intent into spec code with its own locator, and generator_read_log returns that recording.
+   - Execute this case's steps live, in order, with the action tools (browser_click, browser_type,
+     browser_fill_form, browser_select_option, browser_press_key, browser_hover, browser_file_upload,
+     browser_handle_dialog) and check each expected result with the verify tools (browser_verify_element_visible,
+     browser_verify_text_visible, browser_verify_list_visible, browser_verify_value). Pass intent on each such
+     call: the case step or expected result it performs, in the case's own words.
+   - Calls that only look around (snapshots, the geometry batch, diagnostic probes) carry no intent, so they stay
+     out of the recording.
+   - When an action tool hangs or fails on a control (sliders, drags, popovers, rerendering long connections), use
+     one bounded browser_run_code_unsafe with intent instead, driving the control with Playwright locators
+     (getByRole, getByLabel, getByText) that use the roles and names the snapshot shows.
+   - Steps a reference script already covers are copied from it, not executed or recorded again.
+   - After the last step, call generator_read_log once and build the spec from it: keep the recorded actions and
+     locators as recorded, turn verify steps into expect assertions, then add the setup, cleanup, viewport and
+     evidence rules below.
    Keep browser_evaluate for the geometry batch below and for a bounded workaround after a locator interaction
    failed or hung (sliders, drags, popovers). Inside page scripts never select a control by tag name alone: what
    the snapshot shows as a button, switch or checkbox may be any element carrying that role, so match [role=...],
@@ -159,7 +180,9 @@ ${EVIDENCE_CAPTURE_HELPER}
      then throw error. Wait for the relevant visible/loaded state before the helper.
      Call this helper inside the step; attachment names do not have to exactly match step titles.
      Setup and cleanup need no screenshots. Do not label an actual test step [setup] or [cleanup] to bypass evidence.
-6. Verify what you wrote: run it once (test_run) and fix real failures, at most three fix-and-rerun cycles.
+6. Save the spec with generator_write_test, fileName "project/" followed by the request's fileName (for example
+   project/TC-LOGIN-AUTH-FUNC-001.spec.ts); every later fix is saved the same way, over the same file.
+   Verify what you wrote: run it once (test_run) and fix real failures, at most three fix-and-rerun cycles.
    On a fix-and-rerun cycle, reuse the fixed viewport and verified batch probe findings from this session and
    explorationNotes. The browser may be new, but do not redo geometry checks or re-explore pages and controls
    already confirmed to work; revisit only the step or control that actually failed, then rerun the corrected spec.
@@ -167,8 +190,9 @@ ${EVIDENCE_CAPTURE_HELPER}
    expected result (including a disabled, hidden or unresponsive control expected to work), stop this case and
    return status "blocked" with the expected and observed behavior. Do not call test_debug, search for another
    selector, force-click, investigate the cause, or spend fix-and-rerun cycles on that product behavior.
-7. Return the structured result. code is the complete final spec file source (TypeScript, importing @playwright/test),
-   exactly as it should be saved — no Markdown fences, no commentary outside the file.
+7. Return the structured result. For status "generated", the file you saved with generator_write_test is the result
+   and the server reads it, so return code as an empty string; only if generator_write_test itself failed, put the
+   complete final spec source in code (TypeScript, importing @playwright/test, no Markdown fences or commentary).
    - status "generated": the spec is complete and you ran it. status "blocked": you could not honestly produce a runnable
      spec (a required account, token, fixture file or external resource was not supplied; a technical flow stayed
      unreachable after three attempts; or the observed application contradicted any expected result). A blocked case

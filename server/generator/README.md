@@ -128,6 +128,8 @@ node server/generator/main.mjs
 
 `GENERATOR_DATA_DIR` 下还有 healer 的 `healer-workspaces/` 和 `healer-settings.json`；healer 自己的环境变量见 `server/healer/README.md`。探索经验不保存在服务里：需求级经验随 `requirements[].explorationNotes` / `context.explorationNotes`、产品级经验随 `context.productExperience` 传入，结果的 `explorationRecords` 与 `productExperience`（`{origin, notes}`，仅本次新验证的段落）由 CaseHub 存回。
 
+**录制生成与参考脚本**：每条用例在真实浏览器里逐步执行，带 `intent` 的操作由 Playwright test agent 录制成代码，`generator_read_log` 取回后据此组装 spec，并用 `generator_write_test` 写入 `project/<用例ID>.spec.ts`；`test_run` 跑的就是这个文件，服务以它作为结果的 `code`（模型不必回显全文）。`context.referenceScripts`（可选，`[{caseId, title?, code}]`，最多 20 条）是同一产品其他用例已生成的脚本：用例直接复用其中已验证的登录、导航、locator 和前置，只探索、录制它们没有覆盖的步骤；每条用例最多带 5 条、合计 60000 字符，同模块优先，同一任务里先生成的脚本也会自动作为后续用例的参考。
+
 ## 验证
 
 ```sh

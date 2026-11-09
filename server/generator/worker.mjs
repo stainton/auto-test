@@ -21,6 +21,24 @@ export const EXCLUDED_TOOLS = ['planner_setup_page', 'planner_save_plan', 'plann
 const STAGES = new Set(['reading_cases', 'preparing', 'exploring', 'generating', 'verifying', 'finalizing']);
 const INCOMPLETE_SPEC = Symbol('incomplete spec recovered after timeout');
 const setupFailure = message => Object.assign(new Error(message), { code: 'GENERATOR_SETUP_FAILED' });
+// Reference specs are verified code for the same product: they replace re-exploring login, navigation and
+// locators a case shares with them. Bounded so a large library never crowds the model's context.
+export const REFERENCE_LIMIT = { scripts: 5, chars: 60000 };
+const modulePrefix = id => /^(TC-[A-Z0-9]+-[A-Z0-9]+)-/.exec(id ?? '')?.[1] ?? '';
+const requirementPrefix = id => /^(TC-[A-Z0-9]+)-/.exec(id ?? '')?.[1] ?? '';
+// Same module first, then same requirement, then the rest in the order given (the batch's own fresh
+// specs are listed first by the caller below); never the case itself.
+export function selectReferences(scripts = [], testCase, limit = REFERENCE_LIMIT) {
+  const rank = s => modulePrefix(s.caseId) && modulePrefix(s.caseId) === modulePrefix(testCase.id) ? 0
+    : requirementPrefix(s.caseId) && requirementPrefix(s.caseId) === requirementPrefix(testCase.id) ? 1 : 2;
+  const seen = new Set([testCase.id]), picked = [];
+  let chars = 0;
+  for (const s of scripts.map((s, i) => ({ s, i })).sort((a, b) => rank(a.s) - rank(b.s) || a.i - b.i).map(x => x.s)) {
+    if (seen.has(s.caseId) || !s.code?.trim() || picked.length >= limit.scripts || chars + s.code.length > limit.chars) continue;
+    seen.add(s.caseId); picked.push({ caseId: s.caseId, ...(s.title ? { title: s.title } : {}), code: s.code }); chars += s.code.length;
+  }
+  return picked;
+}
 
 // One model run per case rather than one run for the whole batch: a folder-level job covers many
 // cases, and a failure on the fifth case must not throw away the four specs already written. Each
@@ -81,6 +99,8 @@ export function createGeneratorWorker({ runtime = runClaude, command, model, set
       const mergeNotes=(...values)=>[...new Set(values.filter(Boolean).join('\n\n').split(/\n{2,}/).map(value=>value.trim()).filter(Boolean))].slice(-200).join('\n\n');
       const notesByRequirement = new Map((promptInput.requirements ?? []).map(requirement => [requirement.id, requirement.explorationNotes ?? '']));
       let batchNotes=promptInput.context?.explorationNotes ?? '';
+      // Specs this batch generated come before the caller's: they were verified minutes ago.
+      const batchScripts=[], callerScripts=promptInput.context?.referenceScripts ?? [];
       const total = promptInput.cases.length;
       for (const [index, testCase] of promptInput.cases.entries()) {
         signal.throwIfAborted();
@@ -103,7 +123,9 @@ export function createGeneratorWorker({ runtime = runClaude, command, model, set
         try {
           if (total === 1 && workflow.kind === 'generator') checkpoint({ workspace, sessionId });
           // Keep the case timer ahead of the job timer so a batch can continue after a case times out.
-          output = await runCase({ runtime, input: { ...promptInput, ...(authSession ? { authSession } : {}), context: { ...promptInput.context, explorationNotes: notes } },
+          const referenceScripts = workflow.kind === 'generator' ? selectReferences([...batchScripts, ...callerScripts], testCase) : [];
+          const { referenceScripts: _supplied, ...caseContext } = promptInput.context ?? {};
+          output = await runCase({ runtime, input: { ...promptInput, ...(authSession ? { authSession } : {}), context: { ...caseContext, explorationNotes: notes, ...(referenceScripts.length ? { referenceScripts } : {}) } },
             testCase, workspace, mcpConfig, signal, workflow, command, model, settingsPath: taskSettingsPath,
             caseTimeoutMs: Math.min(input.caseTimeoutMs ?? caseTimeoutMs, Math.max(1, jobTimeoutMs - 1000)), emit, position,
             sessionId: total === 1 ? sessionId : randomUUID(), resumed: Boolean(input.resume), stopOnTimeout: total === 1 && workflow.kind === 'generator' });
@@ -121,6 +143,8 @@ export function createGeneratorWorker({ runtime = runClaude, command, model, set
             status: 'blocked', code: '', summary, deviations: [], missingInputs: [String(error.message || summary).slice(0, 200)] };
         }
         scripts.push(script);
+        // A spec recovered after a timeout was never verified, so it is not a reference.
+        if (script.status === 'generated' && script.code && !output[INCOMPLETE_SPEC]) batchScripts.unshift({ caseId: script.caseId, title: script.title, code: script.code });
         if (typeof output.explorationNotes === 'string' && output.explorationNotes.trim()) {
           batchNotes=mergeNotes(batchNotes, output.explorationNotes);
           if(testCase.requirement)notesByRequirement.set(testCase.requirement, output.explorationNotes);
@@ -231,6 +255,12 @@ async function runCase({ runtime, input, testCase, workspace, mcpConfig, signal,
             }
           }
         });
+        // The spec is recorded and written through generator_write_test; the file test_run executed is the
+        // result, so the model need not echo it (and cannot return a copy that differs from what ran).
+        if (workflow.kind === 'generator' && output?.status === 'generated') {
+          const written = await readFile(path.join(workspace, 'project', `${testCase.id}.spec.ts`), 'utf8').catch(() => '');
+          if (written.trim()) output.code = written;
+        }
         await writeFile(path.join(attemptDir, 'output.json'), JSON.stringify(output, null, 2), { mode: 0o600 });
         if (typeof output?.code === 'string') await writeFile(path.join(attemptDir, `${testCase.id}.spec.ts`), output.code, { mode: 0o600 });
         if (workflow.kind === 'generator' && !setupSucceeded) throw setupFailure('Generator 未成功初始化目标浏览器');
@@ -244,7 +274,7 @@ async function runCase({ runtime, input, testCase, workspace, mcpConfig, signal,
           if (validationRepairs === 2) throw error;
           validationRepairs++;
           emit({ stage: 'verifying', caseId: testCase.id, message: `脚本校验未通过，正在原会话修复（${validationRepairs}/2）：${error.message}` });
-          prompt = JSON.stringify({ instruction: 'Continue the same case. Fix only the failure described below. Reuse the already verified viewport and batch geometry findings in the previous output and resumed session; do not resize, repeat the batch probe, or re-explore working pages and controls unless the failed step shows that they changed. Do not weaken assertions. Only actual test steps need screenshots; setup/cleanup do not. Use a local screenshot helper or inline screenshot and attach. Run the corrected spec with test_run and return the complete structured result. The browser is new: initialize generator_setup_page before debugging.', workflow: workflow.kind, validationError: error.message, previousOutput: output });
+          prompt = JSON.stringify({ instruction: 'Continue the same case. Fix only the failure described below. Reuse the already verified viewport and batch geometry findings in the previous output and resumed session; do not resize, repeat the batch probe, or re-explore working pages and controls unless the failed step shows that they changed. Do not weaken assertions. Only actual test steps need screenshots; setup/cleanup do not. Use a local screenshot helper or inline screenshot and attach. Save the corrected spec over the same file with generator_write_test, run it with test_run and return the complete structured result. The browser is new: initialize generator_setup_page before debugging.', workflow: workflow.kind, validationError: error.message, previousOutput: output });
           continue;
         }
         return output;

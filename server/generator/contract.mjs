@@ -15,6 +15,9 @@ export const MIN_CASE_TIMEOUT_MS = 60000, MAX_CASE_TIMEOUT_MS = 3600000;
 export const CASE_ID_PATTERN = '^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$';
 const CASE_ID_RE = new RegExp(CASE_ID_PATTERN);
 export const SCRIPT_STATUSES = ['generated', 'blocked'];
+// Specs already generated for other cases of the same product, sent so a case reuses verified login,
+// navigation and locators instead of exploring them again. The worker trims what reaches the model.
+export const MAX_REFERENCE_SCRIPTS = 20;
 
 // A case as the caller stores it: the reviewed text a person approved, plus the ID the script is
 // filed under. steps/expects stay the numbered multi-line strings CaseHub and test-model.md use.
@@ -52,6 +55,16 @@ export function validateRequirements(requirements) {
   }
 }
 
+export function validateReferenceScripts(scripts) {
+  check(Array.isArray(scripts) && scripts.length <= MAX_REFERENCE_SCRIPTS, `context.referenceScripts must contain at most ${MAX_REFERENCE_SCRIPTS} scripts`);
+  for (const script of scripts) {
+    keys(script, ['caseId', 'title', 'code'], 'context.referenceScripts');
+    string(script.caseId, 'context.referenceScripts.caseId', 128);
+    if (script.title !== undefined) check(typeof script.title === 'string' && script.title.length <= 500, 'context.referenceScripts.title must be a string (max 500 characters)');
+    string(script.code, 'context.referenceScripts.code', SCRIPT_MAX_CHARS);
+  }
+}
+
 export function validateInput(input) {
   keys(input, ['cases', 'requirements', 'target', 'context', 'caseTimeoutMs', 'continueFrom'], 'request');
   validateCases(input.cases);
@@ -63,12 +76,13 @@ export function validateInput(input) {
   validateTarget(input.target);
   if(input.caseTimeoutMs!==undefined)check(Number.isSafeInteger(input.caseTimeoutMs)&&input.caseTimeoutMs>=MIN_CASE_TIMEOUT_MS&&input.caseTimeoutMs<=MAX_CASE_TIMEOUT_MS,`caseTimeoutMs must be between ${MIN_CASE_TIMEOUT_MS} and ${MAX_CASE_TIMEOUT_MS}`);
   if (input.context !== undefined) {
-    keys(input.context, ['explorationNotes', 'productExperience', 'knownIssues', 'constraints', 'instructions', 'testData', 'assets'], 'context');
+    keys(input.context, ['explorationNotes', 'productExperience', 'knownIssues', 'constraints', 'instructions', 'testData', 'assets', 'referenceScripts'], 'context');
     for (const key of ['explorationNotes', 'productExperience', 'knownIssues', 'constraints', 'instructions']) {
       if (input.context[key] !== undefined) check(typeof input.context[key] === 'string' && input.context[key].length <= 200000, `context.${key} must be a string (max 200000 characters)`);
     }
     if (input.context.testData !== undefined) check(object(input.context.testData), 'context.testData must be an object');
     if (input.context.assets !== undefined) validateAssets(input.context.assets);
+    if (input.context.referenceScripts !== undefined) validateReferenceScripts(input.context.referenceScripts);
   }
   return structuredClone(input);
 }

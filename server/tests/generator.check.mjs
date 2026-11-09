@@ -5,7 +5,7 @@ import { mkdtemp, readdir, rm, readFile, writeFile, mkdir } from 'node:fs/promis
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { validateInput, formatScript, formatResult, SCRIPT_OUTPUT_SCHEMA } from '../generator/contract.mjs';
-import { createGeneratorWorker, EXCLUDED_TOOLS } from '../generator/worker.mjs';
+import { createGeneratorWorker, EXCLUDED_TOOLS, selectReferences, REFERENCE_LIMIT } from '../generator/worker.mjs';
 import { SYSTEM_PROMPT, buildPrompt } from '../generator/prompt.mjs';
 import { Jobs } from '../shared/jobs.mjs';
 import { createHttpServer } from '../shared/http.mjs';
@@ -416,4 +416,61 @@ test('aborted generation preserves work already written before returning no resu
   await assert.rejects(worker(input,{signal:controller.signal,emit:()=>{},retain:value=>{retained=value;}}),/timeout/);
   assert.equal(await readFile(path.join(retained.workspace,'project','partial.spec.ts'),'utf8'),'// in progress');
   assert.match(await readFile(path.join(retained.workspace,'failure.json'),'utf8'),/timeout/);
+});
+
+test('the prompt records the case through the test agent instead of hand-writing it', () => {
+  const prompt = SYSTEM_PROMPT.replace(/\s+/g, ' ');
+  assert.match(prompt, /generator_read_log/);
+  assert.match(prompt, /Pass intent on each such call/);
+  assert.match(prompt, /carry no intent, so they stay out of the recording/);
+  assert.match(prompt, /generator_write_test, fileName "project\/" followed by the request's fileName/);
+  assert.match(prompt, /return code as an empty string/);
+  assert.match(prompt, /seedFile "seed\.spec\.ts" exactly as written/);
+  assert.match(prompt, /context\.referenceScripts/);
+  assert.match(prompt, /never import from a reference/);
+});
+
+test('reference scripts are accepted as context and malformed ones are refused', () => {
+  const ok = { ...input, context: { ...input.context, referenceScripts: [{ caseId: 'TC-LOGIN-AUTH-FUNC-009', title: '登录成功', code: spec }] } };
+  assert.equal(validateInput(ok).context.referenceScripts.length, 1);
+  assert.throws(() => validateInput({ ...input, context: { referenceScripts: [{ caseId: 'X', code: spec, extra: 1 }] } }), /referenceScripts/);
+  assert.throws(() => validateInput({ ...input, context: { referenceScripts: [{ caseId: 'X', code: '' }] } }), /referenceScripts\.code/);
+  assert.throws(() => validateInput({ ...input, context: { referenceScripts: Array.from({ length: 21 }, (_, i) => ({ caseId: `X${i}`, code: spec })) } }), /at most 20/);
+});
+
+test('references prefer the same module, then the same requirement, skip the case itself and stay bounded', () => {
+  const ref = (caseId, code = spec) => ({ caseId, code });
+  const picked = selectReferences([ref('TC-OTHER-X-FUNC-001'), ref('TC-LOGIN-PWD-FUNC-001'), ref('TC-LOGIN-AUTH-FUNC-001'), ref('TC-LOGIN-AUTH-FUNC-002')],
+    { id: 'TC-LOGIN-AUTH-FUNC-001' });
+  assert.deepEqual(picked.map(s => s.caseId), ['TC-LOGIN-AUTH-FUNC-002', 'TC-LOGIN-PWD-FUNC-001', 'TC-OTHER-X-FUNC-001']);
+  assert.equal(selectReferences(Array.from({ length: 9 }, (_, i) => ref(`TC-A-B-FUNC-00${i}`)), { id: 'TC-A-B-FUNC-100' }).length, REFERENCE_LIMIT.scripts);
+  assert.deepEqual(selectReferences([ref('TC-A-B-FUNC-001', 'x'.repeat(REFERENCE_LIMIT.chars + 1)), ref('TC-A-B-FUNC-002')], { id: 'TC-A-B-FUNC-003' }).map(s => s.caseId), ['TC-A-B-FUNC-002']);
+});
+
+test('the spec written with generator_write_test is the result, not the code the model echoes', async t => {
+  const recorded = spec.replace('拒绝错误密码', '录制生成的脚本');
+  const { temporaryRoot, worker } = await setup(t, async options => {
+    options.onMessage(setupCall()); options.onMessage(setupPage());
+    await writeFile(path.join(options.cwd, 'project', `${input.cases[0].id}.spec.ts`), recorded);
+    return { ...output, code: '' };
+  });
+  const result = await worker(input, { signal: new AbortController().signal, emit: () => {} });
+  assert.equal(result.scripts[0].status, 'generated');
+  assert.equal(result.scripts[0].code, recorded.trim());
+  assert.deepEqual(await readdir(temporaryRoot), []);
+});
+
+test('a case receives the caller\'s reference scripts and the specs generated earlier in its batch', async t => {
+  const prompts = [];
+  const { worker } = await setup(t, async options => {
+    prompts.push(JSON.parse(options.prompt));
+    options.onMessage(setupCall()); options.onMessage(setupPage());
+    return output;
+  });
+  const library = { caseId: 'TC-LOGIN-AUTH-FUNC-009', title: '已有脚本', code: spec };
+  const two = { ...input, cases: [input.cases[0], { ...input.cases[0], id: 'TC-LOGIN-AUTH-FUNC-002' }],
+    context: { ...input.context, referenceScripts: [library] } };
+  await worker(two, { signal: new AbortController().signal, emit: () => {} });
+  assert.deepEqual(prompts[0].context.referenceScripts.map(s => s.caseId), ['TC-LOGIN-AUTH-FUNC-009']);
+  assert.deepEqual(prompts[1].context.referenceScripts.map(s => s.caseId), ['TC-LOGIN-AUTH-FUNC-001', 'TC-LOGIN-AUTH-FUNC-009']);
 });

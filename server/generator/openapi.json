@@ -998,6 +998,21 @@
             "type": "string",
             "maxLength": 200000,
             "description": "Human-maintained business hints and historical bugs; read-only input."
+          },
+          "referenceScripts": {
+            "type": "array",
+            "maxItems": 20,
+            "description": "Specs already generated for other cases of the same product. A case copies their verified login, navigation, locators and setup instead of exploring them again; the service passes at most 5 (60000 characters) per case, same module first, plus specs generated earlier in the same job.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["caseId", "code"],
+              "properties": {
+                "caseId": { "type": "string", "minLength": 1, "maxLength": 128 },
+                "title": { "type": "string", "maxLength": 500 },
+                "code": { "type": "string", "minLength": 1, "maxLength": 120000 }
+              }
+            }
           }
         }
       },
