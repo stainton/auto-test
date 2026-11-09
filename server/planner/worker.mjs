@@ -79,7 +79,7 @@ export function createPlannerWorker({ runtime = runClaude, command, model, setti
       for (const asset of assets) staged.push({ ...asset, path: await assetCache.stage(asset, path.join(workspace, 'assets')) });
       const promptInput = { ...input, ...(authSession ? { authSession } : {}), ...(assets.length ? { context: { ...input.context, assets: staged } } : {}) };
       const calls = new Map();
-      let setupSucceeded = false;
+      let setupSucceeded = false, setupAttempted = false;
       const output = await runtime({ cwd: workspace, prompt: resumed ? buildContinuationPrompt(promptInput) : buildPrompt(promptInput),
         systemPrompt: SYSTEM_PROMPT,
         schema: outputSchema(input), mcpConfig, allowedTools: ['mcp__playwright-test__*'],
@@ -102,6 +102,7 @@ export function createPlannerWorker({ runtime = runClaude, command, model, setti
               const action=describePlaywrightAction(tool,block.input);
               const toolCode=describePlaywrightCode(block.input),toolIntent=describePlaywrightIntent(block.input,action);
               calls.set(block.id, {tool,action,toolCode,toolIntent,startedAt:Date.now()});
+              if (tool === 'planner_setup_page') setupAttempted = true;
               emit({ stage: tool === 'planner_setup_page' ? 'preparing' : 'exploring', message: `正在${action}`, tool, toolIntent, ...(toolCode?{toolCode}:{}), toolStatus: 'started', operationId: block.id });
             }
             if (message.type === 'user' && block.type === 'tool_result' && calls.has(block.tool_use_id)) {
@@ -128,7 +129,9 @@ export function createPlannerWorker({ runtime = runClaude, command, model, setti
       });
       signal.throwIfAborted();
       // A continued run may finish from what it already explored, so only a fresh run must have opened the browser.
-      if (!setupSucceeded && !resumed) throw new Error('Planner did not successfully initialize the target browser');
+      if (!setupSucceeded && !resumed) throw new Error(setupAttempted
+        ? 'planner_setup_page failed: the target browser could not be opened'
+        : 'planner_setup_page was never called: the plan was designed without opening the target browser');
       emit({ stage: 'finalizing', message: 'Validating test cases and formatting the draft' });
       const result = formatResult(output, input);
       checkpoint(null);

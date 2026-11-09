@@ -50,9 +50,18 @@ test('uses caller input, isolated config, direct MCP tools, progress and strict 
 test('rejects fabricated completion without successful browser setup and keeps the session for a continuation', async t => {
   const { worker, temporaryRoot } = await setup(t, async () => output);
   let checkpoint;
-  await assert.rejects(worker(input, { signal: new AbortController().signal, emit() {}, checkpoint: state => { checkpoint = state; } }), /initialize/);
+  await assert.rejects(worker(input, { signal: new AbortController().signal, emit() {}, checkpoint: state => { checkpoint = state; } }), /planner_setup_page was never called/);
   assert.deepEqual(await readdir(temporaryRoot), [path.basename(checkpoint.workspace)]);
   assert.match(checkpoint.sessionId, /^[0-9a-f-]{36}$/);
+});
+
+test('reports a failed browser setup separately from one never attempted', async t => {
+  const { worker } = await setup(t, async options => {
+    options.onMessage({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'setup-failed', name: 'mcp__playwright-test__planner_setup_page', input: { seedFile: 'seed.spec.ts' } }] } });
+    options.onMessage({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'setup-failed', is_error: true, content: 'Browser launch failed' }] } });
+    return output;
+  });
+  await assert.rejects(worker(input, { signal: new AbortController().signal, emit() {} }), /planner_setup_page failed: the target browser could not be opened/);
 });
 
 test('a cancelled run keeps nothing to continue', async t => {

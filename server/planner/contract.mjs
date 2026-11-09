@@ -161,13 +161,19 @@ export const OUTPUT_SCHEMA = {
     issues: { type: 'array', maxItems: 20, items: ISSUE }
   }
 };
-// Per-job schema: a confirmed caseCount narrows the cases array so the runtime rejects an out-of-range
-// draft while the model can still fix it, instead of failing the job after the expensive exploration.
+// Per-job schema: a confirmed caseCount narrows the cases array and supplied requirement ids constrain
+// case.request in the same way, so the runtime rejects invalid drafts while the model can still fix them.
 export function outputSchema(input) {
-  if (input?.caseCount === undefined) return OUTPUT_SCHEMA;
-  const { min, max } = caseCountRange(input.caseCount);
+  const ids = Array.isArray(input?.requirements)
+    ? input.requirements.map(requirement => requirement?.id).filter(id => typeof id === 'string' && id.length > 0)
+    : [];
+  if (input?.caseCount === undefined && ids.length === 0) return OUTPUT_SCHEMA;
   const schema = structuredClone(OUTPUT_SCHEMA);
-  Object.assign(schema.properties.cases, { minItems: min, maxItems: max });
+  if (input?.caseCount !== undefined) {
+    const { min, max } = caseCountRange(input.caseCount);
+    Object.assign(schema.properties.cases, { minItems: min, maxItems: max });
+  }
+  if (ids.length > 0) schema.properties.cases.items.properties.request = { type: 'string', enum: ids };
   return schema;
 }
 const numberedLines = list => list.map((line, index) => `${index + 1}. ${line}`).join('\n');

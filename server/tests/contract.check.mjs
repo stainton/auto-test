@@ -71,11 +71,16 @@ test('rejects untraceable, duplicate and malformed generated cases', () => {
 test('caseCount bounds the planner to [caseCount-5, caseCount] cases', () => {
   assert.deepEqual(validateInput({ ...input, caseCount: 10 }).caseCount, 10);
   for (const caseCount of [0, -1, 1.5, '10', 501]) assert.throws(() => validateInput({ ...input, caseCount }));
-  assert.equal(outputSchema(input), OUTPUT_SCHEMA);
+  assert.equal(outputSchema({ requirements: [] }), OUTPUT_SCHEMA);
+  assert.equal(outputSchema({}).properties.cases.items.properties.request.enum, undefined);
+  assert.deepEqual(outputSchema(input).properties.cases.items.properties.request.enum, ['REQ-001']);
+  assert.deepEqual(outputSchema({ requirements: [{ id: 'REQ-001' }, { id: '' }, { id: 'REQ-002' }] }).properties.cases.items.properties.request.enum,
+    ['REQ-001', 'REQ-002']);
   const schema = outputSchema({ ...input, caseCount: 10 });
   assert.equal(schema.properties.cases.minItems, 5);
   assert.equal(schema.properties.cases.maxItems, 10);
   assert.equal(OUTPUT_SCHEMA.properties.cases.minItems, 1, 'shared schema must not be mutated');
+  assert.equal(OUTPUT_SCHEMA.properties.cases.items.properties.request.enum, undefined, 'shared request schema must not be mutated');
   assert.equal(outputSchema({ ...input, caseCount: 3 }).properties.cases.minItems, 1);
   assert.deepEqual(JSON.parse(buildPrompt({ ...input, caseCount: 10 })).caseCountRange, { min: 5, max: 10 });
   assert.equal(JSON.parse(buildPrompt(input)).caseCountRange, undefined);
