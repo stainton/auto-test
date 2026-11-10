@@ -40,7 +40,7 @@ or its scrollable containers horizontally or vertically to locate clipped or off
    and never skip a case because a similar one is listed.
 4. Call planner_setup_page once, passing seedFile "seed.spec.ts". The server has prepared the requested URL and storage state.
    For a fresh run, this setup step is mandatory before returning a structured result. Returning cases without a successful planner_setup_page call is rejected by the server, even if explorationNotes appeared to answer everything. A continued run may finish from facts it verified before the interruption.
-   If login still requires interaction, use only credentials/instructions provided in context. Report missing prerequisites.
+   If login still requires interaction, use context.testData.username and context.testData.password supplied with this task, together with context.instructions. target.authenticationProvided describes only preloaded storageState or HTTP headers: false does not mean that login credentials are missing. Check context.testData before reporting missing credentials; use the supplied account to log in when available. Never invent credentials or read them from local files. Report prerequisites that are actually missing.
    Explore breadth-first; prefer accessibility snapshots. Do not take screenshots unless necessary.
    Bound interactions by an explicit timeout where supported (10000 ms); retry a failed action at most three times.
    Never sit waiting for a long-running operation of the application itself (a job, an import, a report build)
@@ -133,7 +133,7 @@ ${buildPrompt(input)}`;
 }
 
 export function buildPrompt(input) {
-  // Browser credentials remain in the generated Playwright config, not in the model prompt.
+  // Cookies and HTTP headers stay in the Playwright config; interactive login credentials are in context.testData.
   return JSON.stringify({
     requirements: input.requirements,
     target: { baseUrl: input.target.baseUrl, authenticationProvided: Boolean(input.target.storageState || input.target.extraHTTPHeaders) },

@@ -4,6 +4,8 @@ import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createPlannerWorker } from '../planner/worker.mjs';
+import { validateInput } from '../planner/contract.mjs';
+import { withExperience } from '../shared/experience.mjs';
 import { input, output } from './fixtures.mjs';
 
 async function setup(t, runtime) {
@@ -16,6 +18,26 @@ function browserSetup(options) {
   options.onMessage({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'setup-1', name: 'mcp__playwright-test__planner_setup_page', input: { seedFile: 'seed.spec.ts' } }] } });
   options.onMessage({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'setup-1', content: 'Ready' }] } });
 }
+
+test('task login credentials reach the model without preloaded authentication, including with product experience', async t => {
+  const testData = { username: 'caller-test-user', password: 'caller-test-password' };
+  const events = [];
+  const { worker } = await setup(t, async options => {
+    const prompt = JSON.parse(options.prompt);
+    assert.equal(prompt.target.authenticationProvided, false);
+    assert.deepEqual(prompt.context.testData, testData);
+    assert.match(prompt.context.explorationNotes, /Saved product navigation/);
+    assert.match(options.systemPrompt, /context\.testData\.username and context\.testData\.password/);
+    browserSetup(options);
+    return output;
+  });
+  const request = validateInput({ ...input, context: { ...input.context, testData,
+    productExperience: 'Saved product navigation' } });
+  await withExperience(worker)(request, { signal: new AbortController().signal, emit: event => events.push(event) });
+  const publicEvents = JSON.stringify(events);
+  assert.ok(!publicEvents.includes(testData.username));
+  assert.ok(!publicEvents.includes(testData.password));
+});
 
 test('uses caller input, isolated config, direct MCP tools, progress and strict structured output', async t => {
   const events = [];
