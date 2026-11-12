@@ -1,5 +1,7 @@
 # Healer 脚本修复
 
+终态任务还提供 `GET /v1/healer/jobs/{id}/sessions`，读取保留现场的原始 Claude 会话、子会话和调用上下文（`{type: "claude_sessions", files: [{path, content}]}`）。CaseHub 在 release 前保存，附入下载的完整日志；原文可能含任务中的测试凭据，不包含 Claude 鉴权配置。
+
 部署在 generator Pod 中（`server/generator/main.mjs`，端口 4502），使用 automation 合并服务时则在 4501，无需新增容器。只修复已有脚本：接收原用例、script 源码、failureDetails（可选）、目标环境和资产，先用 test_run 复现，再用 test_debug 定位并修复。最多五轮业务修复；服务端还会独立执行最终返回代码，全部通过且没有跳过测试后才接受结果。产品缺陷或无法构造的外部条件返回 blocked，不能降低业务断言以求通过。
 
 CaseHub 只在「自动化管理」单条脚本的详情和右键菜单提供入口。支持进度、取消、刷新恢复、失败详情、补充说明后重试；成功保存回原脚本，失败保留原脚本。若修复期间脚本已修改，则不覆盖，仍可下载结果。

@@ -3,7 +3,7 @@
   "info": {
     "title": "Auto Test Planner HTTP API",
     "version": "1.0.0",
-    "description": "Asynchronous requirement-driven browser test planning. All business input is supplied in the request. Results are drafts for human review. Generator and healer are not part of this API. Jobs persist status, events and results; unfinished jobs fail after a server restart. A failed task whose exploration session is still on the server is marked continuable and can be continued (continueFrom) instead of started again. Request inputs and credentials are not persisted. Default retention is 24 hours. This is an HTTP API, not an MCP endpoint. No service token is required. Cross-origin browser requests are supported."
+    "description": "Asynchronous requirement-driven browser test planning. All business input is supplied in the request. Results are drafts for human review. Generator and healer are not part of this API. Jobs persist status, events and results; unfinished jobs fail after a server restart. A failed task whose exploration session is still on the server is marked continuable and can be continued (continueFrom) instead of started again. Request inputs are not part of public job summaries. Failed-run Claude conversations and invocation contexts may contain caller-supplied test credentials; the dispatcher downloads them before release. Default retention is 24 hours. This is an HTTP API, not an MCP endpoint. No service token is required. Cross-origin browser requests are supported."
   },
   "servers": [
     {
@@ -924,6 +924,69 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/v1/planner/jobs/{jobId}/sessions": {
+      "parameters": [
+        {
+          "name": "jobId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "get": {
+        "operationId": "getPlannerSessions",
+        "summary": "Download retained Claude conversations and invocation context before releasing a finished task",
+        "description": "Original main and subagent JSONL files plus per-invocation prompts, system prompts, schema and tool configuration. Contents may contain caller-supplied test credentials. CLI authentication settings are excluded. No truncation; files is empty if this task retained no workspace. Active tasks return 409.",
+        "responses": {
+          "200": {
+            "description": "Original session files",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "type",
+                    "files"
+                  ],
+                  "properties": {
+                    "type": {
+                      "const": "claude_sessions"
+                    },
+                    "files": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "path",
+                          "content"
+                        ],
+                        "properties": {
+                          "path": {
+                            "type": "string"
+                          },
+                          "content": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Task was released, expired, or does not exist"
+          },
+          "409": {
+            "description": "Task is still active"
           }
         }
       }

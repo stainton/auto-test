@@ -1,5 +1,8 @@
 import { spawn } from 'node:child_process';
 import { StringDecoder } from 'node:string_decoder';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import path from 'node:path';
 
 // Shared runtime boundary: a workflow supplies prompt, schema, MCP configuration and a tool allowlist.
 // No repository settings, built-in filesystem tools or arbitrary shell commands are inherited.
@@ -7,8 +10,18 @@ import { StringDecoder } from 'node:string_decoder';
 // offers it after a timeout). Without a sessionId nothing is written to disk, as before; with one the
 // conversation is persisted so `--resume` can pick it up, so the caller must also point env
 // CLAUDE_CONFIG_DIR at a directory it owns and deletes.
-export function runClaude({ cwd, prompt, systemPrompt, schema, mcpConfig, allowedTools, disallowedTools = [], signal, onMessage = () => {},
+export async function runClaude({ cwd, prompt, systemPrompt, schema, mcpConfig, allowedTools, disallowedTools = [], signal, onMessage = () => {},
   command = 'claude', model, settingsPath, sessionId, resume = false, env = {}, maxOutputBytes = 16 * 1024 * 1024 }) {
+  signal.throwIfAborted();
+  if (sessionId && env.CLAUDE_CONFIG_DIR) {
+    // CLI conversations do not necessarily repeat the system prompt or output schema. Keep each
+    // invocation alongside them so failures and resumed attempts can be inspected in full.
+    const requests = path.join(env.CLAUDE_CONFIG_DIR, 'projects', '_requests');
+    await mkdir(requests, { recursive: true, mode: 0o700 });
+    await writeFile(path.join(requests, `${randomUUID()}.jsonl`), JSON.stringify({ type: 'runtime_request',
+      createdAt: new Date().toISOString(), sessionId, resume, prompt, systemPrompt, schema, mcpConfig,
+      allowedTools, disallowedTools, model }) + '\n', { mode: 0o600 });
+  }
   return new Promise((resolve, reject) => {
     if (signal.aborted) return reject(signal.reason);
     const args = ['--bare', '--print', '--verbose', '--output-format', 'stream-json',

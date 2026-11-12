@@ -30,6 +30,7 @@ node server/generator/main.mjs
 | DELETE | `/v1/generator/jobs/{jobId}` | 取消任务，不删除已有结果 |
 | POST | `/v1/generator/jobs/{jobId}/release` | 下发方取走结果后释放已结束的任务（含保留的失败现场） |
 | GET | `/v1/generator/jobs/{jobId}/diagnostics` | 失败现场的诊断包（tar.gz） |
+| GET | `/v1/generator/jobs/{jobId}/sessions` | 保留现场的终态任务的原始 Claude 会话、子会话和调用上下文；返回 `{type: "claude_sessions", files: [{path, content}]}`，CaseHub 在释放前收集到完整日志 |
 | GET | `/v1/generator/jobs/{jobId}/checkpoint` | 超时失败后保存的探索笔记；供跨节点继续生成 |
 | GET | `/v1/generator/capacity` | 本节点空闲槽位，供下发方挑选节点；提交时加 `?queue=false` 则无空闲槽位直接 429 |
 | GET | `/healthz`、`/readyz` | 无鉴权健康检查 |

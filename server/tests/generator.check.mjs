@@ -315,7 +315,8 @@ test('the OpenAPI document describes this service and only its own routes', () =
   assert.equal(spec.components.securitySchemes, undefined);
   assert.deepEqual(Object.keys(spec.paths).filter(p => p.startsWith('/v1')),
     ['/v1/generator/jobs', '/v1/generator/jobs/{jobId}', '/v1/generator/jobs/{jobId}/result', '/v1/generator/jobs/{jobId}/events',
-      '/v1/generator/jobs/{jobId}/release', '/v1/generator/jobs/{jobId}/checkpoint', '/v1/generator/jobs/{jobId}/diagnostics', '/v1/generator/capacity']);
+      '/v1/generator/jobs/{jobId}/release', '/v1/generator/jobs/{jobId}/checkpoint', '/v1/generator/jobs/{jobId}/diagnostics', '/v1/generator/capacity',
+      '/v1/generator/jobs/{jobId}/sessions']);
   assert.equal(spec.components.schemas.Job.properties.kind.const, 'generator');
   assert.equal(JSON.stringify(spec).includes('planner'), false);
   assert.deepEqual(Object.keys(SCRIPT_OUTPUT_SCHEMA.properties).sort(), ['code', 'deviations', 'explorationNotes', 'missingInputs', 'status', 'summary']);

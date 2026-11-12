@@ -30,6 +30,7 @@ node server/planner/main.mjs
 | DELETE | `/v1/planner/jobs/{jobId}` | 取消任务，不删除已有结果 |
 | POST | `/v1/planner/jobs/{jobId}/release` | 下发方取走结果后释放已结束的任务（含保留的会话） |
 | GET | `/v1/planner/jobs/{jobId}/checkpoint` | 中断任务的会话包（tar.gz），供在任意节点继续 |
+| GET | `/v1/planner/jobs/{jobId}/sessions` | 终态任务保留的原始 Claude 会话 JSONL、子会话和调用上下文，返回 `{type: "claude_sessions", files: [{path, content}]}`；CaseHub 在 release 前保存并附入完整日志 |
 | GET | `/v1/planner/capacity` | 本节点空闲槽位，供下发方挑选节点；提交时加 `?queue=false` 则无空闲槽位直接 429 |
 | POST | `/v1/planner/simplify` | 同步接口（非任务队列）：把已设计用例的前置条件/步骤/预期结果改写成非技术人员可读的精简版，不调用浏览器/工具，保留原有步骤数与含义，只去掉选择器、testid、属性值等自动化实现细节 |
 | POST | `/v1/planner/estimate` | 同步接口（非任务队列）：只根据需求文本（不调用浏览器/工具）评估"建议覆盖用例数量"，考虑约 30% 需求因鉴权等原因无法自动化、手工测试至多单人 2 天。结果供人确认/修改后作为任务的 `caseCount` 提交；`rationale` 是一句不超过 40 字的中文说明（覆盖了哪些业务范围），不是推理过程 |
@@ -125,6 +126,8 @@ curl http://localhost:4501/v1/planner/jobs/JOB_ID/result
 浏览器配置临时写入每任务独立目录（`PLANNER_DATA_DIR/workspaces`，启动时清空），任务退出后清理，不从仓库 docs/specs 读取。中断的任务是例外：它的工作目录会保留，里面除了浏览器配置只有 Claude 会话（`CLAUDE_CONFIG_DIR` 指向该目录），供 `continueFrom` 继续或导出 checkpoint；成功、被取消、被释放或过期时一并删除，`continuable` 只对外表示"能否继续"，不暴露会话位置。请求正文、storageState、headers 不进入任务记录。
 
 ## 配置
+
+失败任务释放前，CaseHub 通过 `/sessions` 保存 Claude 原始会话与子会话 JSONL，以及每次调用的请求、系统提示词、输出 schema 和工具配置，再附入下载的完整日志。会话原文可能包含 `context.testData` 测试凭据；不导出 Claude 鉴权配置。会话文件只在任务保留期间可从节点读取，已清理的历史任务无法补回。
 
 | 环境变量 | 默认值 | 含义 |
 | --- | --- | --- |

@@ -3,7 +3,7 @@
   "info": {
     "title": "Auto Test Generator HTTP API",
     "version": "1.0.0",
-    "description": "Asynchronous Playwright script generation from reviewed test cases. One spec file per case, in submission order. All business input is supplied in the request; the service reads no repository files and keeps no approval state — human review happens in the caller. Jobs persist status, events and results; unfinished jobs fail after a server restart; a failed single-case task with a retained checkpoint can be continued. Request inputs and credentials are not persisted. Default retention is 24 hours. This is an HTTP API, not an MCP endpoint. No service token is required. Cross-origin browser requests are supported."
+    "description": "Asynchronous Playwright script generation from reviewed test cases. One spec file per case, in submission order. All business input is supplied in the request; the service reads no repository files and keeps no approval state — human review happens in the caller. Jobs persist status, events and results; unfinished jobs fail after a server restart; a failed single-case task with a retained checkpoint can be continued. Request inputs are not part of public job summaries. Failed-run Claude conversations and invocation contexts may contain caller-supplied test credentials; the dispatcher downloads them before release. Default retention is 24 hours. This is an HTTP API, not an MCP endpoint. No service token is required. Cross-origin browser requests are supported."
   },
   "servers": [
     {
@@ -783,6 +783,69 @@
           }
         }
       }
+    },
+    "/v1/generator/jobs/{jobId}/sessions": {
+      "parameters": [
+        {
+          "name": "jobId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "get": {
+        "operationId": "getGeneratorSessions",
+        "summary": "Download retained Claude conversations and invocation context before releasing a finished task",
+        "description": "Original main and subagent JSONL files plus per-invocation prompts, system prompts, schema and tool configuration. Contents may contain caller-supplied test credentials. CLI authentication settings are excluded. No truncation; files is empty if this task retained no workspace. Active tasks return 409.",
+        "responses": {
+          "200": {
+            "description": "Original session files",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "type",
+                    "files"
+                  ],
+                  "properties": {
+                    "type": {
+                      "const": "claude_sessions"
+                    },
+                    "files": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "path",
+                          "content"
+                        ],
+                        "properties": {
+                          "path": {
+                            "type": "string"
+                          },
+                          "content": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Task was released, expired, or does not exist"
+          },
+          "409": {
+            "description": "Task is still active"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1006,11 +1069,25 @@
             "items": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["caseId", "code"],
+              "required": [
+                "caseId",
+                "code"
+              ],
               "properties": {
-                "caseId": { "type": "string", "minLength": 1, "maxLength": 128 },
-                "title": { "type": "string", "maxLength": 500 },
-                "code": { "type": "string", "minLength": 1, "maxLength": 120000 }
+                "caseId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128
+                },
+                "title": {
+                  "type": "string",
+                  "maxLength": 500
+                },
+                "code": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 120000
+                }
               }
             }
           }

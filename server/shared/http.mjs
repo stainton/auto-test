@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { ServiceError, TERMINAL } from './jobs.mjs';
 import { packDiagnostics } from './archive.mjs';
+import { sessionFiles } from './sessions.mjs';
 import { takeAgentSettings } from './contract.mjs';
 import { SHA256_RE, MAX_ASSET_BYTES } from './assets.mjs';
 
@@ -58,7 +59,7 @@ export function createHttpHandler({ jobs, validateInput, openapiPath, maxBodyByt
   };
   const streams = new Set();
   const jobsPath = `${basePath}/jobs`;
-  const jobRoute = new RegExp(`^${jobsPath.replace(/[/]/g, '\\/')}\\/([0-9a-f-]{36})(?:\\/(result|events|checkpoint|diagnostics|release))?$`);
+  const jobRoute = new RegExp(`^${jobsPath.replace(/[/]/g, '\\/')}\\/([0-9a-f-]{36})(?:\\/(result|events|checkpoint|diagnostics|sessions|release))?$`);
   // Synchronous (non-job) model calls: validate, run with a hard timeout, map runtime failures to 502.
   const syncRoutes = new Map([
     [`${basePath}/simplify`, { run: simplify, validate: validateSimplifyInput, timeoutMs: simplifyTimeoutMs, code: 'SIMPLIFY_FAILED', label: 'Simplify' }],
@@ -150,6 +151,10 @@ export function createHttpHandler({ jobs, validateInput, openapiPath, maxBodyByt
       if (resource === 'diagnostics') {
         if (!TERMINAL.has(job.status)) throw new ServiceError(409, 'JOB_ACTIVE', `Diagnostics are available once the task has finished`);
         return archive(res, `${id}-diagnostics.tar.gz`, await exportDiagnostics(job));
+      }
+      if (resource === 'sessions') {
+        if (!TERMINAL.has(job.status)) throw new ServiceError(409, 'JOB_ACTIVE', 'Sessions are available once the task has finished');
+        return json(res, 200, await sessionFiles(job));
       }
       const rawAfter = req.headers['last-event-id'] ?? url.searchParams.get('after') ?? '0';
       if (!/^\d+$/.test(rawAfter) || !Number.isSafeInteger(Number(rawAfter)) || Number(rawAfter) > job.lastEventId)

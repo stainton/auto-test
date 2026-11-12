@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, writeFile, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { runClaude } from '../runtime/claude.mjs';
@@ -15,6 +15,22 @@ async function setup(t, script) {
   return { cwd, command, prompt: 'caller-supplied-input', systemPrompt: 'planner', schema: OUTPUT_SCHEMA,
     mcpConfig: { mcpServers: {} }, allowedTools: ['mcp__playwright-test__planner_setup_page'], signal: new AbortController().signal, onMessage() {} };
 }
+
+test('saves the invocation context before a failed Claude subprocess exits', async t => {
+  const options = await setup(t, 'process.exit(1);');
+  options.sessionId = 'saved-session';
+  options.env = { CLAUDE_CONFIG_DIR: path.join(options.cwd, 'claude-config') };
+  await assert.rejects(runClaude(options));
+  const directory = path.join(options.env.CLAUDE_CONFIG_DIR, 'projects', '_requests');
+  const names = await readdir(directory);
+  assert.equal(names.length, 1);
+  const saved = JSON.parse(await readFile(path.join(directory, names[0]), 'utf8'));
+  assert.equal(saved.prompt, options.prompt);
+  assert.equal(saved.systemPrompt, options.systemPrompt);
+  assert.deepEqual(saved.schema, options.schema);
+  assert.deepEqual(saved.allowedTools, options.allowedTools);
+  assert.equal(saved.sessionId, options.sessionId);
+});
 
 test('executes a real subprocess with isolated settings and reads stdin/streamed structured output', async t => {
   const options = await setup(t, `

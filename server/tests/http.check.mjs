@@ -230,6 +230,11 @@ test('a failed run\'s diagnostics download without secrets, the saved login or t
   const job = await (await submit(input)).json();
   await eventually(() => jobs.get(job.id).status === 'failed');
   assert.equal((await (await request(`/v1/planner/jobs/${job.id}`)).json()).diagnostics, true);
+  const sessions = await request(`/v1/planner/jobs/${job.id}/sessions`);
+  assert.equal(sessions.status, 200);
+  assert.deepEqual(await sessions.json(), { type: 'claude_sessions', files: [
+    { path: 'claude-config/projects/x/s.jsonl', content: 'session' }
+  ] });
   const response = await request(`/v1/planner/jobs/${job.id}/diagnostics`);
   assert.equal(response.status, 200);
   const out = await mkdtemp(path.join(tmpdir(), 'http-diagnostics-out-'));
@@ -241,6 +246,32 @@ test('a failed run\'s diagnostics download without secrets, the saved login or t
   await eventually(() => none.jobs.get(done.id).status === 'succeeded');
   const missing = await none.request(`/v1/planner/jobs/${done.id}/diagnostics`);
   assert.equal(missing.status, 404); assert.equal((await missing.json()).error.code, 'DIAGNOSTICS_UNAVAILABLE');
+});
+
+test('planner continuation sessions include original context and subagents before release', async t => {
+  const workspace = await mkdtemp(path.join(tmpdir(), 'planner-sessions-'));
+  t.after(() => rm(workspace, { recursive: true, force: true }));
+  const files = {
+    'claude-config/projects/project/main.jsonl': '{"type":"user","message":"原始测试账号上下文"}\n',
+    'claude-config/projects/project/main/subagents/agent-1.jsonl': '{"type":"assistant","message":"child"}\n',
+    'claude-config/projects/_requests/request.jsonl': '{"systemPrompt":"original system prompt"}\n'
+  };
+  for (const [name, content] of Object.entries(files)) {
+    await mkdir(path.dirname(path.join(workspace, name)), { recursive: true });
+    await writeFile(path.join(workspace, name), content);
+  }
+  const { request, submit, jobs } = await setup(t, async (_input, { checkpoint }) => {
+    checkpoint({ workspace, sessionId: 'test-session' });
+    throw new Error('exploration failed');
+  });
+  const job = await (await submit(input)).json();
+  await eventually(() => jobs.get(job.id).status === 'failed');
+  const result = await (await request(`/v1/planner/jobs/${job.id}/sessions`)).json();
+  assert.deepEqual(Object.fromEntries(result.files.map(file => [file.path, file.content])), files);
+  const progress = await (await request(`/v1/planner/jobs/${job.id}/events`)).text();
+  assert.ok(!progress.includes('原始测试账号上下文'));
+  assert.equal((await request(`/v1/planner/jobs/${job.id}/release`, { method: 'POST' })).status, 200);
+  assert.equal((await request(`/v1/planner/jobs/${job.id}/sessions`)).status, 404);
 });
 
 test('a draining node stays alive, turns unready, refuses work and still serves finished results', async t => {
